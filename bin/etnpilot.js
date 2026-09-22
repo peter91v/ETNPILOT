@@ -4,12 +4,18 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { CodeGraph } from "../src/codegraph/codegraph.js";
 import { initializeProject } from "../src/config/init.js";
+import { createTerminalApprovalHandler } from "../src/core/terminal-approval.js";
+import { runProject } from "../src/runtime/project-runner.js";
 
 const { positionals, values } = parseArgs({
   allowPositionals: true,
   options: {
     help: { type: "boolean", short: "h" },
     database: { type: "string", short: "d" },
+    root: { type: "string", short: "r", default: "." },
+    agent: { type: "string", short: "a" },
+    "in-place": { type: "boolean", default: false },
+    publish: { type: "boolean", default: false },
   },
 });
 
@@ -20,6 +26,7 @@ if (values.help || !command) {
 
 Usage:
   etnpilot init [directory]
+  etnpilot run <task> [--agent name] [--root directory] [--in-place] [--publish]
   etnpilot graph build [directory] [--database path]
   etnpilot graph dependencies <file> [--database path]
   etnpilot doctor
@@ -30,6 +37,17 @@ Usage:
 if (command === "init") {
   const result = await initializeProject(resolve(subcommand ?? "."));
   console.log(`Initialized ETNPilot in ${result.root}`);
+} else if (command === "run") {
+  const task = [subcommand, ...rest].filter(Boolean).join(" ");
+  const result = await runProject({
+    root: resolve(values.root),
+    input: task,
+    agent: values.agent,
+    inPlace: values["in-place"],
+    publish: values.publish,
+    approvalHandler: createTerminalApprovalHandler(),
+  });
+  console.log(JSON.stringify(result, null, 2));
 } else if (command === "graph" && subcommand === "build") {
   const root = resolve(rest[0] ?? ".");
   const database = resolve(values.database ?? ".etnpilot/state/codegraph.sqlite");

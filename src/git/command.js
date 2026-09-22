@@ -11,7 +11,7 @@ export function git(args, { cwd, env = process.env, input } = {}) {
     child.stdout.setEncoding("utf8").on("data", (chunk) => { stdout += chunk; });
     child.stderr.setEncoding("utf8").on("data", (chunk) => { stderr += chunk; });
     child.once("error", reject);
-    child.once("exit", (code) => {
+    child.once("close", (code) => {
       if (code === 0) resolve({ stdout: stdout.trim(), stderr: stderr.trim() });
       else reject(new Error(`git ${args[0]} failed (${code}): ${stderr.trim()}`));
     });

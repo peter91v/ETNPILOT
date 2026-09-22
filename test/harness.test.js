@@ -42,3 +42,24 @@ test("plugins can register capabilities exactly once", async () => {
   assert.equal(harness.prompts.get("review"), "Review carefully.");
   await assert.rejects(() => harness.use(plugin), /already registered/);
 });
+
+test("harness routes human-required operations through the approval handler", async () => {
+  const requests = [];
+  const harness = new Harness({
+    approvalPolicy: new ApprovalPolicy(),
+    approvalHandler: async (request) => {
+      requests.push(request);
+      return { kind: "approve-once" };
+    },
+  });
+  harness.registerProvider({
+    name: "fake",
+    async invoke(context) {
+      return context.approve({ kind: "write", fileName: "result.txt" });
+    },
+  });
+  harness.registerAgent({ name: "writer", provider: "fake", prompt: "Write." });
+  const receipt = await harness.run({ agent: "writer", input: "go" });
+  assert.equal(receipt.result.kind, "approve-once");
+  assert.equal(requests.length, 1);
+});

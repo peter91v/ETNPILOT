@@ -1,5 +1,9 @@
 export function createCopilotProvider(options = {}) {
-  const importer = options.importer ?? (() => import("@github/copilot-sdk"));
+  const importer = options.importer ?? (() => import("@github/copilot-sdk").catch((error) => {
+    const wrapped = new Error("GitHub Copilot provider requires '@github/copilot-sdk'. Install it in the ETNPilot project.");
+    wrapped.cause = error;
+    throw wrapped;
+  }));
 
   return {
     name: options.name ?? "github-copilot",

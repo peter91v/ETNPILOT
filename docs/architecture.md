@@ -11,6 +11,7 @@
 | Forge | Remote repository lifecycle | self-hosted GitLab API |
 | Code intelligence | Files, symbols, imports, impact queries | embedded SQLite code graph |
 | Evidence | Tamper-evident run results | SHA-256 JSONL receipts |
+| Workflow | Dependency ordering, retries, limits, cancellation | bounded DAG scheduler |
 
 ## Execution flow
 
@@ -26,6 +27,10 @@ flowchart TD
 ```
 
 Providers do not own orchestration policy. GitLab does not own local Git state. Plugins receive the harness API but cannot silently replace an already registered capability. These boundaries keep the runtime testable and prevent a model provider from becoming the architecture.
+
+## Runnable workflow
+
+`etnpilot run` creates a run branch and worktree, loads the project's manifests, registers configured providers, and executes the configured DAG. Agent steps receive the outputs of their dependencies. Check steps execute argument arrays directly without a shell. A failed dependency blocks downstream work, while successful runs retain their worktree for human inspection. Publishing to GitLab requires the explicit `--publish` flag and a token supplied through the environment.
 
 ## Security defaults
 
