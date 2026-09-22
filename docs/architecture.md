@@ -5,7 +5,7 @@
 | Area | Responsibility | Default implementation |
 |---|---|---|
 | Harness | Runs agents, subagents, plugins, events, approvals, receipts | `src/core/` |
-| Providers | Model/agent runtime adapters | GitHub Copilot SDK, OpenAI-compatible |
+| Providers | Capability-aware model/agent runtime adapters and safe fallback | GitHub Copilot SDK, OpenAI-compatible |
 | Content | Instructions, skills, prompts, agent manifests | `.etnpilot/` |
 | Git | Safe local operations and isolated branches | native Git worktrees |
 | Forge | Remote repository lifecycle | self-hosted GitLab API |
@@ -26,7 +26,19 @@ flowchart TD
     Harness --> Graph[(SQLite code graph)]
 ```
 
-Providers do not own orchestration policy. GitLab does not own local Git state. Plugins receive the harness API but cannot silently replace an already registered capability. These boundaries keep the runtime testable and prevent a model provider from becoming the architecture.
+Providers do not own orchestration policy. GitLab does not own local Git state. Plugins receive a
+versioned, capability-scoped context and cannot silently replace an already registered component.
+These boundaries keep the runtime testable and prevent a model provider from becoming the
+architecture.
+
+Provider selection combines agent preferences, matching routing rules, and configured defaults.
+Each candidate must satisfy the required capability set. Fallback is intentionally conservative:
+it only proceeds after a structured provider error declares the operation retryable and safe to
+replay. This prevents duplicate file changes or tool calls after an ambiguous failure.
+
+Plugin manifests declare their API version, version, dependencies, and required SDK capabilities.
+All manifests are validated before setup, dependencies are topologically ordered, and setup code
+can access only its declared registration and event APIs.
 
 ## Runnable workflow
 

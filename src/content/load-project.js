@@ -2,7 +2,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
 import YAML from "yaml";
 import { loadConfig } from "../config/load.js";
-import { loadPlugin } from "../plugins/load-plugin.js";
+import { loadPlugins } from "../plugins/load-plugin.js";
 
 export async function loadProject(harness, root = process.cwd(), env = process.env) {
   const projectRoot = resolve(root);
@@ -26,10 +26,7 @@ export async function loadProject(harness, root = process.cwd(), env = process.e
       : manifest.prompt;
     harness.registerAgent({ ...manifest, prompt });
   }
-  for (const entry of config.plugins ?? []) {
-    const pluginPath = typeof entry === "string" ? entry : entry.path;
-    await loadPlugin(resolve(projectRoot, pluginPath), harness, typeof entry === "string" ? {} : entry.options);
-  }
+  await loadPlugins(config.plugins ?? [], harness, projectRoot);
   return { root: projectRoot, config };
 }
 

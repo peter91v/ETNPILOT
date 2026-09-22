@@ -7,6 +7,12 @@ providers:
   github-copilot:
     type: github-copilot
     model: auto
+routing:
+  defaults: [github-copilot]
+  fallback:
+    enabled: true
+    maxAttempts: 2
+  rules: []
 git:
   host: gitlab
   baseUrl: https://gitlab.metropol-it.at

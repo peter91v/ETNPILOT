@@ -11,6 +11,7 @@ import { git } from "../git/command.js";
 import { WorktreeManager } from "../git/worktrees.js";
 import { GitLabPublisher } from "../gitlab/publisher.js";
 import { registerConfiguredProviders } from "../providers/register.js";
+import { ProviderRouter } from "../providers/router.js";
 import { WorkflowEngine } from "../workflow/engine.js";
 
 export async function runProject({
@@ -55,6 +56,7 @@ export async function runProject({
     env,
     factories: providerFactories,
   });
+  harness.setProviderRouter(new ProviderRouter(harness.providers, config.routing));
   const workflow = normalizeWorkflow(config.workflow, agent ?? config.defaultAgent ?? "orchestrator");
   const engine = new WorkflowEngine({
     concurrency: workflow.concurrency,

@@ -23,6 +23,8 @@
 - [x] Resolved JavaScript/TypeScript dependency edges
 - [x] Transitive impact analysis and affected-test discovery
 - [x] Workflow-integrated codegraph evidence
+- [x] Versioned plugin SDK with capability declarations and dependency ordering
+- [x] Capability-aware provider routing with replay-safe fallback
 - [ ] GitLab issue-to-workflow trigger
 - [ ] Human approval inbox for pending tool calls
 - [ ] Cryptographically signed receipt chains
@@ -33,8 +35,7 @@
 - [ ] OIDC/Vault secret-provider plugin
 - [ ] OpenTelemetry traces and cost accounting
 - [ ] Policy-as-code for tools, paths, networks, and providers
-- [ ] Provider fallback and model routing rules
-- [ ] Plugin isolation and capability declarations
+- [ ] Process-level plugin isolation and resource limits
 - [ ] GitLab webhooks and pipeline status synchronization
 
 ## Brainstorming backlog
