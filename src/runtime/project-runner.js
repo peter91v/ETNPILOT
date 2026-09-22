@@ -27,6 +27,7 @@ export async function runProject({
   fetchImpl,
   approvalHandler,
   signal,
+  metadata = {},
 } = {}) {
   if (!input) throw new TypeError("A task prompt is required.");
   const repositoryRoot = resolve(root);
@@ -89,7 +90,7 @@ export async function runProject({
         return harness.run({
           agent: step.agent,
           input: composeAgentInput(input, execution.dependencyResults),
-          metadata: { workflowRunId: runId, workflowStep: step.id, workspace: workspace.path },
+          metadata: { ...metadata, workflowRunId: runId, workflowStep: step.id, workspace: workspace.path },
         });
       }
       if (step.type === "check") {

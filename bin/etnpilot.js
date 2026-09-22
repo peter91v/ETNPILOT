@@ -10,6 +10,7 @@ import { createTerminalApprovalHandler } from "../src/core/terminal-approval.js"
 import { WorktreeManager } from "../src/git/worktrees.js";
 import { createGitLabWebhookServer } from "../src/gitlab/webhook-server.js";
 import { runProject } from "../src/runtime/project-runner.js";
+import { WorkflowQueue } from "../src/workflow/queue.js";
 
 const { positionals, values } = parseArgs({
   allowPositionals: true,
@@ -30,6 +31,7 @@ const { positionals, values } = parseArgs({
     limit: { type: "string" },
     actor: { type: "string" },
     reason: { type: "string" },
+    force: { type: "boolean", default: false },
   },
 });
 
@@ -55,6 +57,10 @@ Usage:
   etnpilot approval show <id>
   etnpilot approval approve <id> [--actor name] [--reason text]
   etnpilot approval reject <id> [--actor name] [--reason text]
+  etnpilot queue list [--status status] [--limit number]
+  etnpilot queue show <id>
+  etnpilot queue resume <id> [--force]
+  etnpilot queue cancel <id> [--actor name] [--reason text]
   etnpilot doctor
 `);
   process.exit(0);
@@ -153,7 +159,6 @@ if (command === "init") {
   console.log(`ETNPilot GitLab webhook receiver listening on http://${displayHost}:${displayPort}`);
   await waitForShutdown();
   await webhookServer.close();
-  await webhookServer.drain();
 } else if (command === "approval" && subcommand === "list") {
   const limit = values.limit === undefined ? 100 : Number.parseInt(values.limit, 10);
   await withApprovalInbox(resolve(values.root), async (inbox) => {
@@ -176,6 +181,31 @@ if (command === "init") {
     });
     console.log(JSON.stringify(result, null, 2));
   });
+} else if (command === "queue" && subcommand === "list") {
+  const limit = values.limit === undefined ? 100 : Number.parseInt(values.limit, 10);
+  await withWorkflowQueue(resolve(values.root), async (queue) => {
+    console.log(JSON.stringify(queue.list({ status: values.status ?? "all", limit }), null, 2));
+  });
+} else if (command === "queue" && subcommand === "show") {
+  if (!rest[0]) throw new Error("A workflow job ID is required.");
+  await withWorkflowQueue(resolve(values.root), async (queue) => {
+    const job = queue.get(rest[0]);
+    if (!job) throw new Error(`Unknown workflow job '${rest[0]}'.`);
+    console.log(JSON.stringify(job, null, 2));
+  });
+} else if (command === "queue" && subcommand === "resume") {
+  if (!rest[0]) throw new Error("A workflow job ID is required.");
+  await withWorkflowQueue(resolve(values.root), async (queue) => {
+    console.log(JSON.stringify(queue.resume(rest[0], { force: values.force }), null, 2));
+  });
+} else if (command === "queue" && subcommand === "cancel") {
+  if (!rest[0]) throw new Error("A workflow job ID is required.");
+  await withWorkflowQueue(resolve(values.root), async (queue) => {
+    console.log(JSON.stringify(queue.requestCancel(rest[0], {
+      actor: values.actor ?? process.env.USER ?? "cli",
+      reason: values.reason,
+    }), null, 2));
+  });
 } else if (command === "doctor") {
   const checks = {
     node: process.versions.node,
@@ -186,6 +216,17 @@ if (command === "init") {
   process.exit(checks.git ? 0 : 1);
 } else {
   throw new Error(`Unknown command: ${positionals.join(" ")}`);
+}
+
+async function withWorkflowQueue(root, operation) {
+  const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"));
+  const database = resolve(root, config.queue?.database ?? ".etnpilot/state/workflows.sqlite");
+  const queue = new WorkflowQueue(database);
+  try {
+    return await operation(queue);
+  } finally {
+    queue.close();
+  }
 }
 
 async function withApprovalInbox(root, operation) {

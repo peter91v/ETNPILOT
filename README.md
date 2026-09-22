@@ -19,7 +19,8 @@ The repository is in early development. The first runnable vertical slice provid
 - an explicit `--publish` path for reviewed GitLab draft merge requests.
 - a versioned plugin SDK with declared capabilities and dependency ordering;
 - capability-aware provider routing with conservative, auditable fallback.
-- an authenticated GitLab issue webhook that queues deduplicated workflow runs and synchronizes external commit status.
+- an authenticated GitLab issue webhook backed by a durable SQLite workflow queue with leases,
+  checkpoints, cancellation, and conservative restart recovery.
 
 ## Quick start
 
@@ -148,9 +149,24 @@ etnpilot webhook serve --root .
 
 For GitLab versions without signing-token support, configure
 `ETNPILOT_GITLAB_WEBHOOK_TOKEN` instead. Newer signing tokens authenticate the raw body and reject
-stale timestamps. Delivery IDs are claimed atomically under `.etnpilot/state/webhooks`, so GitLab
-retries do not launch duplicate workflows. The receiver binds to `127.0.0.1` by default; expose it
+stale timestamps. Delivery IDs are claimed atomically in `.etnpilot/state/workflows.sqlite`, so
+GitLab retries and service restarts do not launch duplicate workflows. The receiver binds to
+`127.0.0.1` by default; expose it
 only through a TLS reverse proxy or another authenticated private route.
+
+Inspect and control queued work from another process:
+
+```bash
+etnpilot queue list
+etnpilot queue show <job-id>
+etnpilot queue cancel <job-id> --reason "Superseded"
+etnpilot queue resume <job-id>
+```
+
+Jobs that were still running when their worker disappeared become `orphaned`; they require
+`queue resume <job-id> --force` after inspection because provider or tool side effects may already
+have occurred. Jobs that had not started are resumed automatically. See
+[docs/workflow-queue.md](docs/workflow-queue.md).
 
 The normal approval policy remains active for webhook runs. With the default policy, writes, shell
 commands, and network calls are placed in the persistent approval inbox. Review them from a second
@@ -164,8 +180,8 @@ etnpilot approval reject <id> --reason "Unsafe command"
 ```
 
 The waiting provider receives a one-time decision and the redacted decision evidence is attached to
-the run receipt. See [docs/approval-inbox.md](docs/approval-inbox.md) for lifecycle and recovery
-limits.
+the run receipt. Approval rows include their durable queue job ID. See
+[docs/approval-inbox.md](docs/approval-inbox.md) for lifecycle and recovery limits.
 See [docs/gitlab-webhooks.md](docs/gitlab-webhooks.md) for setup and operational details.
 
 ## Repository strategy

@@ -27,6 +27,7 @@
 - [x] Capability-aware provider routing with replay-safe fallback
 - [x] Authenticated and deduplicated GitLab issue-to-workflow trigger
 - [x] Persistent human approval inbox for pending tool calls
+- [x] Durable workflow queue with leases, checkpoints, cancellation, and conservative recovery
 - [ ] Cryptographically signed receipt chains
 - [ ] Codegraph parsers for Python, Go, Java, and C#
 

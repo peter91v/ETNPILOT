@@ -93,7 +93,11 @@ export class Harness {
           });
         },
         approve: async (request) => {
-          const decision = await this.#approve(request, { runId, agent: agentName });
+          const decision = await this.#approve(request, {
+            runId,
+            agent: agentName,
+            queueJobId: metadata.queueJobId,
+          });
           approvals.push({
             operationKind: request?.kind ?? "unknown",
             decision: decision.kind,

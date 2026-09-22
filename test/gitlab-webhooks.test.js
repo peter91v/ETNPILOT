@@ -4,7 +4,6 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { WebhookDeliveryStore } from "../src/gitlab/delivery-store.js";
 import { GitLabIssueTrigger } from "../src/gitlab/issue-trigger.js";
 import { authenticateGitLabWebhook } from "../src/gitlab/webhook-auth.js";
 import { createGitLabWebhookServer } from "../src/gitlab/webhook-server.js";
@@ -41,15 +40,6 @@ test("webhook authentication verifies signatures, timestamps, and legacy tokens"
   }).authenticated, true);
 });
 
-test("delivery store atomically claims duplicate webhook deliveries once", async () => {
-  const root = await mkdtemp(join(tmpdir(), "etnpilot-deliveries-"));
-  const store = new WebhookDeliveryStore(root);
-  const claims = await Promise.all(Array.from({ length: 4 }, () => store.claim("same-delivery", { issueIid: 7 })));
-  assert.equal(claims.filter((claim) => claim.claimed).length, 1);
-  await store.mark("same-delivery", "succeeded", { result: { runId: "run-1" } });
-  assert.equal((await store.get("same-delivery")).result.runId, "run-1");
-});
-
 test("issue trigger filters project, labels, users, actions, and confidential issues", () => {
   const trigger = new GitLabIssueTrigger({
     root: ".",
@@ -81,7 +71,6 @@ test("issue trigger runs the workflow and synchronizes commit status", async () 
       setCommitStatus: async (_project, sha, status) => statuses.push({ sha, ...status }),
       addIssueNote: async () => {},
     },
-    approvalHandler: async () => ({ kind: "approve-once" }),
     run: async ({ input, publish, approvalHandler }) => {
       seenApprovalHandler = approvalHandler;
       return {
@@ -94,7 +83,11 @@ test("issue trigger runs the workflow and synchronizes commit status", async () 
       };
     },
   });
-  const result = await trigger.execute(issuePayload(), "delivery-1");
+  const result = await trigger.execute(issuePayload(), "delivery-1", {
+    jobId: "job-1",
+    approvalHandler: async () => ({ kind: "approve-once" }),
+    checkpoint: async () => {},
+  });
   assert.equal(result.status, "succeeded");
   assert.equal(typeof seenApprovalHandler, "function");
   assert.deepEqual(statuses.map((status) => status.state), ["running", "success"]);
@@ -152,6 +145,7 @@ test("webhook server acknowledges quickly and deduplicates deliveries", async ()
     const first = await request();
     const duplicate = await request();
     assert.equal(first.status, 202);
+    const accepted = await first.json();
     assert.equal(duplicate.status, 200);
     assert.equal((await duplicate.json()).duplicate, true);
     let pending;
@@ -159,11 +153,12 @@ test("webhook server acknowledges quickly and deduplicates deliveries", async ()
       pending = app.approvalInbox.list()[0];
       if (!pending) await new Promise((resolve) => setTimeout(resolve, 10));
     }
+    assert.equal(pending.workflowJobId, accepted.jobId);
     app.approvalInbox.decide(pending.id, "approved", { actor: "maintainer" });
     await app.drain();
     assert.equal(runs, 1);
     assert.equal(approvalDecision.kind, "approve-once");
-    assert.equal((await app.deliveryStore.get("delivery-7")).status, "succeeded");
+    assert.equal(app.workflowQueue.getByDeliveryId("delivery-7").status, "succeeded");
   } finally {
     await app.close();
   }

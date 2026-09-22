@@ -34,7 +34,6 @@ git:
     port: 8787
     maxBodyBytes: 1048576
     timestampToleranceSeconds: 300
-    deliveryStore: .etnpilot/state/webhooks
   issueTrigger:
     enabled: true
     labels: [etnpilot]
@@ -47,6 +46,12 @@ git:
     publish: false
     syncStatus: true
     comment: false
+queue:
+  database: .etnpilot/state/workflows.sqlite
+  pollIntervalMs: 500
+  leaseMs: 30000
+  retryDelayMs: 5000
+  maxAttempts: 1
 ```
 
 Environment variables:
@@ -75,9 +80,9 @@ Start the receiver:
 etnpilot webhook serve --root /path/to/project
 ```
 
-The HTTP request is acknowledged after authentication, filtering, and an atomic delivery claim.
-Workflow execution is serialized in the background. Duplicate deliveries return the existing state
-without starting another run.
+The HTTP request is acknowledged after authentication, filtering, and an atomic SQLite queue
+insert. Workflow execution is serialized in the background. Duplicate deliveries return the
+existing job state without starting another run. Pending jobs survive service restarts.
 
 ## Status and publishing
 
@@ -88,5 +93,7 @@ normal reviewed draft-merge-request path; it does not merge.
 
 Webhook runs use the normal approval policy. Human-required operations pause in the persistent
 approval inbox and continue only after an explicit one-time CLI decision. A graceful service
-shutdown rejects active waits; automatic session recovery after a process crash is not yet
-supported.
+shutdown rejects active waits. A running job with an expired worker lease becomes `orphaned` and
+requires an inspected, explicit `etnpilot queue resume <job-id> --force`; queued jobs resume
+automatically. Provider sessions themselves are not serialized. See
+[workflow-queue.md](workflow-queue.md).
