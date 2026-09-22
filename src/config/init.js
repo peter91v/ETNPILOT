@@ -40,6 +40,11 @@ codegraph:
 approval:
   allow: [read]
   requireHuman: [write, shell, network]
+  inbox:
+    enabled: true
+    database: .etnpilot/state/approvals.sqlite
+    timeoutMs: 86400000
+    pollIntervalMs: 500
 workspace:
   mode: worktree
   cleanup: never

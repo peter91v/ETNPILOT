@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { CodeGraph } from "../src/codegraph/codegraph.js";
 import { initializeProject } from "../src/config/init.js";
+import { loadConfig } from "../src/config/load.js";
+import { ApprovalInbox } from "../src/core/approval-inbox.js";
 import { createTerminalApprovalHandler } from "../src/core/terminal-approval.js";
 import { WorktreeManager } from "../src/git/worktrees.js";
 import { createGitLabWebhookServer } from "../src/gitlab/webhook-server.js";
@@ -24,6 +26,10 @@ const { positionals, values } = parseArgs({
     publish: { type: "boolean", default: false },
     host: { type: "string" },
     port: { type: "string" },
+    status: { type: "string" },
+    limit: { type: "string" },
+    actor: { type: "string" },
+    reason: { type: "string" },
   },
 });
 
@@ -45,6 +51,10 @@ Usage:
   etnpilot graph impact <file...> [--depth number] [--database path]
   etnpilot graph stats [--database path]
   etnpilot webhook serve [--root directory] [--host address] [--port number]
+  etnpilot approval list [--status pending|approved|rejected|expired|all] [--limit number]
+  etnpilot approval show <id>
+  etnpilot approval approve <id> [--actor name] [--reason text]
+  etnpilot approval reject <id> [--actor name] [--reason text]
   etnpilot doctor
 `);
   process.exit(0);
@@ -142,8 +152,30 @@ if (command === "init") {
   const displayPort = typeof address === "object" ? address.port : port;
   console.log(`ETNPilot GitLab webhook receiver listening on http://${displayHost}:${displayPort}`);
   await waitForShutdown();
-  await webhookServer.drain();
   await webhookServer.close();
+  await webhookServer.drain();
+} else if (command === "approval" && subcommand === "list") {
+  const limit = values.limit === undefined ? 100 : Number.parseInt(values.limit, 10);
+  await withApprovalInbox(resolve(values.root), async (inbox) => {
+    console.log(JSON.stringify(inbox.list({ status: values.status ?? "pending", limit }), null, 2));
+  });
+} else if (command === "approval" && subcommand === "show") {
+  if (!rest[0]) throw new Error("An approval ID is required.");
+  await withApprovalInbox(resolve(values.root), async (inbox) => {
+    const approval = inbox.get(rest[0]);
+    if (!approval) throw new Error(`Unknown approval '${rest[0]}'.`);
+    console.log(JSON.stringify(approval, null, 2));
+  });
+} else if (command === "approval" && (subcommand === "approve" || subcommand === "reject")) {
+  if (!rest[0]) throw new Error("An approval ID is required.");
+  await withApprovalInbox(resolve(values.root), async (inbox) => {
+    const decision = subcommand === "approve" ? "approved" : "rejected";
+    const result = inbox.decide(rest[0], decision, {
+      actor: values.actor ?? process.env.USER ?? "cli",
+      reason: values.reason,
+    });
+    console.log(JSON.stringify(result, null, 2));
+  });
 } else if (command === "doctor") {
   const checks = {
     node: process.versions.node,
@@ -154,6 +186,17 @@ if (command === "init") {
   process.exit(checks.git ? 0 : 1);
 } else {
   throw new Error(`Unknown command: ${positionals.join(" ")}`);
+}
+
+async function withApprovalInbox(root, operation) {
+  const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"));
+  const database = resolve(root, config.approval?.inbox?.database ?? ".etnpilot/state/approvals.sqlite");
+  const inbox = new ApprovalInbox(database);
+  try {
+    return await operation(inbox);
+  } finally {
+    inbox.close();
+  }
 }
 
 function waitForShutdown() {

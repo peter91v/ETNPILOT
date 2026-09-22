@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { join, resolve } from "node:path";
 import { loadConfig } from "../config/load.js";
+import { ApprovalInbox, createInboxApprovalHandler } from "../core/approval-inbox.js";
 import { GitLabClient } from "./client.js";
 import { WebhookDeliveryStore } from "./delivery-store.js";
 import { GitLabIssueTrigger } from "./issue-trigger.js";
@@ -39,12 +40,24 @@ export async function createGitLabWebhookServer({
   const deliveryStore = new WebhookDeliveryStore(
     resolve(projectRoot, webhook.deliveryStore ?? ".etnpilot/state/webhooks"),
   );
+  const shutdown = new AbortController();
+  const inboxConfig = config.approval?.inbox ?? {};
+  const approvalInbox = inboxConfig.enabled === false ? undefined : new ApprovalInbox(
+    resolve(projectRoot, inboxConfig.database ?? ".etnpilot/state/approvals.sqlite"),
+  );
+  const approvalHandler = approvalInbox ? createInboxApprovalHandler({
+    inbox: approvalInbox,
+    timeoutMs: inboxConfig.timeoutMs ?? 24 * 60 * 60_000,
+    pollIntervalMs: inboxConfig.pollIntervalMs ?? 500,
+    signal: shutdown.signal,
+  }) : undefined;
   const issueTrigger = new GitLabIssueTrigger({
     root: projectRoot,
     config,
     env,
     client,
     run,
+    approvalHandler,
     onSyncError: onError,
   });
   let queue = Promise.resolve();
@@ -116,6 +129,7 @@ export async function createGitLabWebhookServer({
     server,
     config,
     deliveryStore,
+    approvalInbox,
     drain: () => queue,
     listen({ host = webhook.host ?? "127.0.0.1", port = webhook.port ?? 8787 } = {}) {
       return new Promise((resolveListen, reject) => {
@@ -132,10 +146,19 @@ export async function createGitLabWebhookServer({
         server.listen(port, host);
       });
     },
-    close() {
-      return new Promise((resolveClose, reject) => {
-        server.close((error) => error ? reject(error) : resolveClose());
+    async close() {
+      shutdown.abort();
+      await new Promise((resolveClose, reject) => {
+        server.close((error) => {
+          if (error) return reject(error);
+          resolveClose();
+        });
       });
+      try {
+        await queue;
+      } finally {
+        approvalInbox?.close();
+      }
     },
   };
 }

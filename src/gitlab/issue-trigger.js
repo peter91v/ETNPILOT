@@ -2,13 +2,22 @@ import { git } from "../git/command.js";
 import { runProject } from "../runtime/project-runner.js";
 
 export class GitLabIssueTrigger {
-  constructor({ root, config, env = process.env, client, run = runProject, onSyncError = () => {} }) {
+  constructor({
+    root,
+    config,
+    env = process.env,
+    client,
+    run = runProject,
+    approvalHandler,
+    onSyncError = () => {},
+  }) {
     this.root = root;
     this.config = config;
     this.trigger = config.git?.issueTrigger ?? {};
     this.env = env;
     this.client = client;
     this.run = run;
+    this.approvalHandler = approvalHandler;
     this.onSyncError = onSyncError;
   }
 
@@ -60,6 +69,7 @@ export class GitLabIssueTrigger {
         cleanupPolicy: this.trigger.cleanup,
         publish: this.trigger.publish === true,
         env: this.env,
+        approvalHandler: this.approvalHandler,
       });
       const resultUrl = result.mergeRequest?.web_url ?? targetUrl;
       await this.#syncStatus(project, baseSha, {
