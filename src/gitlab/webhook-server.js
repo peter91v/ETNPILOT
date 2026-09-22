@@ -4,6 +4,7 @@ import { loadConfig } from "../config/load.js";
 import { ApprovalInbox, createInboxApprovalHandler } from "../core/approval-inbox.js";
 import { WorkflowQueue } from "../workflow/queue.js";
 import { WorkflowQueueWorker } from "../workflow/queue-worker.js";
+import { createSecretResolver } from "../secrets/resolver.js";
 import { GitLabClient } from "./client.js";
 import { GitLabIssueTrigger } from "./issue-trigger.js";
 import { authenticateGitLabWebhook, deliveryIdFromHeaders } from "./webhook-auth.js";
@@ -18,9 +19,19 @@ export async function createGitLabWebhookServer({
 } = {}) {
   const projectRoot = resolve(root);
   const config = await loadConfig(join(projectRoot, ".etnpilot", "etnpilot.yaml"), env);
+  const secrets = createSecretResolver({ root: projectRoot, config, env });
   const webhook = config.git?.webhook ?? {};
-  const signingSecret = env.ETNPILOT_GITLAB_WEBHOOK_SIGNING_SECRET;
-  const token = env.ETNPILOT_GITLAB_WEBHOOK_TOKEN;
+  const [signingSecret, token, apiToken] = await Promise.all([
+    secrets.get("gitlab.webhookSigningSecret", {
+      fallback: { provider: "env", key: "ETNPILOT_GITLAB_WEBHOOK_SIGNING_SECRET" },
+    }),
+    secrets.get("gitlab.webhookToken", {
+      fallback: { provider: "env", key: "ETNPILOT_GITLAB_WEBHOOK_TOKEN" },
+    }),
+    secrets.get("gitlab.apiToken", {
+      fallback: { provider: "env", key: "ETNPILOT_GITLAB_TOKEN" },
+    }),
+  ]);
   if (!signingSecret && !token) {
     throw new Error("A GitLab webhook signing secret or webhook token is required.");
   }
@@ -30,12 +41,12 @@ export async function createGitLabWebhookServer({
     || issueTriggerConfig.comment === true
     || issueTriggerConfig.publish === true
   );
-  if (requiresApiToken && !env.ETNPILOT_GITLAB_TOKEN) {
-    throw new Error("ETNPILOT_GITLAB_TOKEN is required when the GitLab issue trigger is enabled.");
+  if (requiresApiToken && !apiToken) {
+    throw new Error("A GitLab API token is required when the GitLab issue trigger is enabled.");
   }
   const client = new GitLabClient({
     baseUrl: config.git?.baseUrl,
-    token: env.ETNPILOT_GITLAB_TOKEN,
+    token: apiToken,
     fetchImpl,
   });
   const queueConfig = config.queue ?? {};
@@ -52,6 +63,7 @@ export async function createGitLabWebhookServer({
     env,
     client,
     run,
+    secretResolver: secrets,
     onSyncError: onError,
   });
   const queueWorker = new WorkflowQueueWorker({

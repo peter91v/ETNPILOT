@@ -41,7 +41,14 @@ test("project runner executes an agent and check in an isolated worktree", async
     "receipts:",
     "  signing:",
     "    enabled: true",
-    "    privateKeyFile: .etnpilot/keys/receipt-signing-private.pem",
+    "    privateKeySecret: receipt.signingKey",
+    "secrets:",
+    "  providers:",
+    "    signing-files:",
+    "      type: file",
+    "      root: .etnpilot/keys",
+    "  values:",
+    "    receipt.signingKey: { provider: signing-files, key: receipt-signing-private.pem }",
     "workflow:",
     "  concurrency: 1",
     "  steps:",
@@ -167,7 +174,7 @@ test("project runner rejects an unpublishable run before doing any work", async 
   };
   await assert.rejects(
     runProject({ root, input: "publish me", publish: true, env: {}, providerFactories }),
-    /ETNPILOT_GITLAB_TOKEN is required/,
+    /GitLab API token is required/,
   );
   await assert.rejects(
     runProject({ root, input: "publish me", publish: true, worktree: false, env: {}, providerFactories }),

@@ -8,6 +8,7 @@ export class GitLabIssueTrigger {
     env = process.env,
     client,
     run = runProject,
+    secretResolver,
     onSyncError = () => {},
   }) {
     this.root = root;
@@ -16,6 +17,7 @@ export class GitLabIssueTrigger {
     this.env = env;
     this.client = client;
     this.run = run;
+    this.secretResolver = secretResolver;
     this.onSyncError = onSyncError;
   }
 
@@ -72,6 +74,7 @@ export class GitLabIssueTrigger {
         approvalHandler: execution.approvalHandler,
         signal: execution.signal,
         metadata: { queueJobId: execution.jobId, deliveryId },
+        secretResolver: this.secretResolver,
       });
       await execution.checkpoint?.({
         phase: "workflow-completed",

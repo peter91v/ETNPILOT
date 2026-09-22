@@ -96,9 +96,15 @@ test("issue trigger runs the workflow and synchronizes commit status", async () 
 
 test("webhook server acknowledges quickly and deduplicates deliveries", async () => {
   const root = await createRepository("etnpilot-webhook-server-");
-  await mkdir(join(root, ".etnpilot"), { recursive: true });
+  await mkdir(join(root, ".etnpilot", "secrets"), { recursive: true });
+  await writeFile(join(root, ".etnpilot", "secrets", "webhook-token"), "hook-secret\n", { mode: 0o600 });
   await writeFile(join(root, ".etnpilot", "etnpilot.yaml"), [
     "version: 1",
+    "secrets:",
+    "  providers:",
+    "    local: { type: file, root: .etnpilot/secrets }",
+    "  values:",
+    "    gitlab.webhookToken: { provider: local, key: webhook-token }",
     "git:",
     "  baseUrl: https://gitlab.example.invalid",
     "  project: group/project",
@@ -118,7 +124,7 @@ test("webhook server acknowledges quickly and deduplicates deliveries", async ()
   let approvalDecision;
   const app = await createGitLabWebhookServer({
     root,
-    env: { ETNPILOT_GITLAB_WEBHOOK_TOKEN: "hook-secret" },
+    env: {},
     run: async ({ approvalHandler }) => {
       runs += 1;
       approvalDecision = await approvalHandler(

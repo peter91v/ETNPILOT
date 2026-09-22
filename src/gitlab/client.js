@@ -79,10 +79,9 @@ export class GitLabClient {
     }
     const response = await this.fetch(url, options);
     if (!response.ok) {
-      const responseBody = await response.text();
-      throw new GitLabApiError(`GitLab API failed (${response.status}): ${responseBody}`, {
+      await response.text();
+      throw new GitLabApiError(`GitLab API failed (${response.status}).`, {
         status: response.status,
-        body: responseBody,
       });
     }
     return response.status === 204 ? undefined : response.json();

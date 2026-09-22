@@ -38,7 +38,8 @@ export function createOpenAICompatibleProvider({
       }
       if (!response.ok) {
         const retryable = response.status === 429 || response.status >= 500;
-        throw new ProviderError(`Provider request failed (${response.status}): ${await response.text()}`, {
+        await response.text();
+        throw new ProviderError(`Provider request failed (${response.status}).`, {
           code: `http_${response.status}`,
           retryable,
           safeToRetry: retryable,
