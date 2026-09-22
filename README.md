@@ -28,6 +28,21 @@ npm run etnpilot -- graph build .
 npm test
 ```
 
+## Code intelligence
+
+The embedded code graph incrementally indexes JavaScript and TypeScript files, resolves relative imports to project paths, and traverses reverse dependencies to estimate change impact:
+
+```bash
+etnpilot graph build .
+etnpilot graph dependencies src/core/harness.js
+etnpilot graph dependents src/core/harness.js
+etnpilot graph symbols src/core/harness.js
+etnpilot graph impact src/core/harness.js --depth 10
+etnpilot graph stats
+```
+
+Every normal workflow updates the graph before and after execution. Changed source files, transitive consumers, and affected tests are written into the workflow receipt. Static analysis is evidence for review and test selection, not proof that unaffected files are safe.
+
 Run the configured workflow in an isolated worktree:
 
 ```bash

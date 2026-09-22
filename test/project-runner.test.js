@@ -57,6 +57,8 @@ test("project runner executes an agent and check in an isolated worktree", async
       fake: (name, _config, context) => ({
         name,
         async invoke(request) {
+          await mkdir(join(context.workingDirectory, "src"), { recursive: true });
+          await writeFile(join(context.workingDirectory, "src", "generated.js"), "export const generated = true;\n");
           await writeFile(join(context.workingDirectory, "result.txt"), String(request.input));
           return { text: "done" };
         },
@@ -68,6 +70,8 @@ test("project runner executes an agent and check in an isolated worktree", async
   assert.deepEqual(result.cleanup, { requested: false, removed: false, reason: "retained-by-policy" });
   assert.match(result.workspace.branch, /^etnpilot\/run-/);
   assert.match(result.git.status, /result\.txt/);
+  assert.deepEqual(result.codegraph.impact.changed, ["src/generated.js"]);
+  assert.deepEqual(result.codegraph.impact.files.map((entry) => entry.path), ["src/generated.js"]);
   assert.match(await readFile(join(result.workspace.path, "result.txt"), "utf8"), /create result/);
   const receipts = (await readFile(result.receiptPath, "utf8")).trim().split("\n");
   assert.equal(receipts.length, 2);

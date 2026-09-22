@@ -19,6 +19,10 @@
 - [x] Optional run worktrees, safe cleanup policies, and reproducible check execution
 - [x] Hash-chained receipts
 - [x] Explicit GitLab draft-merge-request publishing
+- [x] Incremental code indexing and schema migration
+- [x] Resolved JavaScript/TypeScript dependency edges
+- [x] Transitive impact analysis and affected-test discovery
+- [x] Workflow-integrated codegraph evidence
 - [ ] GitLab issue-to-workflow trigger
 - [ ] Human approval inbox for pending tool calls
 - [ ] Cryptographically signed receipt chains

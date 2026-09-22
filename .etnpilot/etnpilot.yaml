@@ -16,6 +16,8 @@ git:
 
 codegraph:
   database: .etnpilot/state/codegraph.sqlite
+  autoIndex: true
+  maxImpactDepth: 20
 
 approval:
   allow: [read]
