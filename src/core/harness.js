@@ -3,7 +3,7 @@ import { EventBus } from "./events.js";
 import { Registry } from "./registry.js";
 
 export class Harness {
-  constructor({ approvalPolicy, receiptStore } = {}) {
+  constructor({ approvalPolicy, approvalHandler, receiptStore } = {}) {
     this.events = new EventBus();
     this.providers = new Registry("provider");
     this.plugins = new Registry("plugin");
@@ -12,6 +12,7 @@ export class Harness {
     this.prompts = new Registry("prompt");
     this.instructions = [];
     this.approvalPolicy = approvalPolicy;
+    this.approvalHandler = approvalHandler;
     this.receiptStore = receiptStore;
   }
 
@@ -100,6 +101,11 @@ export class Harness {
 
   async #approve(request, context) {
     if (!this.approvalPolicy) return { kind: "reject", reason: "No approval policy configured." };
-    return this.approvalPolicy.evaluate(request, context);
+    const decision = await this.approvalPolicy.evaluate(request, context);
+    if (decision.kind !== "human-required") return decision;
+    if (!this.approvalHandler) {
+      return { kind: "reject", reason: "Human approval is required, but no approval handler is available." };
+    }
+    return this.approvalHandler(request, context);
   }
 }

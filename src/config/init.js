@@ -10,11 +10,18 @@ providers:
 git:
   host: gitlab
   baseUrl: https://gitlab.metropol-it.at
+  remote: gitlab
+  targetBranch: main
 codegraph:
   database: .etnpilot/state/codegraph.sqlite
 approval:
   allow: [read]
   requireHuman: [write, shell, network]
+workflow:
+  concurrency: 1
+  failFast: true
+  timeoutMs: 1800000
+  maxSteps: 50
 `;
 
 export async function initializeProject(root) {

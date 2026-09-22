@@ -14,11 +14,14 @@
 
 ## M1 — Runnable workflow
 
-- [ ] Manifest discovery for instructions, skills, prompts, and agents
-- [ ] DAG scheduler with concurrency, cancellation, retry, and budgets
-- [ ] GitLab issue-to-merge-request workflow
+- [x] Manifest discovery for instructions, skills, prompts, and agents
+- [x] DAG scheduler with concurrency, cancellation, retry, timeouts, and step budgets
+- [x] Isolated run worktrees and reproducible check execution
+- [x] Hash-chained receipts
+- [x] Explicit GitLab draft-merge-request publishing
+- [ ] GitLab issue-to-workflow trigger
 - [ ] Human approval inbox for pending tool calls
-- [ ] Signed receipt chains and reproducible check execution
+- [ ] Cryptographically signed receipt chains
 - [ ] Codegraph parsers for Python, Go, Java, and C#
 
 ## M2 — Production controls
