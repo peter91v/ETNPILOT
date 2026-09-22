@@ -70,6 +70,7 @@ test("issue trigger filters project, labels, users, actions, and confidential is
 test("issue trigger runs the workflow and synchronizes commit status", async () => {
   const root = await createRepository("etnpilot-trigger-");
   const statuses = [];
+  let seenApprovalHandler;
   const trigger = new GitLabIssueTrigger({
     root,
     config: { git: { project: "group/project", targetBranch: "main", issueTrigger: {
@@ -80,17 +81,22 @@ test("issue trigger runs the workflow and synchronizes commit status", async () 
       setCommitStatus: async (_project, sha, status) => statuses.push({ sha, ...status }),
       addIssueNote: async () => {},
     },
-    run: async ({ input, publish }) => ({
-      runId: "run-1",
-      receiptHash: "receipt-1",
-      workspace: { branch: "etnpilot/run-1" },
-      mergeRequest: undefined,
-      input,
-      publish,
-    }),
+    approvalHandler: async () => ({ kind: "approve-once" }),
+    run: async ({ input, publish, approvalHandler }) => {
+      seenApprovalHandler = approvalHandler;
+      return {
+        runId: "run-1",
+        receiptHash: "receipt-1",
+        workspace: { branch: "etnpilot/run-1" },
+        mergeRequest: undefined,
+        input,
+        publish,
+      };
+    },
   });
   const result = await trigger.execute(issuePayload(), "delivery-1");
   assert.equal(result.status, "succeeded");
+  assert.equal(typeof seenApprovalHandler, "function");
   assert.deepEqual(statuses.map((status) => status.state), ["running", "success"]);
   assert.equal(statuses[0].name, "etnpilot/issue-7");
 });
@@ -116,11 +122,16 @@ test("webhook server acknowledges quickly and deduplicates deliveries", async ()
     "",
   ].join("\n"));
   let runs = 0;
+  let approvalDecision;
   const app = await createGitLabWebhookServer({
     root,
     env: { ETNPILOT_GITLAB_WEBHOOK_TOKEN: "hook-secret" },
-    run: async () => {
+    run: async ({ approvalHandler }) => {
       runs += 1;
+      approvalDecision = await approvalHandler(
+        { kind: "write", fileName: "src/generated.js" },
+        { runId: "run-1", agent: "builder" },
+      );
       return { runId: "run-1", receiptHash: "receipt-1", workspace: { branch: "main" } };
     },
     onError: (error) => { throw error; },
@@ -143,8 +154,15 @@ test("webhook server acknowledges quickly and deduplicates deliveries", async ()
     assert.equal(first.status, 202);
     assert.equal(duplicate.status, 200);
     assert.equal((await duplicate.json()).duplicate, true);
+    let pending;
+    for (let attempt = 0; attempt < 20 && !pending; attempt += 1) {
+      pending = app.approvalInbox.list()[0];
+      if (!pending) await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    app.approvalInbox.decide(pending.id, "approved", { actor: "maintainer" });
     await app.drain();
     assert.equal(runs, 1);
+    assert.equal(approvalDecision.kind, "approve-once");
     assert.equal((await app.deliveryStore.get("delivery-7")).status, "succeeded");
   } finally {
     await app.close();

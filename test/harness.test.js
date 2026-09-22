@@ -66,4 +66,7 @@ test("harness routes human-required operations through the approval handler", as
   const receipt = await harness.run({ agent: "writer", input: "go" });
   assert.equal(receipt.result.kind, "approve-once");
   assert.equal(requests.length, 1);
+  assert.equal(receipt.approvals.length, 1);
+  assert.equal(receipt.approvals[0].operationKind, "write");
+  assert.equal(receipt.approvals[0].decision, "approve-once");
 });

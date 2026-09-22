@@ -86,5 +86,7 @@ With `syncStatus: true`, ETNPilot creates or updates an external commit status n
 up to three times. `comment: true` writes a completion note to the issue. `publish: true` follows the
 normal reviewed draft-merge-request path; it does not merge.
 
-Webhook runs use the normal approval policy. Until a persistent human approval inbox is available,
-the default policy intentionally prevents unattended writes, shell commands, and network access.
+Webhook runs use the normal approval policy. Human-required operations pause in the persistent
+approval inbox and continue only after an explicit one-time CLI decision. A graceful service
+shutdown rejects active waits; automatic session recovery after a process crash is not yet
+supported.

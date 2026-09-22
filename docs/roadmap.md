@@ -26,7 +26,7 @@
 - [x] Versioned plugin SDK with capability declarations and dependency ordering
 - [x] Capability-aware provider routing with replay-safe fallback
 - [x] Authenticated and deduplicated GitLab issue-to-workflow trigger
-- [ ] Human approval inbox for pending tool calls
+- [x] Persistent human approval inbox for pending tool calls
 - [ ] Cryptographically signed receipt chains
 - [ ] Codegraph parsers for Python, Go, Java, and C#
 

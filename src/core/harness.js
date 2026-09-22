@@ -69,6 +69,7 @@ export class Harness {
     const agent = this.agents.get(agentName);
     const runId = randomUUID();
     const startedAt = Date.now();
+    const approvals = [];
     await this.events.emit("run.started", { runId, parentRunId, agent: agentName });
 
     try {
@@ -91,7 +92,17 @@ export class Harness {
             metadata,
           });
         },
-        approve: (request) => this.#approve(request, { runId, agent: agentName }),
+        approve: async (request) => {
+          const decision = await this.#approve(request, { runId, agent: agentName });
+          approvals.push({
+            operationKind: request?.kind ?? "unknown",
+            decision: decision.kind,
+            at: new Date().toISOString(),
+            ...(decision.approvalId ? { approvalId: decision.approvalId } : {}),
+            ...(decision.evidence ? { evidence: decision.evidence } : {}),
+          });
+          return decision;
+        },
       };
       const routed = this.providerRouter
         ? await this.providerRouter.invoke(context)
@@ -108,6 +119,7 @@ export class Harness {
         providerAttempts: routed.attempts,
         status: "succeeded",
         durationMs: Date.now() - startedAt,
+        approvals,
         result: routed.result,
       };
       await this.receiptStore?.append(receipt);
@@ -122,6 +134,7 @@ export class Harness {
         providerAttempts: error.providerAttempts ?? [],
         status: "failed",
         durationMs: Date.now() - startedAt,
+        approvals,
         error: error instanceof Error ? error.message : String(error),
       };
       await this.receiptStore?.append(receipt);

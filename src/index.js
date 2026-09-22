@@ -1,5 +1,11 @@
 export { Harness } from "./core/harness.js";
 export { ApprovalPolicy } from "./core/approval-policy.js";
+export {
+  ApprovalInbox,
+  ApprovalStateError,
+  createInboxApprovalHandler,
+  summarizeApprovalRequest,
+} from "./core/approval-inbox.js";
 export { EventBus } from "./core/events.js";
 export { Registry } from "./core/registry.js";
 export { JsonlReceiptStore } from "./core/receipt-store.js";

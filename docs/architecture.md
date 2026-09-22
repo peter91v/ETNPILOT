@@ -13,6 +13,7 @@
 | Evidence | Tamper-evident run results | SHA-256 JSONL receipts |
 | Workflow | Dependency ordering, retries, limits, cancellation | bounded DAG scheduler |
 | Webhooks | Authenticated, deduplicated event intake | GitLab issue receiver and delivery store |
+| Approvals | Cross-process human decisions and redacted evidence | SQLite approval inbox |
 
 ## Execution flow
 
@@ -55,6 +56,11 @@ receiver acknowledges accepted work before model execution. External commit stat
 running, successful, or failed outcomes in GitLab; a transient status-update conflict is retried.
 Webhook execution reuses the same workflow, worktree, approval, receipt, provider-routing, and
 publishing boundaries as an interactive run.
+
+Human-required provider operations create an expiring SQLite inbox record and suspend that provider
+call. The CLI resolves a pending request with an atomic state transition; a second decision cannot
+replace it. Only a redacted operation summary is persisted, and the final decision is attached to
+the agent run receipt. This is live-session continuation, not durable provider checkpointing.
 
 ## Security defaults
 

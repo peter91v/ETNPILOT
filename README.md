@@ -153,8 +153,19 @@ retries do not launch duplicate workflows. The receiver binds to `127.0.0.1` by 
 only through a TLS reverse proxy or another authenticated private route.
 
 The normal approval policy remains active for webhook runs. With the default policy, writes, shell
-commands, and network calls are rejected because no interactive approver is attached. Do not weaken
-that policy for an internet-facing receiver; use the planned approval inbox for unattended runs.
+commands, and network calls are placed in the persistent approval inbox. Review them from a second
+terminal:
+
+```bash
+etnpilot approval list
+etnpilot approval show <id>
+etnpilot approval approve <id> --actor maintainer --reason "Reviewed"
+etnpilot approval reject <id> --reason "Unsafe command"
+```
+
+The waiting provider receives a one-time decision and the redacted decision evidence is attached to
+the run receipt. See [docs/approval-inbox.md](docs/approval-inbox.md) for lifecycle and recovery
+limits.
 See [docs/gitlab-webhooks.md](docs/gitlab-webhooks.md) for setup and operational details.
 
 ## Repository strategy
