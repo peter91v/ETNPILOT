@@ -12,7 +12,8 @@
 | Code intelligence | Files, symbols, imports, impact queries | embedded SQLite code graph |
 | Evidence | Tamper-evident run results | SHA-256 JSONL receipts |
 | Workflow | Dependency ordering, retries, limits, cancellation | bounded DAG scheduler |
-| Webhooks | Authenticated, deduplicated event intake | GitLab issue receiver and delivery store |
+| Queue | Durable intake, leases, checkpoints, restart recovery | SQLite workflow queue and worker |
+| Webhooks | Authenticated, deduplicated event intake | GitLab issue receiver |
 | Approvals | Cross-process human decisions and redacted evidence | SQLite approval inbox |
 
 ## Execution flow
@@ -51,16 +52,23 @@ The code graph stores file fingerprints, extracted declarations, raw imports, an
 ## GitLab event intake
 
 GitLab issue events pass through raw-body authentication, timestamp validation, project and label
-filters, and an atomic delivery claim before entering the serialized workflow queue. The HTTP
+filters, and an atomic queue insert before entering the serialized workflow worker. The HTTP
 receiver acknowledges accepted work before model execution. External commit statuses expose
 running, successful, or failed outcomes in GitLab; a transient status-update conflict is retried.
 Webhook execution reuses the same workflow, worktree, approval, receipt, provider-routing, and
 publishing boundaries as an interactive run.
 
+Queued jobs survive restarts and are leased to one worker at a time. Heartbeats extend ownership,
+while expired active leases become `orphaned` rather than being replayed automatically. Phase
+checkpoints show how far a job progressed. They deliberately do not claim to serialize a provider
+session; replaying an orphaned job requires an explicit operator acknowledgement because prior side
+effects may be ambiguous.
+
 Human-required provider operations create an expiring SQLite inbox record and suspend that provider
 call. The CLI resolves a pending request with an atomic state transition; a second decision cannot
 replace it. Only a redacted operation summary is persisted, and the final decision is attached to
-the agent run receipt. This is live-session continuation, not durable provider checkpointing.
+the agent run receipt. The approval carries its workflow job ID, and queue cancellation aborts a
+pending wait. This is live-session continuation, not durable provider-session serialization.
 
 ## Security defaults
 

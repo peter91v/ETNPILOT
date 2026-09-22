@@ -34,6 +34,8 @@ export class ApprovalInbox {
       CREATE INDEX IF NOT EXISTS approvals_status_created ON approvals(status, created_at DESC);
       CREATE INDEX IF NOT EXISTS approvals_run ON approvals(run_id, created_at);
     `);
+    ensureColumn(this.database, "approvals", "workflow_job_id", "TEXT");
+    this.database.exec("CREATE INDEX IF NOT EXISTS approvals_workflow_job ON approvals(workflow_job_id, created_at);");
   }
 
   create(request, context = {}, { timeoutMs = 24 * 60 * 60_000, serviceInstanceId } = {}) {
@@ -43,6 +45,7 @@ export class ApprovalInbox {
       id: randomUUID(),
       status: "pending",
       runId: context.runId,
+      workflowJobId: context.queueJobId,
       agent: context.agent,
       operationKind: request?.kind ?? "unknown",
       details: summarizeApprovalRequest(request),
@@ -52,13 +55,14 @@ export class ApprovalInbox {
     };
     this.database.prepare(`
       INSERT INTO approvals(
-        id, status, run_id, agent, operation_kind, details_json,
+        id, status, run_id, workflow_job_id, agent, operation_kind, details_json,
         created_at, expires_at, service_instance_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       record.id,
       record.status,
       record.runId ?? null,
+      record.workflowJobId ?? null,
       record.agent ?? null,
       record.operationKind,
       JSON.stringify(record.details),
@@ -221,6 +225,7 @@ function fromRow(row) {
     id: row.id,
     status: row.status,
     runId: row.run_id ?? undefined,
+    workflowJobId: row.workflow_job_id ?? undefined,
     agent: row.agent ?? undefined,
     operationKind: row.operation_kind,
     details: JSON.parse(row.details_json),
@@ -250,4 +255,11 @@ function approvalEvidence(record) {
     decidedBy: record.decidedBy,
     decidedAt: record.decidedAt,
   };
+}
+
+function ensureColumn(database, table, column, definition) {
+  const columns = database.prepare(`PRAGMA table_info(${table})`).all();
+  if (!columns.some((candidate) => candidate.name === column)) {
+    database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
 }

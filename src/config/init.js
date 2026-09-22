@@ -24,7 +24,6 @@ git:
     port: 8787
     maxBodyBytes: 1048576
     timestampToleranceSeconds: 300
-    deliveryStore: .etnpilot/state/webhooks
   issueTrigger:
     enabled: false
     labels: [etnpilot]
@@ -33,6 +32,12 @@ git:
     publish: false
     syncStatus: true
     comment: false
+queue:
+  database: .etnpilot/state/workflows.sqlite
+  pollIntervalMs: 500
+  leaseMs: 30000
+  retryDelayMs: 5000
+  maxAttempts: 1
 codegraph:
   database: .etnpilot/state/codegraph.sqlite
   autoIndex: true

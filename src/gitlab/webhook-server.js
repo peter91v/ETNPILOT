@@ -2,8 +2,9 @@ import { createServer } from "node:http";
 import { join, resolve } from "node:path";
 import { loadConfig } from "../config/load.js";
 import { ApprovalInbox, createInboxApprovalHandler } from "../core/approval-inbox.js";
+import { WorkflowQueue } from "../workflow/queue.js";
+import { WorkflowQueueWorker } from "../workflow/queue-worker.js";
 import { GitLabClient } from "./client.js";
-import { WebhookDeliveryStore } from "./delivery-store.js";
 import { GitLabIssueTrigger } from "./issue-trigger.js";
 import { authenticateGitLabWebhook, deliveryIdFromHeaders } from "./webhook-auth.js";
 
@@ -37,35 +38,51 @@ export async function createGitLabWebhookServer({
     token: env.ETNPILOT_GITLAB_TOKEN,
     fetchImpl,
   });
-  const deliveryStore = new WebhookDeliveryStore(
-    resolve(projectRoot, webhook.deliveryStore ?? ".etnpilot/state/webhooks"),
+  const queueConfig = config.queue ?? {};
+  const workflowQueue = new WorkflowQueue(
+    resolve(projectRoot, queueConfig.database ?? ".etnpilot/state/workflows.sqlite"),
   );
-  const shutdown = new AbortController();
   const inboxConfig = config.approval?.inbox ?? {};
   const approvalInbox = inboxConfig.enabled === false ? undefined : new ApprovalInbox(
     resolve(projectRoot, inboxConfig.database ?? ".etnpilot/state/approvals.sqlite"),
   );
-  const approvalHandler = approvalInbox ? createInboxApprovalHandler({
-    inbox: approvalInbox,
-    timeoutMs: inboxConfig.timeoutMs ?? 24 * 60 * 60_000,
-    pollIntervalMs: inboxConfig.pollIntervalMs ?? 500,
-    signal: shutdown.signal,
-  }) : undefined;
   const issueTrigger = new GitLabIssueTrigger({
     root: projectRoot,
     config,
     env,
     client,
     run,
-    approvalHandler,
     onSyncError: onError,
   });
-  let queue = Promise.resolve();
-  const enqueue = (operation) => {
-    const current = queue.then(operation);
-    queue = current.catch(onError);
-    return current;
-  };
+  const queueWorker = new WorkflowQueueWorker({
+    queue: workflowQueue,
+    pollIntervalMs: queueConfig.pollIntervalMs ?? 500,
+    leaseMs: queueConfig.leaseMs ?? 30_000,
+    retryDelayMs: queueConfig.retryDelayMs ?? 5_000,
+    onError,
+    execute: async (job, execution) => {
+      if (job.kind !== "gitlab-issue") throw new Error(`Unsupported workflow job kind: '${job.kind}'.`);
+      const inboxHandler = approvalInbox ? createInboxApprovalHandler({
+        inbox: approvalInbox,
+        timeoutMs: inboxConfig.timeoutMs ?? 24 * 60 * 60_000,
+        pollIntervalMs: inboxConfig.pollIntervalMs ?? 500,
+        signal: execution.signal,
+        onPending: (approval) => execution.checkpoint({
+          phase: "waiting-approval",
+          approvalId: approval.id,
+        }),
+        onResolved: (approval) => execution.checkpoint({
+          phase: "approval-resolved",
+          approvalId: approval.id,
+          approvalStatus: approval.status,
+        }),
+      }) : undefined;
+      const approvalHandler = inboxHandler
+        ? (request, context = {}) => inboxHandler(request, { ...context, queueJobId: job.id })
+        : undefined;
+      return issueTrigger.execute(job.payload, job.deliveryId, { ...execution, approvalHandler });
+    },
+  }).start();
 
   const server = createServer(async (request, response) => {
     try {
@@ -93,31 +110,28 @@ export async function createGitLabWebhookServer({
       const event = request.headers["x-gitlab-event"];
       const match = issueTrigger.matches(event, payload);
       if (!match.matched) return json(response, 202, { accepted: false, reason: match.reason });
-      const claim = await deliveryStore.claim(deliveryId, {
-        event,
-        project: payload.project.path_with_namespace,
-        issueIid: match.issue.iid,
-        action: match.issue.action,
+      const queued = workflowQueue.enqueue({
+        kind: "gitlab-issue",
+        deliveryId,
+        payload: queueIssuePayload(payload),
+        metadata: {
+          event,
+          project: payload.project.path_with_namespace,
+          issueIid: match.issue.iid,
+          action: match.issue.action,
+        },
+        maxAttempts: queueConfig.maxAttempts ?? 1,
       });
-      if (!claim.claimed) return json(response, 200, { accepted: false, duplicate: true, status: claim.record?.status });
-
-      enqueue(async () => {
-        await deliveryStore.mark(deliveryId, "running");
-        try {
-          const result = await issueTrigger.execute(payload, deliveryId);
-          await deliveryStore.mark(deliveryId, "succeeded", { result });
-        } catch (error) {
-          await deliveryStore.mark(deliveryId, "failed", {
-            error: {
-              name: error instanceof Error ? error.name : "Error",
-              runId: error.run?.runId,
-              message: "Workflow execution failed. Inspect server logs and the run receipt.",
-            },
-          });
-          throw error;
-        }
-      });
-      return json(response, 202, { accepted: true, deliveryId });
+      if (!queued.enqueued) {
+        return json(response, 200, {
+          accepted: false,
+          duplicate: true,
+          jobId: queued.job?.id,
+          status: queued.job?.status,
+        });
+      }
+      queueWorker.wake();
+      return json(response, 202, { accepted: true, deliveryId, jobId: queued.job.id });
     } catch (error) {
       const status = error.statusCode ?? 500;
       if (status >= 500) onError(error);
@@ -128,9 +142,10 @@ export async function createGitLabWebhookServer({
   return {
     server,
     config,
-    deliveryStore,
+    workflowQueue,
+    queueWorker,
     approvalInbox,
-    drain: () => queue,
+    drain: (options) => queueWorker.waitForIdle(options),
     listen({ host = webhook.host ?? "127.0.0.1", port = webhook.port ?? 8787 } = {}) {
       return new Promise((resolveListen, reject) => {
         const onListenError = (error) => {
@@ -147,18 +162,43 @@ export async function createGitLabWebhookServer({
       });
     },
     async close() {
-      shutdown.abort();
-      await new Promise((resolveClose, reject) => {
-        server.close((error) => {
-          if (error) return reject(error);
-          resolveClose();
+      if (server.listening) {
+        await new Promise((resolveClose, reject) => {
+          server.close((error) => {
+            if (error) return reject(error);
+            resolveClose();
+          });
         });
-      });
+      }
       try {
-        await queue;
+        await queueWorker.stop();
       } finally {
         approvalInbox?.close();
+        workflowQueue.close();
       }
+    },
+  };
+}
+
+function queueIssuePayload(payload) {
+  const issue = payload.object_attributes ?? {};
+  return {
+    object_kind: "issue",
+    user: { username: payload.user?.username },
+    project: {
+      path_with_namespace: payload.project?.path_with_namespace,
+      default_branch: payload.project?.default_branch,
+    },
+    labels: (payload.labels ?? []).map((label) => ({
+      title: typeof label === "string" ? label : label.title,
+    })),
+    object_attributes: {
+      iid: issue.iid,
+      action: issue.action,
+      title: issue.title,
+      description: issue.description,
+      url: issue.url,
+      confidential: issue.confidential === true,
     },
   };
 }

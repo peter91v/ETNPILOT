@@ -8,7 +8,6 @@ export class GitLabIssueTrigger {
     env = process.env,
     client,
     run = runProject,
-    approvalHandler,
     onSyncError = () => {},
   }) {
     this.root = root;
@@ -17,7 +16,6 @@ export class GitLabIssueTrigger {
     this.env = env;
     this.client = client;
     this.run = run;
-    this.approvalHandler = approvalHandler;
     this.onSyncError = onSyncError;
   }
 
@@ -46,7 +44,7 @@ export class GitLabIssueTrigger {
     return { matched: true, issue };
   }
 
-  async execute(payload, deliveryId) {
+  async execute(payload, deliveryId, execution = {}) {
     const issue = payload.object_attributes;
     const project = this.config.git.project;
     const ref = payload.project?.default_branch ?? this.config.git.targetBranch ?? "main";
@@ -60,7 +58,9 @@ export class GitLabIssueTrigger {
       ref,
       targetUrl,
     });
+    await execution.checkpoint?.({ phase: "gitlab-status-running", baseSha });
     try {
+      await execution.checkpoint?.({ phase: "workflow-starting", sideEffectsPossible: true });
       const result = await this.run({
         root: this.root,
         input: formatIssueTask(payload),
@@ -69,7 +69,14 @@ export class GitLabIssueTrigger {
         cleanupPolicy: this.trigger.cleanup,
         publish: this.trigger.publish === true,
         env: this.env,
-        approvalHandler: this.approvalHandler,
+        approvalHandler: execution.approvalHandler,
+        signal: execution.signal,
+        metadata: { queueJobId: execution.jobId, deliveryId },
+      });
+      await execution.checkpoint?.({
+        phase: "workflow-completed",
+        runId: result.runId,
+        receiptHash: result.receiptHash,
       });
       const resultUrl = result.mergeRequest?.web_url ?? targetUrl;
       await this.#syncStatus(project, baseSha, {
@@ -80,6 +87,7 @@ export class GitLabIssueTrigger {
         targetUrl: resultUrl,
       });
       await this.#comment(project, issue.iid, completionNote(result, deliveryId));
+      await execution.checkpoint?.({ phase: "gitlab-finalized" });
       return {
         runId: result.runId,
         receiptHash: result.receiptHash,

@@ -57,10 +57,10 @@ redacted details, reviewer, and decision timestamp.
 
 ## Lifecycle limits
 
-The first version resumes work only while the ETNPilot service and provider session remain alive.
-A graceful service shutdown rejects active waits. After an ungraceful process crash, pending rows
-remain visible until they expire, but approving them does not recreate the lost provider session.
-Automatic restart recovery requires durable workflow checkpoints and is a separate roadmap item.
+Each approval records its durable workflow job ID. Queue cancellation or service shutdown rejects
+an active wait. After a process crash, pending rows remain visible until they expire, but approving
+one does not recreate the lost provider session. The workflow job becomes `orphaned` after its lease
+expires and requires inspected, forced replay. Jobs that were still queued resume automatically.
 
 Protect the project directory and approval CLI with normal operating-system access controls. Anyone
 who can write the inbox database can authorize agent operations.
