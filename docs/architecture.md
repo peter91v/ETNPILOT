@@ -10,7 +10,7 @@
 | Git | Safe local operations and isolated branches | native Git worktrees |
 | Forge | Remote repository lifecycle | self-hosted GitLab API |
 | Code intelligence | Files, symbols, imports, impact queries | embedded SQLite code graph |
-| Evidence | Tamper-evident run results | SHA-256 JSONL receipts |
+| Evidence | Authenticated, tamper-evident run results | SHA-256 chains with optional Ed25519 signatures |
 | Workflow | Dependency ordering, retries, limits, cancellation | bounded DAG scheduler |
 | Queue | Durable intake, leases, checkpoints, restart recovery | SQLite workflow queue and worker |
 | Webhooks | Authenticated, deduplicated event intake | GitLab issue receiver |
@@ -48,6 +48,12 @@ can access only its declared registration and event APIs.
 `etnpilot run` loads the project's manifests, registers configured providers, and executes the configured DAG. The user chooses an isolated worktree or the current checkout through configuration or CLI flags. Agent steps receive the outputs of their dependencies. Check steps execute argument arrays directly without a shell. A failed dependency blocks downstream work. Cleanup is policy-driven and never removes a worktree with uncommitted changes. Publishing to GitLab requires the explicit `--publish` flag and a token supplied through the environment.
 
 The code graph stores file fingerprints, extracted declarations, raw imports, and resolved project paths in SQLite. Indexing uses file metadata and hashes to update only changed or deleted files. Reverse traversal reports direct and transitive consumers with their depth and highlights test files. Workflow receipts include the graph state before and after execution plus impact evidence for changed source files.
+
+Receipt signing is opt-in and uses an external Ed25519 private key. The proof version, algorithm,
+and public-key fingerprint are included inside each hashed entry before the signature is created.
+The final workflow entry seals the chain. Strict verification requires every signature and the
+terminal entry, so content changes, signer replacement, appended entries, and tail truncation are
+detected. Existing hash-only receipts remain readable in migration mode.
 
 ## GitLab event intake
 

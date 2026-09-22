@@ -8,7 +8,17 @@ export {
 } from "./core/approval-inbox.js";
 export { EventBus } from "./core/events.js";
 export { Registry } from "./core/registry.js";
-export { JsonlReceiptStore } from "./core/receipt-store.js";
+export { JsonlReceiptStore, verifyReceiptFile } from "./core/receipt-store.js";
+export {
+  createReceiptSigner,
+  createReceiptVerifier,
+  generateReceiptKeyPair,
+  loadReceiptSigner,
+  loadReceiptVerifiers,
+  receiptKeyId,
+  RECEIPT_PROOF_VERSION,
+  RECEIPT_SIGNATURE_ALGORITHM,
+} from "./core/receipt-signing.js";
 export { createTerminalApprovalHandler } from "./core/terminal-approval.js";
 export { runCheck } from "./checks/runner.js";
 export { CodeGraph } from "./codegraph/codegraph.js";

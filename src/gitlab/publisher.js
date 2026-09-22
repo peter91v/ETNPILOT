@@ -10,7 +10,7 @@ export class GitLabPublisher {
     this.client = new GitLabClient({ baseUrl, token, fetchImpl });
   }
 
-  async publish({ cwd, branch, targetBranch = "main", title, description, receipt }) {
+  async publish({ cwd, branch, targetBranch = "main", title, description, receipt, receiptProof }) {
     const status = await git(["status", "--porcelain"], { cwd });
     if (!status.stdout) throw new Error("Nothing to publish: the worktree has no changes.");
     await git(["add", "--all"], { cwd });
@@ -24,10 +24,14 @@ export class GitLabPublisher {
       draft: true,
     });
     if (receipt) {
+      const lines = [`ETNPilot verification receipt: \`${receipt}\``];
+      if (receiptProof) {
+        lines.push(`Signature: ${receiptProof.algorithm} with key \`${receiptProof.keyId}\``);
+      }
       await this.client.addMergeRequestNote(
         this.project,
         mergeRequest.iid,
-        `ETNPilot verification receipt: \`${receipt}\``,
+        lines.join("\n"),
       );
     }
     return mergeRequest;

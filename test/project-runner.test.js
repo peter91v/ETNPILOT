@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { git } from "../src/git/command.js";
 import { runProject } from "../src/runtime/project-runner.js";
+import { verifyReceiptFile } from "../src/core/receipt-store.js";
+import { createReceiptVerifier, generateReceiptKeyPair } from "../src/core/receipt-signing.js";
 
 test("project runner executes an agent and check in an isolated worktree", async () => {
   const root = await mkdtemp(join(tmpdir(), "etnpilot-run-"));
@@ -13,7 +15,11 @@ test("project runner executes an agent and check in an isolated worktree", async
     mkdir(join(root, ".etnpilot", "prompts"), { recursive: true }),
     mkdir(join(root, ".etnpilot", "state"), { recursive: true }),
   ]);
-  await writeFile(join(root, ".gitignore"), ".etnpilot/state/\n.etnpilot/worktrees/\n");
+  const receiptKeys = await generateReceiptKeyPair({
+    privateKeyPath: join(root, ".etnpilot", "keys", "receipt-signing-private.pem"),
+    publicKeyPath: join(root, ".etnpilot", "receipt-signing-public.pem"),
+  });
+  await writeFile(join(root, ".gitignore"), ".etnpilot/state/\n.etnpilot/worktrees/\n.etnpilot/keys/\n");
   await writeFile(join(root, "package.json"), '{"type":"module"}\n');
   await writeFile(join(root, ".etnpilot", "prompts", "worker.md"), "Do the work.");
   await writeFile(join(root, ".etnpilot", "agents", "worker.yaml"), [
@@ -32,6 +38,10 @@ test("project runner executes an agent and check in an isolated worktree", async
     "    type: fake",
     "approval:",
     "  allow: [read]",
+    "receipts:",
+    "  signing:",
+    "    enabled: true",
+    "    privateKeyFile: .etnpilot/keys/receipt-signing-private.pem",
     "workflow:",
     "  concurrency: 1",
     "  steps:",
@@ -75,6 +85,15 @@ test("project runner executes an agent and check in an isolated worktree", async
   assert.match(await readFile(join(result.workspace.path, "result.txt"), "utf8"), /create result/);
   const receipts = (await readFile(result.receiptPath, "utf8")).trim().split("\n");
   assert.equal(receipts.length, 2);
+  assert.equal(result.receiptProof.algorithm, "Ed25519");
+  assert.equal(result.receiptProof.keyId, receiptKeys.keyId);
+  const verifier = createReceiptVerifier(await readFile(receiptKeys.publicKeyPath, "utf8"));
+  const verification = await verifyReceiptFile(result.receiptPath, {
+    verifiers: new Map([[verifier.keyId, verifier]]),
+    requireSignatures: true,
+    requireTerminal: true,
+  });
+  assert.equal(verification.valid, true);
 });
 
 test("project runner can operate without a worktree", async () => {
@@ -146,7 +165,6 @@ test("project runner rejects an unpublishable run before doing any work", async 
   const providerFactories = {
     fake: (name) => ({ name, invoke: async () => { invocations += 1; return { text: "done" }; } }),
   };
-
   await assert.rejects(
     runProject({ root, input: "publish me", publish: true, env: {}, providerFactories }),
     /ETNPILOT_GITLAB_TOKEN is required/,
@@ -155,8 +173,6 @@ test("project runner rejects an unpublishable run before doing any work", async 
     runProject({ root, input: "publish me", publish: true, worktree: false, env: {}, providerFactories }),
     /Publishing an in-place run is not allowed/,
   );
-
-  // Neither attempt may spend provider budget or leave a worktree behind.
   assert.equal(invocations, 0);
   const worktrees = await git(["worktree", "list", "--porcelain"], { cwd: root });
   assert.equal(worktrees.stdout.match(/^worktree /gm).length, 1);
