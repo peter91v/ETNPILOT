@@ -25,7 +25,7 @@
 - [x] Workflow-integrated codegraph evidence
 - [x] Versioned plugin SDK with capability declarations and dependency ordering
 - [x] Capability-aware provider routing with replay-safe fallback
-- [ ] GitLab issue-to-workflow trigger
+- [x] Authenticated and deduplicated GitLab issue-to-workflow trigger
 - [ ] Human approval inbox for pending tool calls
 - [ ] Cryptographically signed receipt chains
 - [ ] Codegraph parsers for Python, Go, Java, and C#
@@ -36,7 +36,7 @@
 - [ ] OpenTelemetry traces and cost accounting
 - [ ] Policy-as-code for tools, paths, networks, and providers
 - [ ] Process-level plugin isolation and resource limits
-- [ ] GitLab webhooks and pipeline status synchronization
+- [x] GitLab webhook authentication and external pipeline status synchronization
 
 ## Brainstorming backlog
 

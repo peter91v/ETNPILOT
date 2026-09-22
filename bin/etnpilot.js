@@ -6,6 +6,7 @@ import { CodeGraph } from "../src/codegraph/codegraph.js";
 import { initializeProject } from "../src/config/init.js";
 import { createTerminalApprovalHandler } from "../src/core/terminal-approval.js";
 import { WorktreeManager } from "../src/git/worktrees.js";
+import { createGitLabWebhookServer } from "../src/gitlab/webhook-server.js";
 import { runProject } from "../src/runtime/project-runner.js";
 
 const { positionals, values } = parseArgs({
@@ -21,6 +22,8 @@ const { positionals, values } = parseArgs({
     "no-worktree": { type: "boolean", default: false },
     "cleanup-worktree": { type: "boolean", default: false },
     publish: { type: "boolean", default: false },
+    host: { type: "string" },
+    port: { type: "string" },
   },
 });
 
@@ -41,6 +44,7 @@ Usage:
   etnpilot graph symbols <file> [--database path]
   etnpilot graph impact <file...> [--depth number] [--database path]
   etnpilot graph stats [--database path]
+  etnpilot webhook serve [--root directory] [--host address] [--port number]
   etnpilot doctor
 `);
   process.exit(0);
@@ -127,6 +131,19 @@ if (command === "init") {
   } finally {
     graph.close();
   }
+} else if (command === "webhook" && subcommand === "serve") {
+  const port = values.port === undefined ? undefined : Number.parseInt(values.port, 10);
+  if (port !== undefined && (!Number.isInteger(port) || port < 0 || port > 65_535)) {
+    throw new Error("--port must be an integer between 0 and 65535.");
+  }
+  const webhookServer = await createGitLabWebhookServer({ root: resolve(values.root) });
+  const address = await webhookServer.listen({ host: values.host, port });
+  const displayHost = typeof address === "object" ? address.address : values.host;
+  const displayPort = typeof address === "object" ? address.port : port;
+  console.log(`ETNPilot GitLab webhook receiver listening on http://${displayHost}:${displayPort}`);
+  await waitForShutdown();
+  await webhookServer.drain();
+  await webhookServer.close();
 } else if (command === "doctor") {
   const checks = {
     node: process.versions.node,
@@ -137,6 +154,18 @@ if (command === "init") {
   process.exit(checks.git ? 0 : 1);
 } else {
   throw new Error(`Unknown command: ${positionals.join(" ")}`);
+}
+
+function waitForShutdown() {
+  return new Promise((resolveShutdown) => {
+    const shutdown = () => {
+      process.off("SIGINT", shutdown);
+      process.off("SIGTERM", shutdown);
+      resolveShutdown();
+    };
+    process.once("SIGINT", shutdown);
+    process.once("SIGTERM", shutdown);
+  });
 }
 
 async function commandExists(commandName) {
