@@ -11,8 +11,7 @@ export class WorktreeManager {
   async create({ name, branch, startPoint = "HEAD" }) {
     assertRef(name, "worktree name");
     assertRef(branch, "branch");
-    const path = resolve(this.worktreeRoot, name);
-    if (!path.startsWith(`${this.worktreeRoot}${sep}`)) throw new Error("Worktree path escapes its root.");
+    const path = this.#path(name);
     await mkdir(dirname(path), { recursive: true });
     await git(["worktree", "add", "-b", branch, path, startPoint], { cwd: this.repositoryRoot });
     return { name, branch, path };
@@ -26,6 +25,24 @@ export class WorktreeManager {
         return [key, parts.join(" ") || true];
       }),
     ));
+  }
+
+  async removeIfClean(name) {
+    assertRef(name, "worktree name");
+    const path = this.#path(name);
+    const status = await git(["status", "--porcelain"], { cwd: path });
+    if (status.stdout) {
+      return { removed: false, name, path, reason: "dirty-worktree", status: status.stdout };
+    }
+    await git(["worktree", "remove", path], { cwd: this.repositoryRoot });
+    await git(["worktree", "prune"], { cwd: this.repositoryRoot });
+    return { removed: true, name, path };
+  }
+
+  #path(name) {
+    const path = resolve(this.worktreeRoot, name);
+    if (!path.startsWith(`${this.worktreeRoot}${sep}`)) throw new Error("Worktree path escapes its root.");
+    return path;
   }
 }
 

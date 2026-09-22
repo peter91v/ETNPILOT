@@ -5,6 +5,7 @@ import { parseArgs } from "node:util";
 import { CodeGraph } from "../src/codegraph/codegraph.js";
 import { initializeProject } from "../src/config/init.js";
 import { createTerminalApprovalHandler } from "../src/core/terminal-approval.js";
+import { WorktreeManager } from "../src/git/worktrees.js";
 import { runProject } from "../src/runtime/project-runner.js";
 
 const { positionals, values } = parseArgs({
@@ -15,6 +16,9 @@ const { positionals, values } = parseArgs({
     root: { type: "string", short: "r", default: "." },
     agent: { type: "string", short: "a" },
     "in-place": { type: "boolean", default: false },
+    worktree: { type: "boolean", default: false },
+    "no-worktree": { type: "boolean", default: false },
+    "cleanup-worktree": { type: "boolean", default: false },
     publish: { type: "boolean", default: false },
   },
 });
@@ -26,7 +30,10 @@ if (values.help || !command) {
 
 Usage:
   etnpilot init [directory]
-  etnpilot run <task> [--agent name] [--root directory] [--in-place] [--publish]
+  etnpilot run <task> [--agent name] [--root directory]
+    [--worktree | --no-worktree] [--cleanup-worktree] [--publish]
+  etnpilot worktree list [--root directory]
+  etnpilot worktree cleanup <name> [--root directory]
   etnpilot graph build [directory] [--database path]
   etnpilot graph dependencies <file> [--database path]
   etnpilot doctor
@@ -38,16 +45,28 @@ if (command === "init") {
   const result = await initializeProject(resolve(subcommand ?? "."));
   console.log(`Initialized ETNPilot in ${result.root}`);
 } else if (command === "run") {
+  if (values.worktree && (values["no-worktree"] || values["in-place"])) {
+    throw new Error("Choose either --worktree or --no-worktree, not both.");
+  }
   const task = [subcommand, ...rest].filter(Boolean).join(" ");
+  const worktree = values.worktree ? true : (values["no-worktree"] || values["in-place"]) ? false : undefined;
   const result = await runProject({
     root: resolve(values.root),
     input: task,
     agent: values.agent,
-    inPlace: values["in-place"],
+    worktree,
+    cleanupPolicy: values["cleanup-worktree"] ? "on-success" : undefined,
     publish: values.publish,
     approvalHandler: createTerminalApprovalHandler(),
   });
   console.log(JSON.stringify(result, null, 2));
+} else if (command === "worktree" && subcommand === "list") {
+  const manager = new WorktreeManager(resolve(values.root));
+  console.log(JSON.stringify(await manager.list(), null, 2));
+} else if (command === "worktree" && subcommand === "cleanup") {
+  if (!rest[0]) throw new Error("A worktree name is required.");
+  const manager = new WorktreeManager(resolve(values.root));
+  console.log(JSON.stringify(await manager.removeIfClean(rest[0]), null, 2));
 } else if (command === "graph" && subcommand === "build") {
   const root = resolve(rest[0] ?? ".");
   const database = resolve(values.database ?? ".etnpilot/state/codegraph.sqlite");

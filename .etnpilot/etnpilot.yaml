@@ -21,6 +21,10 @@ approval:
   allow: [read]
   requireHuman: [write, shell, network]
 
+workspace:
+  mode: worktree
+  cleanup: never
+
 plugins: []
 
 workflow:

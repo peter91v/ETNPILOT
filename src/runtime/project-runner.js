@@ -16,7 +16,9 @@ export async function runProject({
   root = process.cwd(),
   input,
   agent,
+  worktree,
   inPlace = false,
+  cleanupPolicy,
   publish = false,
   env = process.env,
   providerFactories,
@@ -27,12 +29,16 @@ export async function runProject({
   if (!input) throw new TypeError("A task prompt is required.");
   const repositoryRoot = resolve(root);
   const bootstrapConfig = await loadConfig(join(repositoryRoot, ".etnpilot", "etnpilot.yaml"), env);
+  const useWorktree = worktree ?? (inPlace ? false : bootstrapConfig.workspace?.mode !== "in-place");
+  const effectiveCleanupPolicy = cleanupPolicy ?? bootstrapConfig.workspace?.cleanup ?? "never";
+  assertCleanupPolicy(effectiveCleanupPolicy);
   const runId = createRunId();
   const branch = `etnpilot/run-${runId}`;
   const worktreeManager = new WorktreeManager(repositoryRoot);
-  const workspace = inPlace
-    ? { name: "in-place", branch: await currentBranch(repositoryRoot), path: repositoryRoot }
-    : await worktreeManager.create({ name: `run-${runId}`, branch, startPoint: bootstrapConfig.git?.baseRef ?? "HEAD" });
+  const workspace = useWorktree
+    ? await worktreeManager.create({ name: `run-${runId}`, branch, startPoint: bootstrapConfig.git?.baseRef ?? "HEAD" })
+    : { name: "in-place", branch: await currentBranch(repositoryRoot), path: repositoryRoot, managed: false };
+  if (useWorktree) workspace.managed = true;
 
   const receiptPath = join(repositoryRoot, ".etnpilot", "state", "runs", `${runId}.jsonl`);
   const receiptStore = new JsonlReceiptStore(receiptPath);
@@ -98,7 +104,7 @@ export async function runProject({
   });
   let mergeRequest;
   if (publish) {
-    if (inPlace) throw new Error("Publishing an in-place run is not allowed.");
+    if (!useWorktree) throw new Error("Publishing an in-place run is not allowed.");
     const publisher = new GitLabPublisher({
       baseUrl: config.git?.baseUrl,
       project: config.git?.project,
@@ -115,7 +121,13 @@ export async function runProject({
       receipt: receiptHash,
     });
   }
-  return { runId, workspace, receiptPath, receiptHash, summary, git: gitEvidence, mergeRequest };
+  const cleanup = await cleanupWorkspace({
+    policy: effectiveCleanupPolicy,
+    published: Boolean(mergeRequest),
+    workspace,
+    manager: worktreeManager,
+  });
+  return { runId, workspace, cleanup, receiptPath, receiptHash, summary, git: gitEvidence, mergeRequest };
 }
 
 function normalizeWorkflow(workflow = {}, defaultAgent) {
@@ -159,4 +171,17 @@ function createRunId() {
 
 function firstLine(value) {
   return String(value).split("\n", 1)[0].slice(0, 72);
+}
+
+function assertCleanupPolicy(policy) {
+  if (!["never", "on-success", "after-publish"].includes(policy)) {
+    throw new Error(`Unsupported workspace cleanup policy: '${policy}'.`);
+  }
+}
+
+async function cleanupWorkspace({ policy, published, workspace, manager }) {
+  if (!workspace.managed) return { requested: false, removed: false, reason: "in-place-run" };
+  const requested = policy === "on-success" || (policy === "after-publish" && published);
+  if (!requested) return { requested: false, removed: false, reason: "retained-by-policy" };
+  return { requested: true, ...await manager.removeIfClean(workspace.name) };
 }

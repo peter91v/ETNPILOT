@@ -30,7 +30,7 @@ Providers do not own orchestration policy. GitLab does not own local Git state. 
 
 ## Runnable workflow
 
-`etnpilot run` creates a run branch and worktree, loads the project's manifests, registers configured providers, and executes the configured DAG. Agent steps receive the outputs of their dependencies. Check steps execute argument arrays directly without a shell. A failed dependency blocks downstream work, while successful runs retain their worktree for human inspection. Publishing to GitLab requires the explicit `--publish` flag and a token supplied through the environment.
+`etnpilot run` loads the project's manifests, registers configured providers, and executes the configured DAG. The user chooses an isolated worktree or the current checkout through configuration or CLI flags. Agent steps receive the outputs of their dependencies. Check steps execute argument arrays directly without a shell. A failed dependency blocks downstream work. Cleanup is policy-driven and never removes a worktree with uncommitted changes. Publishing to GitLab requires the explicit `--publish` flag and a token supplied through the environment.
 
 ## Security defaults
 

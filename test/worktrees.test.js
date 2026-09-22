@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -19,4 +19,14 @@ test("worktree manager creates an isolated feature branch", async () => {
   const worktrees = await manager.list();
   assert.match(created.path, /.etnpilot\/worktrees\/run-1$/);
   assert.equal(worktrees.length, 2);
+
+  await writeFile(join(created.path, "pending.txt"), "not committed\n");
+  const retained = await manager.removeIfClean("run-1");
+  assert.equal(retained.removed, false);
+  assert.equal(retained.reason, "dirty-worktree");
+
+  await unlink(join(created.path, "pending.txt"));
+  const removed = await manager.removeIfClean("run-1");
+  assert.equal(removed.removed, true);
+  assert.equal((await manager.list()).length, 1);
 });
