@@ -1,9 +1,10 @@
 export class GitLabClient {
-  constructor({ baseUrl, token, fetchImpl = globalThis.fetch }) {
+  constructor({ baseUrl, token, fetchImpl = globalThis.fetch, statusRetryDelayMs = 100 }) {
     if (!baseUrl) throw new TypeError("GitLab baseUrl is required.");
     this.baseUrl = baseUrl.replace(/\/$/, "");
     this.token = token;
     this.fetch = fetchImpl;
+    this.statusRetryDelayMs = statusRetryDelayMs;
   }
 
   project(project) {
@@ -35,6 +36,33 @@ export class GitLabClient {
     return this.request("POST", `/projects/${encodeURIComponent(project)}/merge_requests/${iid}/notes`, { body });
   }
 
+  addIssueNote(project, iid, body) {
+    return this.request("POST", `/projects/${encodeURIComponent(project)}/issues/${iid}/notes`, { body });
+  }
+
+  async setCommitStatus(project, sha, { state, name = "etnpilot", description, ref, targetUrl, pipelineId } = {}) {
+    if (!sha) throw new TypeError("A commit SHA is required.");
+    if (!["pending", "running", "success", "failed", "canceled", "skipped"].includes(state)) {
+      throw new TypeError(`Unsupported GitLab commit status: '${state}'.`);
+    }
+    const body = {
+      state,
+      name,
+      ...(description ? { description: description.slice(0, 255) } : {}),
+      ...(ref ? { ref } : {}),
+      ...(targetUrl ? { target_url: targetUrl } : {}),
+      ...(pipelineId ? { pipeline_id: pipelineId } : {}),
+    };
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        return await this.request("POST", `/projects/${encodeURIComponent(project)}/statuses/${encodeURIComponent(sha)}`, body);
+      } catch (error) {
+        if (!(error instanceof GitLabApiError) || error.status !== 409 || attempt === 3) throw error;
+        await new Promise((resolve) => setTimeout(resolve, this.statusRetryDelayMs * attempt));
+      }
+    }
+  }
+
   pipelines(project, ref) {
     return this.request("GET", `/projects/${encodeURIComponent(project)}/pipelines`, ref ? { ref } : undefined);
   }
@@ -50,7 +78,22 @@ export class GitLabClient {
       options.body = JSON.stringify(body);
     }
     const response = await this.fetch(url, options);
-    if (!response.ok) throw new Error(`GitLab API failed (${response.status}): ${await response.text()}`);
+    if (!response.ok) {
+      const responseBody = await response.text();
+      throw new GitLabApiError(`GitLab API failed (${response.status}): ${responseBody}`, {
+        status: response.status,
+        body: responseBody,
+      });
+    }
     return response.status === 204 ? undefined : response.json();
+  }
+}
+
+export class GitLabApiError extends Error {
+  constructor(message, { status, body } = {}) {
+    super(message);
+    this.name = "GitLabApiError";
+    this.status = status;
+    this.body = body;
   }
 }

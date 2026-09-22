@@ -19,6 +19,7 @@ The repository is in early development. The first runnable vertical slice provid
 - an explicit `--publish` path for reviewed GitLab draft merge requests.
 - a versioned plugin SDK with declared capabilities and dependency ordering;
 - capability-aware provider routing with conservative, auditable fallback.
+- an authenticated GitLab issue webhook that queues deduplicated workflow runs and synchronizes external commit status.
 
 ## Quick start
 
@@ -120,6 +121,41 @@ export default definePlugin({
 Available capabilities are `provider.register`, `agent.register`, `skill.register`,
 `prompt.register`, `instruction.add`, and `event.subscribe`. Optional `dependencies` are plugin
 names; ETNPilot loads them in dependency order and rejects missing or cyclic dependency graphs.
+
+## GitLab issue trigger
+
+The webhook receiver is opt-in. Enable `git.issueTrigger`, require a dedicated label, and start the
+local receiver:
+
+```yaml
+git:
+  issueTrigger:
+    enabled: true
+    labels: [etnpilot]
+    actions: [open, reopen]
+    allowedUsers: [your-gitlab-username]
+    allowConfidential: false
+    publish: false
+    syncStatus: true
+    comment: false
+```
+
+```bash
+export ETNPILOT_GITLAB_WEBHOOK_SIGNING_SECRET='whsec_...'
+export ETNPILOT_GITLAB_TOKEN='...'
+etnpilot webhook serve --root .
+```
+
+For GitLab versions without signing-token support, configure
+`ETNPILOT_GITLAB_WEBHOOK_TOKEN` instead. Newer signing tokens authenticate the raw body and reject
+stale timestamps. Delivery IDs are claimed atomically under `.etnpilot/state/webhooks`, so GitLab
+retries do not launch duplicate workflows. The receiver binds to `127.0.0.1` by default; expose it
+only through a TLS reverse proxy or another authenticated private route.
+
+The normal approval policy remains active for webhook runs. With the default policy, writes, shell
+commands, and network calls are rejected because no interactive approver is attached. Do not weaken
+that policy for an internet-facing receiver; use the planned approval inbox for unattended runs.
+See [docs/gitlab-webhooks.md](docs/gitlab-webhooks.md) for setup and operational details.
 
 ## Repository strategy
 

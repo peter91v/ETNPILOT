@@ -12,6 +12,7 @@
 | Code intelligence | Files, symbols, imports, impact queries | embedded SQLite code graph |
 | Evidence | Tamper-evident run results | SHA-256 JSONL receipts |
 | Workflow | Dependency ordering, retries, limits, cancellation | bounded DAG scheduler |
+| Webhooks | Authenticated, deduplicated event intake | GitLab issue receiver and delivery store |
 
 ## Execution flow
 
@@ -46,6 +47,15 @@ can access only its declared registration and event APIs.
 
 The code graph stores file fingerprints, extracted declarations, raw imports, and resolved project paths in SQLite. Indexing uses file metadata and hashes to update only changed or deleted files. Reverse traversal reports direct and transitive consumers with their depth and highlights test files. Workflow receipts include the graph state before and after execution plus impact evidence for changed source files.
 
+## GitLab event intake
+
+GitLab issue events pass through raw-body authentication, timestamp validation, project and label
+filters, and an atomic delivery claim before entering the serialized workflow queue. The HTTP
+receiver acknowledges accepted work before model execution. External commit statuses expose
+running, successful, or failed outcomes in GitLab; a transient status-update conflict is retried.
+Webhook execution reuses the same workflow, worktree, approval, receipt, provider-routing, and
+publishing boundaries as an interactive run.
+
 ## Security defaults
 
 - read-only actions may be approved by policy;
@@ -54,3 +64,4 @@ The code graph stores file fingerprints, extracted declarations, raw imports, an
 - worktrees are confined to `.etnpilot/worktrees/`;
 - secrets come from environment variables or a future secret-provider plugin;
 - receipts contain execution metadata, but should never include raw credentials.
+- webhook signing secrets and API tokens are read from the environment and never persisted.

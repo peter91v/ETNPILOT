@@ -18,6 +18,21 @@ git:
   baseUrl: https://gitlab.metropol-it.at
   remote: gitlab
   targetBranch: main
+  webhook:
+    path: /webhooks/gitlab
+    host: 127.0.0.1
+    port: 8787
+    maxBodyBytes: 1048576
+    timestampToleranceSeconds: 300
+    deliveryStore: .etnpilot/state/webhooks
+  issueTrigger:
+    enabled: false
+    labels: [etnpilot]
+    actions: [open, reopen]
+    allowConfidential: false
+    publish: false
+    syncStatus: true
+    comment: false
 codegraph:
   database: .etnpilot/state/codegraph.sqlite
   autoIndex: true
