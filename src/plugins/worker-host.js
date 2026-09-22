@@ -21,6 +21,10 @@ const SDK_URL = pathToFileURL(join(RUNTIME_DIRECTORY, "sdk.js")).href;
 
 export class PluginWorkerHost {
   #child;
+  #allowedNetworkPrefixes;
+  #allowedSecretNames;
+  #authorizeNetwork;
+  #capabilities = new Set();
   #closed = false;
   #cleanupCallbacks = [];
   #closing = false;
@@ -35,8 +39,11 @@ export class PluginWorkerHost {
   #pluginName;
   #subscriptions = [];
   #exitPromise;
+  #fetchImpl;
+  #networkControllers = new Set();
+  #resolveSecretInput;
 
-  static async start({ specifier, projectRoot = process.cwd(), limits, moduleRoot, signal } = {}) {
+  static async start({ specifier, projectRoot = process.cwd(), limits, moduleRoot, signal, resources = {} } = {}) {
     if (typeof specifier !== "string" || specifier.length === 0) {
       throw new TypeError("A plugin worker requires a module specifier.");
     }
@@ -50,6 +57,7 @@ export class PluginWorkerHost {
       entryPath,
       readRoots,
       limits: normalizedLimits,
+      resources,
     });
     try {
       const manifest = await host.#request("inspect", {
@@ -59,6 +67,7 @@ export class PluginWorkerHost {
         callbackTimeoutMs: normalizedLimits.callTimeoutMs,
       }, { timeoutMs: normalizedLimits.setupTimeoutMs, signal });
       host.#pluginName = manifest?.name;
+      host.#capabilities = new Set(manifest?.capabilities ?? []);
       return { host, manifest };
     } catch (error) {
       await host.close(error);
@@ -66,8 +75,13 @@ export class PluginWorkerHost {
     }
   }
 
-  constructor({ projectRoot, entryPath, readRoots, limits = DEFAULT_PLUGIN_LIMITS }) {
+  constructor({ projectRoot, entryPath, readRoots, limits = DEFAULT_PLUGIN_LIMITS, resources = {} }) {
     this.#limits = limits;
+    this.#allowedNetworkPrefixes = normalizeNetworkPrefixes(resources.networkAllow ?? []);
+    this.#allowedSecretNames = new Set(normalizeStringList(resources.secretInputs ?? [], "Plugin secretInputs"));
+    this.#authorizeNetwork = resources.authorizeNetwork;
+    this.#fetchImpl = resources.fetchImpl ?? globalThis.fetch;
+    this.#resolveSecretInput = resources.resolveSecret;
     const major = Number(process.versions.node.split(".", 1)[0]);
     const permissionFlag = major >= 23 ? "--permission" : "--experimental-permission";
     const execArgv = [
@@ -90,6 +104,8 @@ export class PluginWorkerHost {
       this.#child.once("exit", (code, signal) => {
         this.#closed = true;
         clearInterval(this.#memoryTimer);
+        for (const controller of this.#networkControllers) controller.abort();
+        this.#networkControllers.clear();
         const error = this.#fatalError ?? (!this.#closing
           ? new PluginProcessError(
             `Plugin worker exited unexpectedly (code ${code ?? "none"}, signal ${signal ?? "none"}).`,
@@ -143,6 +159,24 @@ export class PluginWorkerHost {
       capabilities: Object.freeze([...(action.value.capabilities ?? [])]),
       invoke: (context) => this.invokeProvider(action.value.name, context),
     });
+  }
+
+  createSecretProvider(action) {
+    return Object.freeze({
+      apiVersion: 1,
+      name: action.value.name,
+      type: "plugin",
+      resolve: (key, context) => this.resolveSecretProvider(action.value.name, key, context),
+    });
+  }
+
+  async resolveSecretProvider(provider, key, context = {}) {
+    const result = await this.#request("secret.resolve", {
+      provider,
+      key,
+      context: cloneIpcValue({ name: context.name }, this.#limits.maxMessageBytes, "Plugin secret context"),
+    }, { timeoutMs: this.#limits.callTimeoutMs, signal: context.signal });
+    return result === null ? undefined : result;
   }
 
   async invokeProvider(provider, context) {
@@ -310,23 +344,44 @@ export class PluginWorkerHost {
 
   async #handleHostCall(message) {
     try {
-      const invocation = this.#invocations.get(message.params?.invocationId);
-      if (!invocation) throw new PluginProcessError("Plugin referenced an unknown invocation.", {
-        code: "plugin_protocol_error",
-        plugin: this.#pluginName,
-      });
       let result;
-      if (message.method === "runtime.approve") {
-        if (typeof invocation.approve !== "function") throw new Error("Approval is unavailable for this invocation.");
-        result = await invocation.approve(message.params.request);
-      } else if (message.method === "runtime.spawn") {
-        if (typeof invocation.spawn !== "function") throw new Error("Subagent spawning is unavailable for this invocation.");
-        result = await invocation.spawn(message.params.agent, message.params.input);
+      if (message.method === "runtime.secret.resolve") {
+        this.#requireCapability("secret.read");
+        const name = message.params?.name;
+        if (typeof name !== "string" || !this.#allowedSecretNames.has(name)) {
+          throw new PluginProcessError("Plugin requested a secret input outside its allowlist.", {
+            code: "plugin_permission_denied",
+            plugin: this.#pluginName,
+          });
+        }
+        if (typeof this.#resolveSecretInput !== "function") {
+          throw new PluginProcessError("Plugin secret inputs are unavailable.", {
+            code: "plugin_permission_denied",
+            plugin: this.#pluginName,
+          });
+        }
+        result = await this.#resolveSecretInput(name);
+      } else if (message.method === "runtime.network.fetch") {
+        this.#requireCapability("network.fetch");
+        result = await this.#performNetworkRequest(message.params?.request);
       } else {
-        throw new PluginProcessError(`Plugin requested unknown host method '${message.method}'.`, {
+        const invocation = this.#invocations.get(message.params?.invocationId);
+        if (!invocation) throw new PluginProcessError("Plugin referenced an unknown invocation.", {
           code: "plugin_protocol_error",
           plugin: this.#pluginName,
         });
+        if (message.method === "runtime.approve") {
+          if (typeof invocation.approve !== "function") throw new Error("Approval is unavailable for this invocation.");
+          result = await invocation.approve(message.params.request);
+        } else if (message.method === "runtime.spawn") {
+          if (typeof invocation.spawn !== "function") throw new Error("Subagent spawning is unavailable for this invocation.");
+          result = await invocation.spawn(message.params.agent, message.params.input);
+        } else {
+          throw new PluginProcessError(`Plugin requested unknown host method '${message.method}'.`, {
+            code: "plugin_protocol_error",
+            plugin: this.#pluginName,
+          });
+        }
       }
       this.#send({
         v: PLUGIN_PROTOCOL_VERSION,
@@ -343,6 +398,81 @@ export class PluginWorkerHost {
         ok: false,
         error: serializeError(error),
       });
+    }
+  }
+
+  #requireCapability(capability) {
+    if (!this.#capabilities.has(capability)) {
+      throw new PluginProcessError(`Plugin did not declare capability '${capability}'.`, {
+        code: "plugin_permission_denied",
+        plugin: this.#pluginName,
+      });
+    }
+  }
+
+  async #performNetworkRequest(value) {
+    const request = normalizeNetworkRequest(value, this.#limits.maxMessageBytes);
+    const target = new URL(request.url);
+    if (!this.#allowedNetworkPrefixes.some((prefix) => matchesNetworkPrefix(target, prefix))) {
+      throw new PluginProcessError("Plugin network target is outside its allowlist.", {
+        code: "plugin_permission_denied",
+        plugin: this.#pluginName,
+      });
+    }
+    if (typeof this.#authorizeNetwork !== "function") {
+      throw new PluginProcessError("Plugin network access requires an authorization policy.", {
+        code: "plugin_permission_denied",
+        plugin: this.#pluginName,
+      });
+    }
+    const decision = await this.#authorizeNetwork({
+      kind: "network",
+      url: `${target.origin}${target.pathname}`,
+    }, this.#pluginName);
+    if (decision?.kind !== "approve-once") {
+      throw new PluginProcessError("Plugin network access was not approved.", {
+        code: "plugin_permission_denied",
+        plugin: this.#pluginName,
+      });
+    }
+    if (typeof this.#fetchImpl !== "function") {
+      throw new PluginProcessError("No host network implementation is available.", {
+        code: "plugin_process_error",
+        plugin: this.#pluginName,
+      });
+    }
+    const controller = new AbortController();
+    this.#networkControllers.add(controller);
+    const timer = setTimeout(() => controller.abort(), this.#limits.callTimeoutMs);
+    timer.unref?.();
+    try {
+      const response = await this.#fetchImpl(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body: request.body,
+        redirect: "manual",
+        signal: controller.signal,
+      });
+      if (response.status >= 300 && response.status < 400) {
+        throw new PluginProcessError("Plugin network redirects are not permitted.", {
+          code: "plugin_permission_denied",
+          plugin: this.#pluginName,
+        });
+      }
+      return {
+        status: response.status,
+        body: await readBoundedBody(response, this.#limits.maxMessageBytes),
+      };
+    } catch (error) {
+      if (error instanceof PluginProcessError) throw error;
+      throw new PluginProcessError("Plugin network request failed.", {
+        code: controller.signal.aborted ? "plugin_timeout" : "plugin_network_error",
+        plugin: this.#pluginName,
+        cause: error,
+      });
+    } finally {
+      clearTimeout(timer);
+      this.#networkControllers.delete(controller);
     }
   }
 
@@ -395,6 +525,8 @@ export class PluginWorkerHost {
     this.#closing = true;
     this.#rejectPending(error);
     this.#disposeSubscriptions();
+    for (const controller of this.#networkControllers) controller.abort();
+    this.#networkControllers.clear();
     this.#child.kill("SIGKILL");
   }
 
@@ -455,6 +587,137 @@ export async function resolvePluginEntry(specifier, projectRoot) {
   });
   await assertEsmEntry(candidate);
   return candidate;
+}
+
+const PLUGIN_NETWORK_HEADERS = new Set([
+  "accept",
+  "content-type",
+  "x-vault-namespace",
+  "x-vault-token",
+]);
+
+function normalizeNetworkPrefixes(values) {
+  return normalizeStringList(values, "Plugin networkAllow").map((value) => {
+    let prefix;
+    try {
+      prefix = new URL(value);
+    } catch {
+      throw new TypeError("Plugin networkAllow entries must be absolute HTTPS URLs.");
+    }
+    if (prefix.protocol !== "https:" || !prefix.hostname || prefix.username || prefix.password
+      || prefix.search || prefix.hash) {
+      throw new TypeError("Plugin networkAllow entries must be credential-free HTTPS URL prefixes.");
+    }
+    const pathname = prefix.pathname.endsWith("/") ? prefix.pathname : `${prefix.pathname}/`;
+    return Object.freeze({ origin: prefix.origin, pathname });
+  });
+}
+
+function matchesNetworkPrefix(target, prefix) {
+  if (target.protocol !== "https:" || target.username || target.password || target.hash) return false;
+  const exactPath = prefix.pathname.slice(0, -1);
+  return target.origin === prefix.origin
+    && (target.pathname === exactPath || target.pathname.startsWith(prefix.pathname));
+}
+
+function normalizeNetworkRequest(value, maxBytes) {
+  if (!value || Array.isArray(value) || typeof value !== "object") {
+    throw new PluginProcessError("Plugin network request must be an object.", { code: "plugin_protocol_error" });
+  }
+  const unknown = Object.keys(value).find((key) => !["url", "method", "headers", "body"].includes(key));
+  if (unknown) {
+    throw new PluginProcessError(`Plugin network request has unknown field '${unknown}'.`, {
+      code: "plugin_protocol_error",
+    });
+  }
+  let target;
+  try {
+    target = new URL(value.url);
+  } catch {
+    throw new PluginProcessError("Plugin network request requires an absolute URL.", {
+      code: "plugin_protocol_error",
+    });
+  }
+  if (target.protocol !== "https:" || !target.hostname || target.username || target.password || target.hash) {
+    throw new PluginProcessError("Plugin network requests require credential-free HTTPS URLs.", {
+      code: "plugin_permission_denied",
+    });
+  }
+  const method = String(value.method ?? "GET").toUpperCase();
+  if (!["GET", "POST"].includes(method)) {
+    throw new PluginProcessError("Plugin network method is not permitted.", { code: "plugin_permission_denied" });
+  }
+  if (value.body !== undefined && typeof value.body !== "string") {
+    throw new PluginProcessError("Plugin network body must be a string.", { code: "plugin_protocol_error" });
+  }
+  if (method === "GET" && value.body !== undefined) {
+    throw new PluginProcessError("Plugin GET requests cannot contain a body.", { code: "plugin_protocol_error" });
+  }
+  if (value.body !== undefined && Buffer.byteLength(value.body) > maxBytes) {
+    throw new PluginProcessError("Plugin network body exceeds the RPC limit.", { code: "plugin_output_limit" });
+  }
+  const headers = {};
+  if (value.headers !== undefined) {
+    if (!value.headers || Array.isArray(value.headers) || typeof value.headers !== "object") {
+      throw new PluginProcessError("Plugin network headers must be an object.", { code: "plugin_protocol_error" });
+    }
+    for (const [rawName, headerValue] of Object.entries(value.headers)) {
+      const name = rawName.toLowerCase();
+      if (!PLUGIN_NETWORK_HEADERS.has(name) || typeof headerValue !== "string" || headerValue.length > 16_384) {
+        throw new PluginProcessError("Plugin network header is not permitted.", {
+          code: "plugin_permission_denied",
+        });
+      }
+      headers[name] = headerValue;
+    }
+  }
+  return Object.freeze({
+    url: target.href,
+    method,
+    headers: Object.freeze(headers),
+    ...(value.body === undefined ? {} : { body: value.body }),
+  });
+}
+
+async function readBoundedBody(response, maxBytes) {
+  if (!response || !Number.isInteger(response.status)) {
+    throw new PluginProcessError("Host network implementation returned an invalid response.", {
+      code: "plugin_network_error",
+    });
+  }
+  if (!response.body) return "";
+  if (typeof response.body.getReader === "function") {
+    const reader = response.body.getReader();
+    const chunks = [];
+    let size = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) {
+        await reader.cancel().catch(() => {});
+        throw new PluginProcessError("Plugin network response exceeds the RPC limit.", {
+          code: "plugin_output_limit",
+        });
+      }
+      chunks.push(Buffer.from(value));
+    }
+    return Buffer.concat(chunks, size).toString("utf8");
+  }
+  const body = await response.text();
+  if (Buffer.byteLength(body) > maxBytes) {
+    throw new PluginProcessError("Plugin network response exceeds the RPC limit.", {
+      code: "plugin_output_limit",
+    });
+  }
+  return body;
+}
+
+function normalizeStringList(value, label) {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || item.length === 0)) {
+    throw new TypeError(`${label} must be an array of non-empty strings.`);
+  }
+  return [...new Set(value)];
 }
 
 async function assertEsmEntry(path) {

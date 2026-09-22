@@ -49,7 +49,9 @@ Workers import and validate manifests without evaluating plugin code in the harn
 are returned as size-bounded JSON, checked against the declaration, dependency-ordered, and applied
 transactionally. Provider calls and subscribed events use request-correlated, size-limited RPC.
 Timeout, cancellation, output, memory, protocol, or process failures terminate the affected worker
-and unregister its event listeners.
+and unregister its event listeners and secret providers. Sensitive capabilities require both a
+manifest declaration and a host-side resource grant. Host-mediated HTTPS calls also pass operation
+policy before bounded I/O begins.
 
 ## Runnable workflow
 
@@ -87,9 +89,10 @@ pending wait. This is live-session continuation, not durable provider-session se
 Secret consumers request stable logical names from a resolver. A named reference selects one
 versioned provider and an opaque key. Built-in providers read only an explicit environment
 allow-list or regular files confined beneath a configured root. Resolution failures are normalized
-before they reach logs, and availability checks never return the value. Custom adapters implement
-the same contract, allowing external identity or secret systems without coupling them to the
-harness, GitLab client, or model-provider APIs.
+before they reach logs, and availability checks never return the value. The bundled Vault adapter
+runs behind the plugin worker boundary, obtains only its named workload identity input, and exposes
+only fields beneath configured Vault path prefixes. External secret storage remains independent
+from the harness, GitLab client, and model-provider APIs.
 
 Policy evaluation precedes both provider invocation and the approval handler. Operation rules match
 the operation kind plus optional agent, workspace-relative path, or URL hostname. Provider rules
@@ -112,6 +115,8 @@ completed provider call and before another workflow step can consume budget.
   module, heap/RSS, output, RPC, timeout, cancellation, and shutdown limits;
 - plugin entry points are ESM-only; CommonJS, native addons, WebAssembly modules, privileged
   built-ins, and global network clients are denied in workers;
+- plugin secret inputs and HTTPS prefixes require explicit grants; mediated requests are
+  policy-checked, redirect-free, method/header restricted, and size-bounded;
 - worktrees are confined to `.etnpilot/worktrees/`;
 - secret consumers use named references through the versioned provider boundary;
 - environment access can be allow-listed and file access is root-confined, size-limited, and

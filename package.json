@@ -4,7 +4,11 @@
   "description": "A provider-neutral, GitLab-first agent harness with proof-carrying execution and an embedded code graph.",
   "type": "module",
   "private": true,
-  "exports": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./plugin": "./src/plugins/sdk.js",
+    "./plugins/vault": "./src/plugins/vault.js"
+  },
   "bin": {
     "etnpilot": "bin/etnpilot.js"
   },

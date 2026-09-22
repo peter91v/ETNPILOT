@@ -17,6 +17,7 @@ const setTimeoutRaw = globalThis.setTimeout.bind(globalThis);
 const clearTimeoutRaw = globalThis.clearTimeout.bind(globalThis);
 const pending = new Map();
 const providers = new Map();
+const secretProviders = new Map();
 const listeners = new Map();
 let inspected = false;
 let setupComplete = false;
@@ -68,6 +69,7 @@ async function handleMessage(message) {
 
 async function dispatch(method, params) {
   if (method === "shutdown") {
+    if (setupComplete && typeof plugin.shutdown === "function") await plugin.shutdown();
     for (const request of pending.values()) request.reject(protocolError("Plugin worker is shutting down."));
     pending.clear();
     setTimeoutRaw(() => {
@@ -81,6 +83,7 @@ async function dispatch(method, params) {
   if (method === "setup") return setupPlugin(params);
   if (!setupComplete) throw protocolError("Plugin worker setup has not completed.");
   if (method === "provider.invoke") return invokeProvider(params);
+  if (method === "secret.resolve") return resolveSecret(params);
   if (method === "event.emit") return emitEvent(params);
   throw protocolError(`Unknown plugin RPC method '${method}'.`);
 }
@@ -132,6 +135,23 @@ function createBridge(actions) {
       actions.push({ type: "provider.register", value: { name: provider.name, capabilities } });
       return provider;
     },
+    registerSecretProvider(provider) {
+      if (!provider?.name || typeof provider.resolve !== "function") {
+        throw new TypeError("A plugin secret provider must expose name and resolve(key, context).");
+      }
+      if (secretProviders.has(provider.name)) {
+        throw new Error(`secret provider '${provider.name}' is already registered by this plugin.`);
+      }
+      secretProviders.set(provider.name, provider);
+      actions.push({ type: "secret.register", value: { name: provider.name } });
+      return provider;
+    },
+    resolveSecret(name) {
+      return callHost("runtime.secret.resolve", { name });
+    },
+    fetch(request) {
+      return callHost("runtime.network.fetch", { request });
+    },
     registerAgent(agent) {
       const value = cloneIpcValue(agent, maxMessageBytes, "Plugin agent");
       actions.push({ type: "agent.register", value });
@@ -172,6 +192,16 @@ async function invokeProvider(params) {
   }, new Set(["approve", "spawn"]));
   const result = await provider.invoke(context);
   return cloneIpcValue(result, maxMessageBytes, "Plugin provider result");
+}
+
+async function resolveSecret(params) {
+  const provider = secretProviders.get(params.provider);
+  if (!provider) throw protocolError(`Unknown plugin secret provider '${params.provider}'.`);
+  const result = await provider.resolve(params.key, deepFreeze(params.context ?? {}));
+  if (result !== undefined && typeof result !== "string") {
+    throw new TypeError(`Plugin secret provider '${params.provider}' returned an invalid value.`);
+  }
+  return cloneIpcValue(result ?? null, maxMessageBytes, "Plugin secret result");
 }
 
 async function emitEvent(params) {

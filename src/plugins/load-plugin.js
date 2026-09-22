@@ -3,6 +3,8 @@ import { normalizePluginLimits } from "./protocol.js";
 import { validatePluginManifest } from "./sdk.js";
 import { PluginWorkerHost } from "./worker-host.js";
 
+const BOOTSTRAP_CAPABILITIES = new Set(["secret.register", "secret.read", "network.fetch"]);
+
 export async function loadPlugin(specifier, harness, options = {}, runtime = {}) {
   const loaded = await loadPlugins([{ path: specifier, options }], harness, runtime.projectRoot ?? process.cwd(), runtime);
   return loaded[0];
@@ -23,8 +25,25 @@ export async function loadPlugins(entries, harness, projectRoot = process.cwd(),
         limits,
         moduleRoot: descriptor.moduleRoot,
         signal: runtime.signal,
+        resources: {
+          secretInputs: descriptor.secretInputs ?? [],
+          networkAllow: descriptor.networkAllow ?? [],
+          resolveSecret: runtime.secretResolver
+            ? (name) => runtime.secretResolver.get(name, { required: true })
+            : undefined,
+          fetchImpl: runtime.fetchImpl,
+          authorizeNetwork: (request, plugin) => harness.approveOperation(request, {
+            agent: `plugin:${plugin ?? "unknown"}`,
+            workspace: root,
+          }),
+        },
       });
       const manifest = validatePluginManifest(started.manifest);
+      if (runtime.bootstrap === true && manifest.capabilities.some((capability) => !BOOTSTRAP_CAPABILITIES.has(capability))) {
+        const error = new Error(`Bootstrap plugin '${manifest.name}' declares a non-bootstrap capability.`);
+        await started.host.close(error);
+        throw error;
+      }
       if (pending.some((item) => item.manifest.name === manifest.name) || harness.plugins.has(manifest.name)) {
         const error = new Error(`plugin '${manifest.name}' is already registered.`);
         await started.host.close(error);
@@ -79,6 +98,10 @@ function applyPlugin(item, harness, undo) {
       const provider = item.host.createProvider(action);
       const registered = harness.registerProvider(provider);
       recordUndo(item, undo, () => harness.providers.unregister(provider.name, registered));
+    } else if (action.type === "secret.register") {
+      const provider = item.host.createSecretProvider(action);
+      const registered = harness.registerSecretProvider(provider);
+      recordUndo(item, undo, () => harness.secrets.unregister(provider.name, registered));
     } else if (action.type === "agent.register") {
       const registered = harness.registerAgent(action.value);
       recordUndo(item, undo, () => harness.agents.unregister(action.value.name, registered));
@@ -123,6 +146,8 @@ function validateActions(actions, manifest) {
     if (action.type === "provider.register") {
       assertRegistrationName(action.value?.name, action.type, names);
       if (!Array.isArray(action.value?.capabilities)) throw new TypeError("Plugin provider capabilities must be an array.");
+    } else if (action.type === "secret.register") {
+      assertRegistrationName(action.value?.name, action.type, names);
     } else if (action.type === "agent.register") {
       assertRegistrationName(action.value?.name, action.type, names);
     } else if (["skill.register", "prompt.register"].includes(action.type)) {

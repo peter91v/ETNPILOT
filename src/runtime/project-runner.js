@@ -14,6 +14,7 @@ import { GitLabPublisher } from "../gitlab/publisher.js";
 import { registerConfiguredProviders } from "../providers/register.js";
 import { ProviderRouter } from "../providers/router.js";
 import { PolicyEngine } from "../policy/engine.js";
+import { loadPlugins } from "../plugins/load-plugin.js";
 import { WorkflowEngine } from "../workflow/engine.js";
 import { createSecretResolver } from "../secrets/resolver.js";
 import { createTelemetry } from "../observability/telemetry.js";
@@ -38,46 +39,68 @@ export async function runProject({
   const repositoryRoot = resolve(root);
   const bootstrapConfig = await loadConfig(join(repositoryRoot, ".etnpilot", "etnpilot.yaml"), env);
   const secrets = secretResolver ?? createSecretResolver({ root: repositoryRoot, config: bootstrapConfig, env });
-  const gitLabToken = await secrets.get("gitlab.apiToken", {
-    fallback: { provider: "env", key: "ETNPILOT_GITLAB_TOKEN" },
-  });
-  const telemetry = await createTelemetry({
-    root: repositoryRoot,
-    config: bootstrapConfig,
-    secretResolver: secrets,
-    fetchImpl,
-  });
   const useWorktree = worktree ?? (inPlace ? false : bootstrapConfig.workspace?.mode !== "in-place");
   const effectiveCleanupPolicy = cleanupPolicy ?? bootstrapConfig.workspace?.cleanup ?? "never";
   assertCleanupPolicy(effectiveCleanupPolicy);
-  if (publish) assertPublishable(useWorktree, bootstrapConfig, gitLabToken);
-  const receiptSigner = await loadReceiptSigner({
-    root: repositoryRoot,
-    config: bootstrapConfig,
-    env,
-    secretResolver: secrets,
-  });
   const runId = createRunId();
   const branch = `etnpilot/run-${runId}`;
   const worktreeManager = new WorktreeManager(repositoryRoot);
-  const workspace = useWorktree
-    ? await worktreeManager.create({ name: `run-${runId}`, branch, startPoint: bootstrapConfig.git?.baseRef ?? "HEAD" })
-    : { name: "in-place", branch: await currentBranch(repositoryRoot), path: repositoryRoot, managed: false };
-  if (useWorktree) workspace.managed = true;
-
   const receiptPath = join(repositoryRoot, ".etnpilot", "state", "runs", `${runId}.jsonl`);
-  const receiptStore = new JsonlReceiptStore(receiptPath, { signer: receiptSigner });
   const policy = new PolicyEngine(bootstrapConfig.policy);
   const harness = new Harness({
     approvalPolicy: new ApprovalPolicy(bootstrapConfig.approval, { policy }),
     approvalHandler,
-    receiptStore,
     policy,
-    telemetry,
+    secrets,
   });
   let config;
+  let gitLabToken;
+  let receiptSigner;
+  let receiptStore;
+  let telemetry;
+  let workspace;
   try {
-    ({ config } = await loadProject(harness, workspace.path, env, { signal }));
+    const bootstrapPlugins = (bootstrapConfig.plugins ?? []).filter(isBootstrapPlugin);
+    await loadPlugins(bootstrapPlugins, harness, repositoryRoot, {
+      isolation: bootstrapConfig.pluginIsolation,
+      signal,
+      secretResolver: secrets,
+      fetchImpl,
+      bootstrap: true,
+    });
+    gitLabToken = await secrets.get("gitlab.apiToken", {
+      fallback: { provider: "env", key: "ETNPILOT_GITLAB_TOKEN" },
+    });
+    if (publish) assertPublishable(useWorktree, bootstrapConfig, gitLabToken);
+    telemetry = await createTelemetry({
+      root: repositoryRoot,
+      config: bootstrapConfig,
+      secretResolver: secrets,
+      fetchImpl,
+    });
+    receiptSigner = await loadReceiptSigner({
+      root: repositoryRoot,
+      config: bootstrapConfig,
+      env,
+      secretResolver: secrets,
+    });
+    workspace = useWorktree
+      ? await worktreeManager.create({
+          name: `run-${runId}`,
+          branch,
+          startPoint: bootstrapConfig.git?.baseRef ?? "HEAD",
+        })
+      : { name: "in-place", branch: await currentBranch(repositoryRoot), path: repositoryRoot, managed: false };
+    if (useWorktree) workspace.managed = true;
+    receiptStore = new JsonlReceiptStore(receiptPath, { signer: receiptSigner });
+    harness.telemetry = telemetry;
+    harness.receiptStore = receiptStore;
+    ({ config } = await loadProject(harness, workspace.path, env, {
+      signal,
+      secretResolver: secrets,
+      fetchImpl,
+      bootstrapPluginsLoaded: true,
+    }));
     await registerConfiguredProviders(harness, config.providers, {
       workingDirectory: workspace.path,
       env,
@@ -382,6 +405,10 @@ function createCodegraph(repositoryRoot, config) {
   if (config.codegraph?.enabled === false || config.codegraph?.autoIndex === false) return null;
   const database = resolve(repositoryRoot, config.codegraph?.database ?? ".etnpilot/state/codegraph.sqlite");
   return { database, graph: new CodeGraph(database) };
+}
+
+function isBootstrapPlugin(entry) {
+  return entry && typeof entry === "object" && entry.bootstrap === true;
 }
 
 function isSourcePath(path) {

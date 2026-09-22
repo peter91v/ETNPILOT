@@ -3,6 +3,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { ApprovalPolicy } from "../src/core/approval-policy.js";
 import { Harness } from "../src/core/harness.js";
 import { loadPlugins } from "../src/plugins/load-plugin.js";
 import { normalizePluginLimits } from "../src/plugins/protocol.js";
@@ -69,6 +70,22 @@ test("plugin loader rejects missing and cyclic dependencies and cleans up worker
   );
 });
 
+test("bootstrap plugins are limited to secret and mediated network capabilities", async () => {
+  const root = await pluginDirectory("bootstrap-capabilities", {
+    "plugin.mjs": `export default {
+      apiVersion: 1, name: "early-instruction", version: "1.0.0", capabilities: ["instruction.add"],
+      setup(context) { context.addInstruction("too early"); }
+    };\n`,
+  });
+  const harness = new Harness();
+  await assert.rejects(
+    () => loadPlugins(["./plugin.mjs"], harness, root, { bootstrap: true }),
+    /declares a non-bootstrap capability/,
+  );
+  assert.deepEqual(harness.instructions, []);
+  await harness.close();
+});
+
 test("isolated providers use bounded bidirectional RPC", async () => {
   const root = await pluginDirectory("provider-rpc", {
     "plugin.mjs": `import { definePlugin } from "etnpilot";
@@ -132,6 +149,32 @@ test("plugin workers hide the host environment and deny filesystem, process, and
   await assert.rejects(() => loadPlugins(["./process.mjs"], new Harness(), root), /not permitted|restricted/);
   await assert.rejects(() => loadPlugins(["./network.mjs"], new Harness(), root), /network access is not permitted/i);
   delete process.env.ETNPILOT_TEST_SECRET;
+});
+
+test("host-mediated plugin networking rejects unsafe targets, methods, headers, and redirects", async () => {
+  const root = await pluginDirectory("mediated-network", {
+    "http.mjs": networkPlugin("http", `{ url: "http://vault.example.test/v1/secret" }`),
+    "method.mjs": networkPlugin("method", `{ url: "https://vault.example.test/v1/secret", method: "DELETE" }`),
+    "header.mjs": networkPlugin("header", `{ url: "https://vault.example.test/v1/secret", headers: { authorization: "hidden" } }`),
+    "redirect.mjs": networkPlugin("redirect", `{ url: "https://vault.example.test/v1/secret" }`),
+  });
+  const descriptor = (path) => ({ path, networkAllow: ["https://vault.example.test/v1/"] });
+  const runtime = {
+    fetchImpl: async () => new Response(null, {
+      status: 302,
+      headers: { location: "https://evil.example.test/collect" },
+    }),
+  };
+  for (const path of ["./http.mjs", "./method.mjs", "./header.mjs", "./redirect.mjs"]) {
+    const harness = new Harness({
+      approvalPolicy: new ApprovalPolicy({ allow: ["network"], requireHuman: [] }),
+    });
+    await assert.rejects(
+      () => loadPlugins([descriptor(path)], harness, root, runtime),
+      (error) => error.code === "plugin_permission_denied",
+    );
+    await harness.close();
+  }
 });
 
 test("plugin workers reject CommonJS entry points that could bypass import controls", async () => {
@@ -241,4 +284,11 @@ async function pluginDirectory(name, files) {
   await writeFile(join(root, "package.json"), '{"type":"module"}\n');
   await Promise.all(Object.entries(files).map(([path, content]) => writeFile(join(root, path), content)));
   return root;
+}
+
+function networkPlugin(name, request) {
+  return `export default {
+    apiVersion: 1, name: "${name}", version: "1.0.0", capabilities: ["network.fetch"],
+    async setup(context) { await context.fetch(${request}); }
+  };\n`;
 }
