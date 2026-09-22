@@ -3,4 +3,5 @@ provider: github-copilot
 model: auto
 promptRef: orchestrator
 skills: [evidence, codegraph]
+requires: [chat]
 subagents: [builder, reviewer]

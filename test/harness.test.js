@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Harness } from "../src/core/harness.js";
 import { ApprovalPolicy } from "../src/core/approval-policy.js";
+import { definePlugin } from "../src/plugins/sdk.js";
 
 test("harness composes plugins, agents, providers, and subagents", async () => {
   const receipts = [];
@@ -32,12 +33,15 @@ test("harness composes plugins, agents, providers, and subagents", async () => {
 
 test("plugins can register capabilities exactly once", async () => {
   const harness = new Harness();
-  const plugin = {
+  const plugin = definePlugin({
+    apiVersion: 1,
     name: "example",
-    setup(target) {
-      target.prompts.register("review", "Review carefully.");
+    version: "1.0.0",
+    capabilities: ["prompt.register"],
+    setup(context) {
+      context.registerPrompt("review", "Review carefully.");
     },
-  };
+  });
   await harness.use(plugin);
   assert.equal(harness.prompts.get("review"), "Review carefully.");
   await assert.rejects(() => harness.use(plugin), /already registered/);

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createCopilotProvider } from "../src/providers/copilot.js";
+import { createOpenAICompatibleProvider } from "../src/providers/openai-compatible.js";
+import { ProviderError } from "../src/providers/router.js";
 
 test("Copilot provider uses the SDK session and preserves safe approvals", async () => {
   const calls = [];
@@ -27,4 +29,35 @@ test("Copilot provider uses the SDK session and preserves safe approvals", async
   });
   assert.deepEqual(result, { text: "answer:hello", sessionId: "session-1" });
   assert.deepEqual(calls.slice(-2), [["disconnect"], ["stop"]]);
+});
+
+test("Copilot provider marks post-delivery failures unsafe to replay", async () => {
+  class CopilotClient {
+    async start() {}
+    async createSession() {
+      return {
+        sendAndWait: async () => { throw new Error("connection lost"); },
+        disconnect: async () => {},
+      };
+    }
+    async stop() {}
+  }
+  const provider = createCopilotProvider({ importer: async () => ({ CopilotClient }) });
+  await assert.rejects(
+    () => provider.invoke({
+      agent: { prompt: "System" }, input: "hello", instructions: [], skills: [], approve: async () => ({ kind: "reject" }),
+    }),
+    (error) => error instanceof ProviderError && error.retryable && !error.safeToRetry,
+  );
+});
+
+test("OpenAI-compatible provider exposes retry-safe transient failures", async () => {
+  const provider = createOpenAICompatibleProvider({
+    baseUrl: "https://models.example.invalid/v1",
+    fetchImpl: async () => ({ ok: false, status: 503, text: async () => "busy" }),
+  });
+  await assert.rejects(
+    () => provider.invoke({ agent: { prompt: "System" }, input: "hello", instructions: [] }),
+    (error) => error instanceof ProviderError && error.code === "http_503" && error.safeToRetry,
+  );
 });
