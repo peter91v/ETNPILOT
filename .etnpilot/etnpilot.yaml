@@ -1,0 +1,21 @@
+version: 1
+defaultProvider: github-copilot
+
+providers:
+  github-copilot:
+    type: github-copilot
+    model: auto
+
+git:
+  host: gitlab
+  baseUrl: https://gitlab.metropol-it.at
+  project: varga.pter91/etnpilot
+
+codegraph:
+  database: .etnpilot/state/codegraph.sqlite
+
+approval:
+  allow: [read]
+  requireHuman: [write, shell, network]
+
+plugins: []
