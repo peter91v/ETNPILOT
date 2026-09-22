@@ -161,16 +161,20 @@ export class CodeGraph {
 
   dependencies(path) {
     return this.database.prepare(`
-      SELECT target, target_path AS targetPath, kind
-      FROM edges WHERE source_path = ? ORDER BY target
-    `).all(normalizePath(path)).map((row) => ({ ...row }));
+      SELECT edges.target, edges.target_path AS targetPath, edges.kind,
+        CASE WHEN edges.target_path IS NOT NULL AND files.path IS NULL THEN 1 ELSE 0 END AS dangling
+      FROM edges LEFT JOIN files ON files.path = edges.target_path
+      WHERE edges.source_path = ? ORDER BY edges.target
+    `).all(normalizePath(path)).map(markDangling);
   }
 
   dependents(path) {
     return this.database.prepare(`
-      SELECT source_path AS source, target, kind
-      FROM edges WHERE target_path = ? ORDER BY source_path
-    `).all(normalizePath(path)).map((row) => ({ ...row }));
+      SELECT edges.source_path AS source, edges.target, edges.kind,
+        CASE WHEN files.path IS NULL THEN 1 ELSE 0 END AS dangling
+      FROM edges LEFT JOIN files ON files.path = edges.target_path
+      WHERE edges.target_path = ? ORDER BY edges.source_path
+    `).all(normalizePath(path)).map(markDangling);
   }
 
   symbols(path) {
@@ -199,7 +203,10 @@ export class CodeGraph {
         queue.push(next);
       }
     }
-    const files = [...impacted.values()].sort((a, b) => a.depth - b.depth || a.path.localeCompare(b.path));
+    const isKnownFile = this.database.prepare("SELECT 1 FROM files WHERE path = ?");
+    const files = [...impacted.values()]
+      .sort((a, b) => a.depth - b.depth || a.path.localeCompare(b.path))
+      .map((entry) => ({ ...entry, dangling: isKnownFile.get(entry.path) === undefined }));
     return {
       changed: paths.map(normalizePath),
       files,
@@ -292,6 +299,10 @@ function resolveDependency(sourcePath, target, files) {
     if (files.has(candidate)) return candidate;
   }
   return null;
+}
+
+function markDangling(row) {
+  return { ...row, dangling: row.dangling === 1 };
 }
 
 function normalizePath(path) {

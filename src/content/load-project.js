@@ -4,10 +4,10 @@ import YAML from "yaml";
 import { loadConfig } from "../config/load.js";
 import { loadPlugin } from "../plugins/load-plugin.js";
 
-export async function loadProject(harness, root = process.cwd()) {
+export async function loadProject(harness, root = process.cwd(), env = process.env) {
   const projectRoot = resolve(root);
   const etnRoot = join(projectRoot, ".etnpilot");
-  const config = await loadConfig(join(etnRoot, "etnpilot.yaml"));
+  const config = await loadConfig(join(etnRoot, "etnpilot.yaml"), env);
 
   for (const file of await filesIn(join(etnRoot, "instructions"), ".md")) {
     harness.instructions.push(await readFile(file, "utf8"));

@@ -33,6 +33,7 @@ export async function runProject({
   const useWorktree = worktree ?? (inPlace ? false : bootstrapConfig.workspace?.mode !== "in-place");
   const effectiveCleanupPolicy = cleanupPolicy ?? bootstrapConfig.workspace?.cleanup ?? "never";
   assertCleanupPolicy(effectiveCleanupPolicy);
+  if (publish) assertPublishable(useWorktree, bootstrapConfig, env);
   const runId = createRunId();
   const branch = `etnpilot/run-${runId}`;
   const worktreeManager = new WorktreeManager(repositoryRoot);
@@ -48,7 +49,7 @@ export async function runProject({
     approvalHandler,
     receiptStore,
   });
-  const { config } = await loadProject(harness, workspace.path);
+  const { config } = await loadProject(harness, workspace.path, env);
   registerConfiguredProviders(harness, config.providers, {
     workingDirectory: workspace.path,
     env,
@@ -62,6 +63,7 @@ export async function runProject({
     maxSteps: workflow.maxSteps,
     events: harness.events,
   });
+  const publisher = publish ? createPublisher(config, env, fetchImpl) : undefined;
   const codegraph = createCodegraph(repositoryRoot, config);
   let codegraphBefore;
   if (codegraph) {
@@ -137,15 +139,7 @@ export async function runProject({
     summary,
   });
   let mergeRequest;
-  if (publish) {
-    if (!useWorktree) throw new Error("Publishing an in-place run is not allowed.");
-    const publisher = new GitLabPublisher({
-      baseUrl: config.git?.baseUrl,
-      project: config.git?.project,
-      remote: config.git?.remote ?? "gitlab",
-      token: env.ETNPILOT_GITLAB_TOKEN,
-      fetchImpl,
-    });
+  if (publisher) {
     mergeRequest = await publisher.publish({
       cwd: workspace.path,
       branch,
@@ -224,6 +218,22 @@ function createRunId() {
 
 function firstLine(value) {
   return String(value).split("\n", 1)[0].slice(0, 72);
+}
+
+function assertPublishable(useWorktree, config, env) {
+  if (!useWorktree) throw new Error("Publishing an in-place run is not allowed.");
+  if (!config.git?.project) throw new Error("Publishing requires 'git.project' in .etnpilot/etnpilot.yaml.");
+  if (!env.ETNPILOT_GITLAB_TOKEN) throw new Error("ETNPILOT_GITLAB_TOKEN is required for GitLab publishing.");
+}
+
+function createPublisher(config, env, fetchImpl) {
+  return new GitLabPublisher({
+    baseUrl: config.git?.baseUrl,
+    project: config.git?.project,
+    remote: config.git?.remote ?? "gitlab",
+    token: env.ETNPILOT_GITLAB_TOKEN,
+    fetchImpl,
+  });
 }
 
 function createCodegraph(repositoryRoot, config) {
