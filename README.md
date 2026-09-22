@@ -21,6 +21,7 @@ The repository is in early development. The first runnable vertical slice provid
 - capability-aware provider routing with conservative, auditable fallback.
 - an authenticated GitLab issue webhook backed by a durable SQLite workflow queue with leases,
   checkpoints, cancellation, and conservative restart recovery.
+- optional Ed25519 signatures for sealed, independently verifiable receipt chains.
 
 ## Quick start
 
@@ -31,6 +32,17 @@ npm run etnpilot -- init .
 npm run etnpilot -- graph build .
 npm test
 ```
+
+Optionally create a receipt-signing key and enable `receipts.signing` in the generated configuration:
+
+```bash
+etnpilot receipt keygen --root .
+etnpilot receipt verify .etnpilot/state/runs/<run-id>.jsonl --root .
+```
+
+The private key stays in the ignored `.etnpilot/keys/` directory. The shareable public key
+fingerprint is written into signed receipts and GitLab evidence notes. See
+[docs/signed-receipts.md](docs/signed-receipts.md).
 
 ## Code intelligence
 

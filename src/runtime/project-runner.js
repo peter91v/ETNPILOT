@@ -5,6 +5,7 @@ import { loadProject } from "../content/load-project.js";
 import { ApprovalPolicy } from "../core/approval-policy.js";
 import { Harness } from "../core/harness.js";
 import { JsonlReceiptStore } from "../core/receipt-store.js";
+import { loadReceiptSigner } from "../core/receipt-signing.js";
 import { runCheck } from "../checks/runner.js";
 import { CodeGraph } from "../codegraph/codegraph.js";
 import { git } from "../git/command.js";
@@ -36,6 +37,7 @@ export async function runProject({
   const effectiveCleanupPolicy = cleanupPolicy ?? bootstrapConfig.workspace?.cleanup ?? "never";
   assertCleanupPolicy(effectiveCleanupPolicy);
   if (publish) assertPublishable(useWorktree, bootstrapConfig, env);
+  const receiptSigner = await loadReceiptSigner({ root: repositoryRoot, config: bootstrapConfig, env });
   const runId = createRunId();
   const branch = `etnpilot/run-${runId}`;
   const worktreeManager = new WorktreeManager(repositoryRoot);
@@ -45,7 +47,7 @@ export async function runProject({
   if (useWorktree) workspace.managed = true;
 
   const receiptPath = join(repositoryRoot, ".etnpilot", "state", "runs", `${runId}.jsonl`);
-  const receiptStore = new JsonlReceiptStore(receiptPath);
+  const receiptStore = new JsonlReceiptStore(receiptPath, { signer: receiptSigner });
   const harness = new Harness({
     approvalPolicy: new ApprovalPolicy(bootstrapConfig.approval),
     approvalHandler,
@@ -100,8 +102,9 @@ export async function runProject({
     }, { signal, context: { runId, workspace } });
   } catch (error) {
     summary = error.workflow ?? { status: "failed", error: error.message };
-    await receiptStore.append({
+    const receiptHash = await receiptStore.append({
       type: "workflow",
+      terminal: true,
       runId,
       status: "failed",
       durationMs: Date.now() - startedAt,
@@ -109,7 +112,17 @@ export async function runProject({
       summary,
     });
     codegraph?.graph.close();
-    error.run = { runId, workspace, receiptPath, summary };
+    error.run = {
+      runId,
+      workspace,
+      receiptPath,
+      receiptHash,
+      receiptProof: receiptSigner ? {
+        algorithm: receiptSigner.algorithm,
+        keyId: receiptSigner.keyId,
+      } : undefined,
+      summary,
+    };
     throw error;
   }
 
@@ -133,6 +146,7 @@ export async function runProject({
   }
   const receiptHash = await receiptStore.append({
     type: "workflow",
+    terminal: true,
     runId,
     status: summary.status,
     durationMs: Date.now() - startedAt,
@@ -150,6 +164,10 @@ export async function runProject({
       title: `ETNPilot: ${firstLine(input)}`,
       description: `Automated ETNPilot run \`${runId}\`. Review the attached evidence before merging.`,
       receipt: receiptHash,
+      receiptProof: receiptSigner ? {
+        algorithm: receiptSigner.algorithm,
+        keyId: receiptSigner.keyId,
+      } : undefined,
     });
   }
   const cleanup = await cleanupWorkspace({
@@ -164,6 +182,10 @@ export async function runProject({
     cleanup,
     receiptPath,
     receiptHash,
+    receiptProof: receiptSigner ? {
+      algorithm: receiptSigner.algorithm,
+      keyId: receiptSigner.keyId,
+    } : undefined,
     summary,
     git: gitEvidence,
     codegraph: codegraphEvidence,

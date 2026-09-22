@@ -14,8 +14,8 @@ test("init keeps run state and worktrees out of the repository", async () => {
   const ignore = await readFile(join(root, ".etnpilot", ".gitignore"), "utf8");
   assert.match(ignore, /^state\/$/m);
   assert.match(ignore, /^worktrees\/$/m);
+  assert.match(ignore, /^keys\/$/m);
 
-  // A generated receipt and code graph must not show up as untracked changes.
   await writeFile(join(root, ".etnpilot", "state", "run.jsonl"), "{}\n");
   await writeFile(join(root, ".etnpilot", "state", "codegraph.sqlite"), "");
   const status = await git(["status", "--porcelain"], { cwd: root });

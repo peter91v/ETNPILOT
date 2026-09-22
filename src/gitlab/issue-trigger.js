@@ -77,6 +77,7 @@ export class GitLabIssueTrigger {
         phase: "workflow-completed",
         runId: result.runId,
         receiptHash: result.receiptHash,
+        receiptProof: result.receiptProof,
       });
       const resultUrl = result.mergeRequest?.web_url ?? targetUrl;
       await this.#syncStatus(project, baseSha, {
@@ -91,6 +92,7 @@ export class GitLabIssueTrigger {
       return {
         runId: result.runId,
         receiptHash: result.receiptHash,
+        receiptProof: result.receiptProof,
         mergeRequest: result.mergeRequest?.web_url,
         status: "succeeded",
       };
@@ -138,6 +140,9 @@ function completionNote(result, deliveryId) {
     `ETNPilot completed delivery \`${deliveryId}\` as run \`${result.runId}\`.`,
     `Verification receipt: \`${result.receiptHash}\`.`,
   ];
+  if (result.receiptProof) {
+    lines.push(`Signature: ${result.receiptProof.algorithm} with key \`${result.receiptProof.keyId}\`.`);
+  }
   if (result.mergeRequest?.web_url) lines.push(`Draft merge request: ${result.mergeRequest.web_url}`);
   else lines.push("Publishing was disabled; the run workspace was retained according to cleanup policy.");
   return lines.join("\n\n");

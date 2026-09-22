@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 
+import { access } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { CodeGraph } from "../src/codegraph/codegraph.js";
 import { initializeProject } from "../src/config/init.js";
 import { loadConfig } from "../src/config/load.js";
 import { ApprovalInbox } from "../src/core/approval-inbox.js";
+import { verifyReceiptFile } from "../src/core/receipt-store.js";
+import { generateReceiptKeyPair, loadReceiptVerifiers } from "../src/core/receipt-signing.js";
 import { createTerminalApprovalHandler } from "../src/core/terminal-approval.js";
 import { WorktreeManager } from "../src/git/worktrees.js";
 import { createGitLabWebhookServer } from "../src/gitlab/webhook-server.js";
@@ -32,6 +35,12 @@ const { positionals, values } = parseArgs({
     actor: { type: "string" },
     reason: { type: "string" },
     force: { type: "boolean", default: false },
+    "private-key": { type: "string" },
+    "public-key": { type: "string", multiple: true },
+    "require-signatures": { type: "boolean", default: false },
+    "allow-unsigned": { type: "boolean", default: false },
+    "require-terminal": { type: "boolean", default: false },
+    "allow-incomplete": { type: "boolean", default: false },
   },
 });
 
@@ -61,6 +70,9 @@ Usage:
   etnpilot queue show <id>
   etnpilot queue resume <id> [--force]
   etnpilot queue cancel <id> [--actor name] [--reason text]
+  etnpilot receipt keygen [--private-key path] [--public-key path]
+  etnpilot receipt verify <file> [--public-key path]
+    [--require-signatures | --allow-unsigned] [--require-terminal | --allow-incomplete]
   etnpilot doctor
 `);
   process.exit(0);
@@ -206,6 +218,36 @@ if (command === "init") {
       reason: values.reason,
     }), null, 2));
   });
+} else if (command === "receipt" && subcommand === "keygen") {
+  const publicKeys = values["public-key"] ?? [];
+  if (publicKeys.length > 1) throw new Error("Receipt key generation accepts one --public-key path.");
+  const root = resolve(values.root);
+  const result = await generateReceiptKeyPair({
+    privateKeyPath: resolve(root, values["private-key"] ?? ".etnpilot/keys/receipt-signing-private.pem"),
+    publicKeyPath: resolve(root, publicKeys[0] ?? ".etnpilot/receipt-signing-public.pem"),
+  });
+  console.log(JSON.stringify(result, null, 2));
+} else if (command === "receipt" && subcommand === "verify") {
+  if (!rest[0]) throw new Error("A receipt file is required.");
+  if (values["require-signatures"] && values["allow-unsigned"]) {
+    throw new Error("Choose either --require-signatures or --allow-unsigned, not both.");
+  }
+  if (values["require-terminal"] && values["allow-incomplete"]) {
+    throw new Error("Choose either --require-terminal or --allow-incomplete, not both.");
+  }
+  const publicKeyPaths = await resolveReceiptPublicKeys(resolve(values.root), values["public-key"] ?? []);
+  const verifiers = await loadReceiptVerifiers(publicKeyPaths);
+  const requireSignatures = values["require-signatures"]
+    || (publicKeyPaths.length > 0 && !values["allow-unsigned"]);
+  const requireTerminal = values["require-terminal"]
+    || (publicKeyPaths.length > 0 && !values["allow-incomplete"]);
+  const result = await verifyReceiptFile(resolve(rest[0]), {
+    verifiers,
+    requireSignatures,
+    requireTerminal,
+  });
+  console.log(JSON.stringify(result, null, 2));
+  if (!result.valid) process.exitCode = 1;
 } else if (command === "doctor") {
   const checks = {
     node: process.versions.node,
@@ -216,6 +258,21 @@ if (command === "init") {
   process.exit(checks.git ? 0 : 1);
 } else {
   throw new Error(`Unknown command: ${positionals.join(" ")}`);
+}
+
+async function resolveReceiptPublicKeys(root, explicitPaths) {
+  if (explicitPaths.length > 0) return explicitPaths.map((path) => resolve(path));
+  const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml")).catch((error) => {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  });
+  const configured = config?.receipts?.signing?.publicKeyFile;
+  if (!configured) return [];
+  const path = resolve(root, configured);
+  return access(path).then(() => [path], (error) => {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  });
 }
 
 async function withWorkflowQueue(root, operation) {

@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
 import { mkdir, appendFile, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { verifyReceiptSignature } from "./receipt-signing.js";
 
 export class JsonlReceiptStore {
-  constructor(path) {
+  constructor(path, { signer } = {}) {
     this.path = path;
+    this.signer = signer;
     this.pending = Promise.resolve();
   }
 
@@ -15,23 +17,134 @@ export class JsonlReceiptStore {
   }
 
   async #append(receipt) {
+    assertReceiptPayload(receipt);
     await mkdir(dirname(this.path), { recursive: true });
-    const previousHash = await this.#lastHash();
-    const payload = { ...receipt, previousHash };
+    const previous = await this.#lastEntry();
+    if (previous?.terminal === true) throw new Error("Cannot append to a sealed receipt chain.");
+    const previousHash = previous?.hash ?? null;
+    const payload = {
+      ...receipt,
+      previousHash,
+      ...(this.signer ? { proof: this.signer.proof } : {}),
+    };
     const canonical = JSON.stringify(payload);
     const hash = createHash("sha256").update(canonical).digest("hex");
-    await appendFile(this.path, `${JSON.stringify({ ...payload, hash })}\n`, "utf8");
+    const signature = this.signer?.sign(hash);
+    await appendFile(this.path, `${JSON.stringify({
+      ...payload,
+      hash,
+      ...(signature ? { signature } : {}),
+    })}\n`, "utf8");
     return hash;
   }
 
-  async #lastHash() {
+  async #lastEntry() {
     const content = await readFile(this.path, "utf8").catch((error) => {
       if (error.code === "ENOENT") return "";
       throw error;
     });
     const lastLine = content.trim().split("\n").filter(Boolean).at(-1);
-    if (!lastLine) return null;
-    const parsed = JSON.parse(lastLine);
-    return parsed.hash ?? null;
+    return lastLine ? JSON.parse(lastLine) : undefined;
+  }
+}
+
+export async function verifyReceiptFile(path, {
+  verifiers = new Map(),
+  requireSignatures = false,
+  requireTerminal = false,
+} = {}) {
+  let content;
+  try {
+    content = await readFile(path, "utf8");
+  } catch (error) {
+    return verificationFailure("file-read-failed", { message: error.message });
+  }
+  const lines = content.split("\n");
+  if (lines.at(-1) === "") lines.pop();
+  if (lines.length === 0) return verificationFailure("empty-file");
+  let previousHash = null;
+  let signed = 0;
+  let unsigned = 0;
+  let terminal = false;
+  for (let index = 0; index < lines.length; index += 1) {
+    const lineNumber = index + 1;
+    let entry;
+    try {
+      entry = JSON.parse(lines[index]);
+    } catch {
+      return verificationFailure("invalid-json", { line: lineNumber, entries: index, signed, unsigned });
+    }
+    if (!entry || Array.isArray(entry) || typeof entry !== "object") {
+      return verificationFailure("invalid-entry", { line: lineNumber, entries: index, signed, unsigned });
+    }
+    const { hash, signature, ...payload } = entry;
+    const expectedHash = createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+    if (hash !== expectedHash) {
+      return verificationFailure("hash-mismatch", { line: lineNumber, entries: index, signed, unsigned });
+    }
+    if (payload.previousHash !== previousHash) {
+      return verificationFailure("chain-mismatch", { line: lineNumber, entries: index, signed, unsigned });
+    }
+    if (payload.proof || signature) {
+      const proof = verifyReceiptSignature({ ...payload, hash, signature }, verifiers);
+      if (!proof.valid) {
+        return verificationFailure(proof.reason, {
+          line: lineNumber,
+          keyId: proof.keyId,
+          entries: index,
+          signed,
+          unsigned,
+        });
+      }
+      signed += 1;
+    } else {
+      if (requireSignatures) {
+        return verificationFailure("signature-required", { line: lineNumber, entries: index, signed, unsigned });
+      }
+      unsigned += 1;
+    }
+    previousHash = hash;
+    terminal = payload.terminal === true;
+    if (terminal && index !== lines.length - 1) {
+      return verificationFailure("entries-after-terminal", {
+        line: lineNumber,
+        entries: index + 1,
+        signed,
+        unsigned,
+      });
+    }
+  }
+  if (requireTerminal && !terminal) {
+    return verificationFailure("terminal-receipt-required", {
+      entries: lines.length,
+      signed,
+      unsigned,
+      lastHash: previousHash,
+    });
+  }
+  return {
+    valid: true,
+    entries: lines.length,
+    signed,
+    unsigned,
+    terminal,
+    lastHash: previousHash,
+    keyIds: [...new Set(lines.map((line) => JSON.parse(line).proof?.keyId).filter(Boolean))],
+  };
+}
+
+function verificationFailure(reason, details = {}) {
+  return { valid: false, reason, ...details };
+}
+
+function assertReceiptPayload(receipt) {
+  if (!receipt || Array.isArray(receipt) || typeof receipt !== "object") {
+    throw new TypeError("A receipt must be an object.");
+  }
+  for (const field of ["previousHash", "proof", "hash", "signature"]) {
+    if (Object.hasOwn(receipt, field)) throw new Error(`Receipt field '${field}' is reserved.`);
+  }
+  if (Object.hasOwn(receipt, "terminal") && typeof receipt.terminal !== "boolean") {
+    throw new TypeError("Receipt field 'terminal' must be boolean.");
   }
 }
