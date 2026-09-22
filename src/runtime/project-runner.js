@@ -6,6 +6,7 @@ import { ApprovalPolicy } from "../core/approval-policy.js";
 import { Harness } from "../core/harness.js";
 import { JsonlReceiptStore } from "../core/receipt-store.js";
 import { runCheck } from "../checks/runner.js";
+import { CodeGraph } from "../codegraph/codegraph.js";
 import { git } from "../git/command.js";
 import { WorktreeManager } from "../git/worktrees.js";
 import { GitLabPublisher } from "../gitlab/publisher.js";
@@ -53,7 +54,6 @@ export async function runProject({
     env,
     factories: providerFactories,
   });
-
   const workflow = normalizeWorkflow(config.workflow, agent ?? config.defaultAgent ?? "orchestrator");
   const engine = new WorkflowEngine({
     concurrency: workflow.concurrency,
@@ -62,6 +62,21 @@ export async function runProject({
     maxSteps: workflow.maxSteps,
     events: harness.events,
   });
+  const codegraph = createCodegraph(repositoryRoot, config);
+  let codegraphBefore;
+  if (codegraph) {
+    try {
+      codegraphBefore = await codegraph.graph.indexDirectory(workspace.path);
+      harness.instructions.push([
+        "ETNPilot code intelligence is available through the embedded code graph.",
+        `Database: ${codegraph.database}`,
+        "Use dependency, dependent, symbol, and impact queries before broad edits.",
+      ].join("\n"));
+    } catch (error) {
+      codegraph.graph.close();
+      throw error;
+    }
+  }
   const startedAt = Date.now();
   let summary;
   try {
@@ -88,11 +103,29 @@ export async function runProject({
       workspace,
       summary,
     });
+    codegraph?.graph.close();
     error.run = { runId, workspace, receiptPath, summary };
     throw error;
   }
 
   const gitEvidence = await collectGitEvidence(workspace.path);
+  let codegraphEvidence;
+  if (codegraph) {
+    try {
+      const update = await codegraph.graph.indexDirectory(workspace.path);
+      const sourceChanges = gitEvidence.changedPaths.filter(isSourcePath);
+      codegraphEvidence = {
+        database: codegraph.database,
+        before: codegraphBefore,
+        after: update,
+        impact: sourceChanges.length > 0
+          ? codegraph.graph.impact(sourceChanges, { maxDepth: config.codegraph?.maxImpactDepth ?? 20 })
+          : { changed: [], files: [], tests: [], maxDepth: config.codegraph?.maxImpactDepth ?? 20 },
+      };
+    } finally {
+      codegraph.graph.close();
+    }
+  }
   const receiptHash = await receiptStore.append({
     type: "workflow",
     runId,
@@ -100,6 +133,7 @@ export async function runProject({
     durationMs: Date.now() - startedAt,
     workspace,
     git: gitEvidence,
+    codegraph: codegraphEvidence,
     summary,
   });
   let mergeRequest;
@@ -127,7 +161,17 @@ export async function runProject({
     workspace,
     manager: worktreeManager,
   });
-  return { runId, workspace, cleanup, receiptPath, receiptHash, summary, git: gitEvidence, mergeRequest };
+  return {
+    runId,
+    workspace,
+    cleanup,
+    receiptPath,
+    receiptHash,
+    summary,
+    git: gitEvidence,
+    codegraph: codegraphEvidence,
+    mergeRequest,
+  };
 }
 
 function normalizeWorkflow(workflow = {}, defaultAgent) {
@@ -153,12 +197,21 @@ function composeAgentInput(input, dependencies) {
 }
 
 async function collectGitEvidence(cwd) {
-  const [head, status, diff] = await Promise.all([
+  const [head, status, diff, changed, staged, untracked] = await Promise.all([
     git(["rev-parse", "HEAD"], { cwd }),
     git(["status", "--short"], { cwd }),
     git(["diff", "--stat"], { cwd }),
+    git(["diff", "--name-only", "HEAD", "--"], { cwd }),
+    git(["diff", "--cached", "--name-only", "--"], { cwd }),
+    git(["ls-files", "--others", "--exclude-standard"], { cwd }),
   ]);
-  return { head: head.stdout, status: status.stdout, diffStat: diff.stdout };
+  const changedPaths = [...new Set(
+    [changed.stdout, staged.stdout, untracked.stdout]
+      .flatMap((value) => value.split("\n"))
+      .filter(Boolean)
+      .map((path) => path.replaceAll("\\", "/")),
+  )].sort();
+  return { head: head.stdout, status: status.stdout, diffStat: diff.stdout, changedPaths };
 }
 
 async function currentBranch(cwd) {
@@ -171,6 +224,16 @@ function createRunId() {
 
 function firstLine(value) {
   return String(value).split("\n", 1)[0].slice(0, 72);
+}
+
+function createCodegraph(repositoryRoot, config) {
+  if (config.codegraph?.enabled === false || config.codegraph?.autoIndex === false) return null;
+  const database = resolve(repositoryRoot, config.codegraph?.database ?? ".etnpilot/state/codegraph.sqlite");
+  return { database, graph: new CodeGraph(database) };
+}
+
+function isSourcePath(path) {
+  return /\.(cjs|js|jsx|mjs|ts|tsx)$/i.test(path);
 }
 
 function assertCleanupPolicy(policy) {

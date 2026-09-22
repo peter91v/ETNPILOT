@@ -13,6 +13,7 @@ const { positionals, values } = parseArgs({
   options: {
     help: { type: "boolean", short: "h" },
     database: { type: "string", short: "d" },
+    depth: { type: "string" },
     root: { type: "string", short: "r", default: "." },
     agent: { type: "string", short: "a" },
     "in-place": { type: "boolean", default: false },
@@ -36,6 +37,10 @@ Usage:
   etnpilot worktree cleanup <name> [--root directory]
   etnpilot graph build [directory] [--database path]
   etnpilot graph dependencies <file> [--database path]
+  etnpilot graph dependents <file> [--database path]
+  etnpilot graph symbols <file> [--database path]
+  etnpilot graph impact <file...> [--depth number] [--database path]
+  etnpilot graph stats [--database path]
   etnpilot doctor
 `);
   process.exit(0);
@@ -83,6 +88,42 @@ if (command === "init") {
   const graph = new CodeGraph(database);
   try {
     console.log(JSON.stringify(graph.dependencies(rest[0]), null, 2));
+  } finally {
+    graph.close();
+  }
+} else if (command === "graph" && subcommand === "dependents") {
+  if (!rest[0]) throw new Error("A file path is required.");
+  const database = resolve(values.database ?? ".etnpilot/state/codegraph.sqlite");
+  const graph = new CodeGraph(database);
+  try {
+    console.log(JSON.stringify(graph.dependents(rest[0]), null, 2));
+  } finally {
+    graph.close();
+  }
+} else if (command === "graph" && subcommand === "symbols") {
+  if (!rest[0]) throw new Error("A file path is required.");
+  const database = resolve(values.database ?? ".etnpilot/state/codegraph.sqlite");
+  const graph = new CodeGraph(database);
+  try {
+    console.log(JSON.stringify(graph.symbols(rest[0]), null, 2));
+  } finally {
+    graph.close();
+  }
+} else if (command === "graph" && subcommand === "impact") {
+  if (rest.length === 0) throw new Error("At least one changed file is required.");
+  const maxDepth = values.depth === undefined ? 20 : Number.parseInt(values.depth, 10);
+  const database = resolve(values.database ?? ".etnpilot/state/codegraph.sqlite");
+  const graph = new CodeGraph(database);
+  try {
+    console.log(JSON.stringify(graph.impact(rest, { maxDepth }), null, 2));
+  } finally {
+    graph.close();
+  }
+} else if (command === "graph" && subcommand === "stats") {
+  const database = resolve(values.database ?? ".etnpilot/state/codegraph.sqlite");
+  const graph = new CodeGraph(database);
+  try {
+    console.log(JSON.stringify(graph.stats(), null, 2));
   } finally {
     graph.close();
   }

@@ -14,6 +14,8 @@ git:
   targetBranch: main
 codegraph:
   database: .etnpilot/state/codegraph.sqlite
+  autoIndex: true
+  maxImpactDepth: 20
 approval:
   allow: [read]
   requireHuman: [write, shell, network]
