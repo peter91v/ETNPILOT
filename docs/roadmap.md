@@ -36,7 +36,7 @@
 
 - [ ] OIDC/Vault secret-provider plugin
 - [ ] OpenTelemetry traces and cost accounting
-- [ ] Policy-as-code for tools, paths, networks, and providers
+- [x] Policy-as-code for tools, paths, networks, and providers
 - [ ] Process-level plugin isolation and resource limits
 - [x] GitLab webhook authentication and external pipeline status synchronization
 

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Harness } from "../src/core/harness.js";
 import { ProviderError, ProviderRouter } from "../src/providers/router.js";
+import { PolicyEngine } from "../src/policy/engine.js";
 
 test("router skips unavailable and incompatible providers", async () => {
   const harness = new Harness();
@@ -62,6 +63,26 @@ test("router never replays an unsafe provider failure", async () => {
   const router = new ProviderRouter(harness.providers, { defaults: ["primary", "backup"] });
   await assert.rejects(() => router.invoke({ agent: { name: "reviewer", requires: ["chat"] } }), /prompt may have run/);
   assert.equal(backupCalls, 0);
+});
+
+test("router skips providers denied by policy", async () => {
+  const harness = new Harness();
+  harness.registerProvider({ name: "blocked", capabilities: ["chat"], invoke: fail });
+  harness.registerProvider({ name: "approved", capabilities: ["chat"], invoke: async () => ({ text: "ok" }) });
+  const policy = new PolicyEngine({
+    providers: {
+      rules: [{ id: "approved-provider", effect: "allow", providers: ["approved"] }],
+    },
+  });
+  const router = new ProviderRouter(harness.providers, { defaults: ["blocked", "approved"] }, { policy });
+  const routed = await router.invoke({ agent: { name: "builder", requires: ["chat"] } });
+  assert.equal(routed.provider, "approved");
+  assert.deepEqual(routed.attempts[0], {
+    provider: "blocked",
+    status: "skipped",
+    reason: "policy-denied",
+    policy: { section: "providers", effect: "deny", default: true },
+  });
 });
 
 test("harness receipts record the provider selected by fallback", async () => {

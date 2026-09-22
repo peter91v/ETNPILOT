@@ -15,6 +15,7 @@ import { createGitLabWebhookServer } from "../src/gitlab/webhook-server.js";
 import { runProject } from "../src/runtime/project-runner.js";
 import { WorkflowQueue } from "../src/workflow/queue.js";
 import { createSecretResolver } from "../src/secrets/resolver.js";
+import { PolicyEngine } from "../src/policy/engine.js";
 
 const { positionals, values } = parseArgs({
   allowPositionals: true,
@@ -42,6 +43,10 @@ const { positionals, values } = parseArgs({
     "allow-unsigned": { type: "boolean", default: false },
     "require-terminal": { type: "boolean", default: false },
     "allow-incomplete": { type: "boolean", default: false },
+    kind: { type: "string" },
+    path: { type: "string" },
+    url: { type: "string" },
+    provider: { type: "string" },
   },
 });
 
@@ -75,6 +80,8 @@ Usage:
   etnpilot receipt verify <file> [--public-key path]
     [--require-signatures | --allow-unsigned] [--require-terminal | --allow-incomplete]
   etnpilot secret check <name> [--root directory]
+  etnpilot policy check (--kind kind [--path path | --url url] | --provider name)
+    [--agent name] [--root directory]
   etnpilot doctor
 `);
   process.exit(0);
@@ -258,6 +265,25 @@ if (command === "init") {
   const result = await resolver.check(rest[0]);
   console.log(JSON.stringify(result, null, 2));
   if (!result.available) process.exitCode = 1;
+} else if (command === "policy" && subcommand === "check") {
+  if (Boolean(values.kind) === Boolean(values.provider)) {
+    throw new Error("Specify either --kind or --provider.");
+  }
+  if (values.path && values.url) throw new Error("Choose either --path or --url.");
+  const root = resolve(values.root);
+  const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"));
+  const policy = new PolicyEngine(config.policy);
+  const result = values.provider
+    ? policy.evaluateProvider(values.provider, { agent: values.agent })
+    : policy.evaluateOperation({
+        kind: values.kind,
+        ...(values.path ? { fileName: values.path } : {}),
+        ...(values.url ? { url: values.url } : {}),
+      }, { agent: values.agent, workspace: root });
+  const report = result ?? { configured: false, reason: "No policy section is configured." };
+  console.log(JSON.stringify(report, null, 2));
+  const denied = values.provider ? result?.allowed === false : result?.kind === "reject";
+  if (denied || !result) process.exitCode = 1;
 } else if (command === "doctor") {
   const checks = {
     node: process.versions.node,
