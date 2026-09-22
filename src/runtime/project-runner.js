@@ -75,14 +75,20 @@ export async function runProject({
     policy,
     telemetry,
   });
-  const { config } = await loadProject(harness, workspace.path, env);
-  await registerConfiguredProviders(harness, config.providers, {
-    workingDirectory: workspace.path,
-    env,
-    secretResolver: secrets,
-    factories: providerFactories,
-  });
-  harness.setProviderRouter(new ProviderRouter(harness.providers, config.routing, { policy }));
+  let config;
+  try {
+    ({ config } = await loadProject(harness, workspace.path, env, { signal }));
+    await registerConfiguredProviders(harness, config.providers, {
+      workingDirectory: workspace.path,
+      env,
+      secretResolver: secrets,
+      factories: providerFactories,
+    });
+    harness.setProviderRouter(new ProviderRouter(harness.providers, config.routing, { policy }));
+  } catch (error) {
+    await harness.close();
+    throw error;
+  }
   const workflow = normalizeWorkflow(config.workflow, agent ?? config.defaultAgent ?? "orchestrator");
   const engine = new WorkflowEngine({
     concurrency: workflow.concurrency,
@@ -104,6 +110,7 @@ export async function runProject({
       ].join("\n"));
     } catch (error) {
       codegraph.graph.close();
+      await harness.close();
       throw error;
     }
   }
@@ -131,6 +138,7 @@ export async function runProject({
             workflowStep: step.id,
             workspace: workspace.path,
           },
+          signal: execution.signal,
         });
       }
       if (step.type === "check") {
@@ -166,6 +174,7 @@ export async function runProject({
       summary,
     });
     codegraph?.graph.close();
+    await harness.close();
     error.run = {
       runId,
       workspace,
@@ -180,6 +189,8 @@ export async function runProject({
     };
     throw error;
   }
+
+  await harness.close();
 
   const gitEvidence = await collectGitEvidence(workspace.path);
   let codegraphEvidence;

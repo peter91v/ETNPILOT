@@ -4,7 +4,7 @@ import YAML from "yaml";
 import { loadConfig } from "../config/load.js";
 import { loadPlugins } from "../plugins/load-plugin.js";
 
-export async function loadProject(harness, root = process.cwd(), env = process.env) {
+export async function loadProject(harness, root = process.cwd(), env = process.env, runtime = {}) {
   const projectRoot = resolve(root);
   const etnRoot = join(projectRoot, ".etnpilot");
   const config = await loadConfig(join(etnRoot, "etnpilot.yaml"), env);
@@ -26,7 +26,10 @@ export async function loadProject(harness, root = process.cwd(), env = process.e
       : manifest.prompt;
     harness.registerAgent({ ...manifest, prompt });
   }
-  await loadPlugins(config.plugins ?? [], harness, projectRoot);
+  await loadPlugins(config.plugins ?? [], harness, projectRoot, {
+    isolation: config.pluginIsolation,
+    signal: runtime.signal,
+  });
   return { root: projectRoot, config };
 }
 

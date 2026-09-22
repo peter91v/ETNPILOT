@@ -4,7 +4,8 @@
 
 | Area | Responsibility | Default implementation |
 |---|---|---|
-| Harness | Runs agents, subagents, plugins, events, approvals, receipts | `src/core/` |
+| Harness | Runs agents, subagents, events, approvals, receipts | `src/core/` |
+| Plugins | Capability-scoped extensions behind bounded worker-process RPC | `src/plugins/` |
 | Providers | Capability-aware model/agent runtime adapters and safe fallback | GitHub Copilot SDK, OpenAI-compatible |
 | Content | Instructions, skills, prompts, agent manifests | `.etnpilot/` |
 | Git | Safe local operations and isolated branches | native Git worktrees |
@@ -33,9 +34,10 @@ flowchart TD
 ```
 
 Providers do not own orchestration policy. GitLab does not own local Git state. Plugins receive a
-versioned, capability-scoped context and cannot silently replace an already registered component.
-These boundaries keep the runtime testable and prevent a model provider from becoming the
-architecture.
+versioned, capability-scoped context over validated RPC and cannot silently replace an already
+registered component. Plugin modules, setup functions, providers, and event listeners execute only
+in their dedicated worker process. These boundaries keep the runtime testable and prevent a model
+provider from becoming the architecture.
 
 Provider selection combines agent preferences, matching routing rules, and configured defaults.
 Each candidate must satisfy the required capability set. Fallback is intentionally conservative:
@@ -43,8 +45,11 @@ it only proceeds after a structured provider error declares the operation retrya
 replay. This prevents duplicate file changes or tool calls after an ambiguous failure.
 
 Plugin manifests declare their API version, version, dependencies, and required SDK capabilities.
-All manifests are validated before setup, dependencies are topologically ordered, and setup code
-can access only its declared registration and event APIs.
+Workers import and validate manifests without evaluating plugin code in the harness. Setup actions
+are returned as size-bounded JSON, checked against the declaration, dependency-ordered, and applied
+transactionally. Provider calls and subscribed events use request-correlated, size-limited RPC.
+Timeout, cancellation, output, memory, protocol, or process failures terminate the affected worker
+and unregister its event listeners.
 
 ## Runnable workflow
 
@@ -103,6 +108,10 @@ completed provider call and before another workflow step can consume budget.
 - read-only actions may be approved by policy;
 - writes, shell execution, and network access require a human decision;
 - subprocesses use argument arrays with `shell: false`;
+- configured plugins run in separate restricted processes with an empty environment and explicit
+  module, heap/RSS, output, RPC, timeout, cancellation, and shutdown limits;
+- plugin entry points are ESM-only; CommonJS, native addons, WebAssembly modules, privileged
+  built-ins, and global network clients are denied in workers;
 - worktrees are confined to `.etnpilot/worktrees/`;
 - secret consumers use named references through the versioned provider boundary;
 - environment access can be allow-listed and file access is root-confined, size-limited, and

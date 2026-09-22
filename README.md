@@ -25,6 +25,7 @@ The repository is in early development. The first runnable vertical slice provid
 - a versioned secret-provider API with policy-restricted environment and confined file backends.
 - deny-first policy-as-code for operation types, workspace paths, network hosts, and providers.
 - OTLP/HTTP traces with provider usage, configurable cost estimates, and workflow budgets.
+- one restricted worker process per plugin with bounded RPC, runtime, memory, and output.
 
 ## Quick start
 
@@ -221,7 +222,9 @@ failure behavior.
 
 ## Plugin SDK
 
-Plugins use a versioned manifest and receive only the APIs they declare:
+Plugins use a versioned manifest and receive only the APIs they declare. Configured plugins are
+imported and executed in dedicated worker processes; plugin code is never evaluated in the harness
+process:
 
 ```js
 import { definePlugin } from "etnpilot";
@@ -241,6 +244,33 @@ export default definePlugin({
 Available capabilities are `provider.register`, `agent.register`, `skill.register`,
 `prompt.register`, `instruction.add`, and `event.subscribe`. Optional `dependencies` are plugin
 names; ETNPilot loads them in dependency order and rejects missing or cyclic dependency graphs.
+
+Configure global worker limits and optional per-plugin overrides in `.etnpilot/etnpilot.yaml`:
+
+```yaml
+pluginIsolation:
+  setupTimeoutMs: 10000
+  callTimeoutMs: 30000
+  shutdownTimeoutMs: 1000
+  memoryMb: 128
+  maxOutputBytes: 65536
+  maxMessageBytes: 1048576
+  maxPendingRequests: 32
+  memoryPollIntervalMs: 100
+
+plugins:
+  - path: ./.etnpilot/plugins/team-guidance.mjs
+    options: { strict: true }
+    limits:
+      callTimeoutMs: 5000
+      memoryMb: 96
+```
+
+Plugin entries must be ECMAScript modules. The worker receives an empty environment, cannot import
+filesystem, process, subprocess, worker-thread, or network modules, and cannot use global network
+clients. Standard output, standard error, RPC messages, heap/RSS, setup, calls, cancellation, and
+shutdown are bounded. See [docs/plugin-isolation.md](docs/plugin-isolation.md) for the security and
+lifecycle contract.
 
 ## GitLab issue trigger
 

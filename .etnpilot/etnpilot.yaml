@@ -99,6 +99,16 @@ workspace:
   mode: worktree
   cleanup: never
 
+pluginIsolation:
+  setupTimeoutMs: 10000
+  callTimeoutMs: 30000
+  shutdownTimeoutMs: 1000
+  memoryMb: 128
+  maxOutputBytes: 65536
+  maxMessageBytes: 1048576
+  maxPendingRequests: 32
+  memoryPollIntervalMs: 100
+
 plugins: []
 
 workflow:

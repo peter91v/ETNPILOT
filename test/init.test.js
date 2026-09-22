@@ -31,6 +31,8 @@ test("init keeps run state and worktrees out of the repository", async () => {
   assert.equal(policy.evaluateProvider("github-copilot").allowed, true);
   assert.equal(config.observability.enabled, true);
   assert.equal(config.observability.otlp.enabled, false);
+  assert.equal(config.pluginIsolation.memoryMb, 128);
+  assert.equal(config.pluginIsolation.callTimeoutMs, 30000);
 });
 
 test("init never overwrites an existing configuration", async () => {
