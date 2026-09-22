@@ -1,0 +1,30 @@
+{
+  "name": "etnpilot",
+  "version": "0.1.0",
+  "description": "A provider-neutral, GitLab-first agent harness with proof-carrying execution and an embedded code graph.",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "etnpilot": "bin/etnpilot.js"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "check": "node --check bin/etnpilot.js && node --test test/*.test.js",
+    "etnpilot": "node bin/etnpilot.js"
+  },
+  "engines": {
+    "node": ">=22.12"
+  },
+  "dependencies": {
+    "yaml": "^2.8.1"
+  },
+  "peerDependencies": {
+    "@github/copilot-sdk": ">=1.0.14"
+  },
+  "peerDependenciesMeta": {
+    "@github/copilot-sdk": {
+      "optional": true
+    }
+  },
+  "license": "MIT"
+}

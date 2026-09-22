@@ -1,0 +1,3 @@
+[submodule "upstream/agentwerk"]
+	path = upstream/agentwerk
+	url = https://github.com/peter91v/agentwerk.git

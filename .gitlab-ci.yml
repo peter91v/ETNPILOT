@@ -1,0 +1,16 @@
+default:
+  image: node:24
+
+stages: [test]
+
+test:
+  stage: test
+  variables:
+    npm_config_cache: $CI_PROJECT_DIR/.npm
+  script:
+    - npm ci --omit=optional
+    - npm run check
+  cache:
+    key:
+      files: [package-lock.json]
+    paths: [.npm/]

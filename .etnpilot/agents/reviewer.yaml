@@ -1,0 +1,6 @@
+name: reviewer
+provider: github-copilot
+model: auto
+promptRef: reviewer
+skills: [evidence, codegraph]
+subagents: []

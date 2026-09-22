@@ -1,0 +1,14 @@
+export { Harness } from "./core/harness.js";
+export { ApprovalPolicy } from "./core/approval-policy.js";
+export { EventBus } from "./core/events.js";
+export { Registry } from "./core/registry.js";
+export { JsonlReceiptStore } from "./core/receipt-store.js";
+export { CodeGraph } from "./codegraph/codegraph.js";
+export { loadConfig } from "./config/load.js";
+export { initializeProject } from "./config/init.js";
+export { loadProject } from "./content/load-project.js";
+export { WorktreeManager } from "./git/worktrees.js";
+export { GitLabClient } from "./gitlab/client.js";
+export { loadPlugin } from "./plugins/load-plugin.js";
+export { createCopilotProvider } from "./providers/copilot.js";
+export { createOpenAICompatibleProvider } from "./providers/openai-compatible.js";

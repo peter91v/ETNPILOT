@@ -1,0 +1,8 @@
+node_modules/
+.etnpilot/state/
+.etnpilot/worktrees/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+coverage/
+.DS_Store
