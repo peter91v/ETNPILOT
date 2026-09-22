@@ -1,6 +1,6 @@
 # ETNPilot
 
-ETNPilot is a GitLab-first, provider-neutral harness for auditable software-engineering agents. It combines isolated Git worktrees, explicit human approvals, content-addressed receipts, reusable agents/skills/prompts/plugins, and an embedded SQLite code graph—without GitNexus or Neo4j.
+ETNPilot is a GitLab-first, provider-neutral harness for auditable software-engineering agents. It combines isolated Git worktrees, explicit human approvals, content-addressed receipts, reusable agents, skills, prompts, plugins, and an embedded SQLite code graph.
 
 ## Status
 
