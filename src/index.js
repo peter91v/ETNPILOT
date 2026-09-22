@@ -32,7 +32,18 @@ export { formatIssueTask, GitLabIssueTrigger } from "./gitlab/issue-trigger.js";
 export { authenticateGitLabWebhook, deliveryIdFromHeaders, verifyStandardSignature } from "./gitlab/webhook-auth.js";
 export { createGitLabWebhookServer } from "./gitlab/webhook-server.js";
 export { loadPlugin, loadPlugins } from "./plugins/load-plugin.js";
-export { createPluginContext, definePlugin, PLUGIN_CAPABILITIES } from "./plugins/sdk.js";
+export {
+  createPluginContext,
+  definePlugin,
+  PLUGIN_CAPABILITIES,
+  validatePluginManifest,
+} from "./plugins/sdk.js";
+export {
+  DEFAULT_PLUGIN_LIMITS,
+  normalizePluginLimits,
+  PluginProcessError,
+} from "./plugins/protocol.js";
+export { PluginWorkerHost } from "./plugins/worker-host.js";
 export { createCopilotProvider } from "./providers/copilot.js";
 export { createOpenAICompatibleProvider } from "./providers/openai-compatible.js";
 export { registerConfiguredProviders } from "./providers/register.js";

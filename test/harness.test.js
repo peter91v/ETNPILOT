@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Harness } from "../src/core/harness.js";
 import { ApprovalPolicy } from "../src/core/approval-policy.js";
-import { definePlugin } from "../src/plugins/sdk.js";
 import { PolicyEngine } from "../src/policy/engine.js";
 
 test("harness composes plugins, agents, providers, and subagents", async () => {
@@ -32,20 +31,9 @@ test("harness composes plugins, agents, providers, and subagents", async () => {
   assert.equal(receipts[0].parentRunId, result.runId);
 });
 
-test("plugins can register capabilities exactly once", async () => {
+test("harness refuses in-process plugins", async () => {
   const harness = new Harness();
-  const plugin = definePlugin({
-    apiVersion: 1,
-    name: "example",
-    version: "1.0.0",
-    capabilities: ["prompt.register"],
-    setup(context) {
-      context.registerPrompt("review", "Review carefully.");
-    },
-  });
-  await harness.use(plugin);
-  assert.equal(harness.prompts.get("review"), "Review carefully.");
-  await assert.rejects(() => harness.use(plugin), /already registered/);
+  await assert.rejects(() => harness.use({}), /In-process plugins are disabled/);
 });
 
 test("harness routes human-required operations through the approval handler", async () => {

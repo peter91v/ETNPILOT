@@ -30,6 +30,11 @@ export class Registry {
     return this.#entries.has(name);
   }
 
+  unregister(name, expected) {
+    if (expected !== undefined && this.#entries.get(name) !== expected) return false;
+    return this.#entries.delete(name);
+  }
+
   list() {
     return [...this.#entries.keys()].sort();
   }

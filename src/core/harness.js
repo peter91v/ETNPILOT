@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { EventBus } from "./events.js";
 import { Registry } from "./registry.js";
-import { createPluginContext, definePlugin } from "../plugins/sdk.js";
 import { telemetryProviderAttributes } from "../observability/telemetry.js";
 
 export class Harness {
@@ -19,22 +18,22 @@ export class Harness {
     this.policy = policy;
     this.telemetry = telemetry;
     this.providerRouter = undefined;
+    this.pluginRuntimes = new Set();
   }
 
-  async use(plugin, options = {}) {
-    const manifest = definePlugin(plugin);
-    for (const dependency of manifest.dependencies) {
-      if (!this.plugins.has(dependency)) {
-        throw new Error(`Plugin '${manifest.name}' requires plugin '${dependency}' to be loaded first.`);
-      }
-    }
-    if (this.plugins.has(manifest.name)) {
-      throw new Error(`plugin '${manifest.name}' is already registered.`);
-    }
-    await manifest.setup(createPluginContext(this, manifest), options);
-    this.plugins.register(manifest.name, manifest);
-    await this.events.emit("plugin.loaded", { plugin: manifest.name, version: manifest.version });
-    return this;
+  async use() {
+    throw new Error("In-process plugins are disabled. Load plugins by module path through loadPlugin() or project configuration.");
+  }
+
+  attachPluginRuntime(runtime) {
+    this.pluginRuntimes.add(runtime);
+    return runtime;
+  }
+
+  async close() {
+    const runtimes = [...this.pluginRuntimes];
+    this.pluginRuntimes.clear();
+    await Promise.allSettled(runtimes.map((runtime) => runtime.close()));
   }
 
   setProviderRouter(router) {
@@ -68,7 +67,8 @@ export class Harness {
     return agent;
   }
 
-  async run({ agent: agentName, input, parentRunId, metadata = {} }) {
+  async run({ agent: agentName, input, parentRunId, metadata = {}, signal }) {
+    signal?.throwIfAborted();
     const agent = this.agents.get(agentName);
     const runId = randomUUID();
     const startedAt = Date.now();
@@ -94,6 +94,7 @@ export class Harness {
         metadata,
         telemetry: this.telemetry,
         trace: runSpan ? { traceId: runSpan.traceId, parentSpanId: runSpan.spanId } : undefined,
+        signal,
         instructions: [...this.instructions],
         skills: agent.skills.map((name) => this.skills.get(name)),
         spawn: (subagent, subInput) => {
@@ -108,6 +109,7 @@ export class Harness {
               ...metadata,
               ...(runSpan ? { traceId: runSpan.traceId, parentSpanId: runSpan.spanId } : {}),
             },
+            signal,
           });
         },
         approve: async (request) => {
