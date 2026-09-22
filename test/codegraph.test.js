@@ -21,11 +21,13 @@ test("codegraph indexes symbols and resolves internal imports", async () => {
       target: "./b.js",
       targetPath: "src/b.js",
       kind: "imports",
+      dangling: false,
     }]);
     assert.deepEqual(graph.dependents("src/b.js"), [{
       source: "src/a.js",
       target: "./b.js",
       kind: "imports",
+      dangling: false,
     }]);
     assert.equal(graph.symbols("src/a.js")[0].name, "a");
     assert.equal(graph.stats().schemaVersion, 2);
@@ -78,6 +80,21 @@ test("codegraph updates only changed files and calculates transitive test impact
     assert.equal(graph.dependencies("src/b.ts")[0].targetPath, "src/c.ts");
     assert.equal(graph.stats().brokenEdges, 1);
     assert.deepEqual(graph.impact(["src/c.ts"]).tests.map((entry) => entry.path), ["test/a.test.ts"]);
+
+    // The edge to a deleted file is retained so impact analysis still answers
+    // "who depended on this?", but every query must mark it as dangling.
+    assert.equal(graph.dependencies("src/b.ts")[0].dangling, true);
+    assert.equal(graph.dependents("src/c.ts")[0].dangling, true);
+    const afterDelete = graph.impact(["src/c.ts"]);
+    assert.deepEqual(
+      afterDelete.files.map(({ path, dangling }) => ({ path, dangling })),
+      [
+        { path: "src/c.ts", dangling: true },
+        { path: "src/b.ts", dangling: false },
+        { path: "src/a.ts", dangling: false },
+        { path: "test/a.test.ts", dangling: false },
+      ],
+    );
   } finally {
     graph.close();
   }

@@ -114,3 +114,95 @@ test("project runner can operate without a worktree", async () => {
   assert.equal(result.workspace.managed, false);
   assert.equal(result.cleanup.reason, "in-place-run");
 });
+
+test("project runner rejects an unpublishable run before doing any work", async () => {
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-publish-preflight-"));
+  await Promise.all([
+    mkdir(join(root, ".etnpilot", "agents"), { recursive: true }),
+    mkdir(join(root, ".etnpilot", "prompts"), { recursive: true }),
+  ]);
+  await writeFile(join(root, ".gitignore"), ".etnpilot/state/\n.etnpilot/worktrees/\n");
+  await writeFile(join(root, ".etnpilot", "prompts", "worker.md"), "Work.");
+  await writeFile(join(root, ".etnpilot", "agents", "worker.yaml"), "name: worker\nprovider: fake\npromptRef: worker\n");
+  await writeFile(join(root, ".etnpilot", "etnpilot.yaml"), [
+    "version: 1",
+    "defaultAgent: worker",
+    "git:",
+    "  project: group/project",
+    "providers:",
+    "  fake: { type: fake }",
+    "workflow:",
+    "  steps:",
+    "    - { id: build, type: agent, agent: worker }",
+    "",
+  ].join("\n"));
+  await git(["init", "-b", "main"], { cwd: root });
+  await git(["config", "user.email", "test@example.invalid"], { cwd: root });
+  await git(["config", "user.name", "ETNPilot Test"], { cwd: root });
+  await git(["add", "."], { cwd: root });
+  await git(["commit", "-m", "initial"], { cwd: root });
+
+  let invocations = 0;
+  const providerFactories = {
+    fake: (name) => ({ name, invoke: async () => { invocations += 1; return { text: "done" }; } }),
+  };
+
+  await assert.rejects(
+    runProject({ root, input: "publish me", publish: true, env: {}, providerFactories }),
+    /ETNPILOT_GITLAB_TOKEN is required/,
+  );
+  await assert.rejects(
+    runProject({ root, input: "publish me", publish: true, worktree: false, env: {}, providerFactories }),
+    /Publishing an in-place run is not allowed/,
+  );
+
+  // Neither attempt may spend provider budget or leave a worktree behind.
+  assert.equal(invocations, 0);
+  const worktrees = await git(["worktree", "list", "--porcelain"], { cwd: root });
+  assert.equal(worktrees.stdout.match(/^worktree /gm).length, 1);
+});
+
+test("project runner interpolates the project config with the injected environment", async () => {
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-env-"));
+  await Promise.all([
+    mkdir(join(root, ".etnpilot", "agents"), { recursive: true }),
+    mkdir(join(root, ".etnpilot", "prompts"), { recursive: true }),
+  ]);
+  await writeFile(join(root, ".gitignore"), ".etnpilot/state/\n.etnpilot/worktrees/\n");
+  await writeFile(join(root, ".etnpilot", "prompts", "worker.md"), "Work.");
+  await writeFile(join(root, ".etnpilot", "agents", "worker.yaml"), "name: worker\nprovider: fake\npromptRef: worker\n");
+  await writeFile(join(root, ".etnpilot", "etnpilot.yaml"), [
+    "version: 1",
+    "defaultAgent: worker",
+    "providers:",
+    "  fake:",
+    "    type: fake",
+    "    model: ${ETNPILOT_TEST_MODEL}",
+    "codegraph:",
+    "  enabled: false",
+    "workflow:",
+    "  steps:",
+    "    - { id: build, type: agent, agent: worker }",
+    "",
+  ].join("\n"));
+  await git(["init", "-b", "main"], { cwd: root });
+  await git(["config", "user.email", "test@example.invalid"], { cwd: root });
+  await git(["config", "user.name", "ETNPilot Test"], { cwd: root });
+  await git(["add", "."], { cwd: root });
+  await git(["commit", "-m", "initial"], { cwd: root });
+
+  let seenModel;
+  const result = await runProject({
+    root,
+    input: "check env",
+    env: { ETNPILOT_TEST_MODEL: "injected-model" },
+    providerFactories: {
+      fake: (name, config) => {
+        seenModel = config.model;
+        return { name, invoke: async () => ({ text: "done" }) };
+      },
+    },
+  });
+  assert.equal(result.summary.status, "succeeded");
+  assert.equal(seenModel, "injected-model");
+});
