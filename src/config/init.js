@@ -17,6 +17,9 @@ codegraph:
 approval:
   allow: [read]
   requireHuman: [write, shell, network]
+workspace:
+  mode: worktree
+  cleanup: never
 workflow:
   concurrency: 1
   failFast: true

@@ -34,7 +34,24 @@ Run the configured workflow in an isolated worktree:
 npm run etnpilot -- run "Implement the requested change"
 ```
 
-The command preserves the resulting worktree for inspection. Operations such as writes, shell commands, and network access require confirmation in an interactive terminal and are rejected when no terminal is available. Publishing is never implicit. Once the GitLab remote and `ETNPILOT_GITLAB_TOKEN` are configured, `--publish` commits the reviewed work, pushes its run branch, and opens a draft merge request.
+Worktree use is configurable and can be selected per run:
+
+```bash
+# Explicit isolated worktree
+npm run etnpilot -- run "Implement the change" --worktree
+
+# Work directly in the current checkout
+npm run etnpilot -- run "Implement the change" --no-worktree
+
+# Request cleanup after success
+npm run etnpilot -- run "Inspect the project" --worktree --cleanup-worktree
+```
+
+The default comes from `workspace.mode` in `.etnpilot/etnpilot.yaml`. Cleanup defaults to `never`. Requested cleanup only removes a clean worktree; a worktree containing uncommitted changes is retained and reported as `dirty-worktree`. Use `etnpilot worktree list` and `etnpilot worktree cleanup <name>` for manual housekeeping.
+
+`--in-place` remains available as a compatibility alias for `--no-worktree`.
+
+Operations such as writes, shell commands, and network access require confirmation in an interactive terminal and are rejected when no terminal is available. Publishing is never implicit. Once the GitLab remote and `ETNPILOT_GITLAB_TOKEN` are configured, `--publish` commits the reviewed work, pushes its run branch, and opens a draft merge request. Setting `workspace.cleanup` to `after-publish` removes the clean linked worktree after a successful publication while retaining its branch.
 
 For GitHub Copilot, authenticate with the Copilot CLI/SDK-supported GitHub login. ETNPilot never auto-approves writes, shell commands, or network access by default.
 

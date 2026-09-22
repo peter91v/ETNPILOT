@@ -16,7 +16,7 @@
 
 - [x] Manifest discovery for instructions, skills, prompts, and agents
 - [x] DAG scheduler with concurrency, cancellation, retry, timeouts, and step budgets
-- [x] Isolated run worktrees and reproducible check execution
+- [x] Optional run worktrees, safe cleanup policies, and reproducible check execution
 - [x] Hash-chained receipts
 - [x] Explicit GitLab draft-merge-request publishing
 - [ ] GitLab issue-to-workflow trigger
