@@ -29,6 +29,8 @@ test("init keeps run state and worktrees out of the repository", async () => {
   assert.equal(policy.evaluateOperation({ kind: "read", fileName: "src/index.js" }, { workspace: root }).kind, "approve-once");
   assert.equal(policy.evaluateOperation({ kind: "read", fileName: ".env" }, { workspace: root }).kind, "reject");
   assert.equal(policy.evaluateProvider("github-copilot").allowed, true);
+  assert.equal(config.observability.enabled, true);
+  assert.equal(config.observability.otlp.enabled, false);
 });
 
 test("init never overwrites an existing configuration", async () => {

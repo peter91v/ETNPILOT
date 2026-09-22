@@ -19,6 +19,8 @@ export function createCopilotProvider(options = {}) {
       let client;
       let session;
       let promptSent = false;
+      const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, providerUnits: 0 };
+      let usageModel;
       try {
         client = new CopilotClient({
           workingDirectory: options.workingDirectory ?? process.cwd(),
@@ -38,9 +40,25 @@ export function createCopilotProvider(options = {}) {
             return { kind: "reject", feedback: decision.reason ?? "Denied by ETNPilot policy." };
           },
         });
+        if (typeof session.on === "function") {
+          session.on("assistant.usage", (event) => {
+            const data = event?.data ?? {};
+            usage.inputTokens += number(data.inputTokens);
+            usage.outputTokens += number(data.outputTokens);
+            usage.cacheReadTokens += number(data.cacheReadTokens);
+            usage.cacheWriteTokens += number(data.cacheWriteTokens);
+            usage.providerUnits += number(data.cost);
+            usageModel = data.model ?? usageModel;
+          });
+        }
         promptSent = true;
         const message = await session.sendAndWait({ prompt: String(context.input) });
-        return { text: message?.data?.content ?? "", sessionId: session.sessionId };
+        return {
+          text: message?.data?.content ?? "",
+          sessionId: session.sessionId,
+          model: usageModel ?? context.agent.model ?? options.model,
+          usage,
+        };
       } catch (error) {
         if (error instanceof ProviderError) throw error;
         throw new ProviderError(
@@ -58,6 +76,10 @@ export function createCopilotProvider(options = {}) {
       }
     },
   };
+}
+
+function number(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
 }
 
 function buildSystemMessage(context) {

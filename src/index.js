@@ -38,6 +38,13 @@ export { createOpenAICompatibleProvider } from "./providers/openai-compatible.js
 export { registerConfiguredProviders } from "./providers/register.js";
 export { ProviderError, ProviderRouter } from "./providers/router.js";
 export { PolicyEngine } from "./policy/engine.js";
+export {
+  createTelemetry,
+  OBSERVABILITY_VERSION,
+  summarizeTelemetryFile,
+  Telemetry,
+  telemetryProviderAttributes,
+} from "./observability/telemetry.js";
 export { runProject } from "./runtime/project-runner.js";
 export { WorkflowEngine } from "./workflow/engine.js";
 export { WorkflowQueue, WorkflowQueueStateError, WORKFLOW_JOB_STATUSES } from "./workflow/queue.js";

@@ -16,6 +16,7 @@ import { runProject } from "../src/runtime/project-runner.js";
 import { WorkflowQueue } from "../src/workflow/queue.js";
 import { createSecretResolver } from "../src/secrets/resolver.js";
 import { PolicyEngine } from "../src/policy/engine.js";
+import { summarizeTelemetryFile } from "../src/observability/telemetry.js";
 
 const { positionals, values } = parseArgs({
   allowPositionals: true,
@@ -82,6 +83,7 @@ Usage:
   etnpilot secret check <name> [--root directory]
   etnpilot policy check (--kind kind [--path path | --url url] | --provider name)
     [--agent name] [--root directory]
+  etnpilot telemetry summary [workflow-run-id] [--root directory]
   etnpilot doctor
 `);
   process.exit(0);
@@ -284,6 +286,11 @@ if (command === "init") {
   console.log(JSON.stringify(report, null, 2));
   const denied = values.provider ? result?.allowed === false : result?.kind === "reject";
   if (denied || !result) process.exitCode = 1;
+} else if (command === "telemetry" && subcommand === "summary") {
+  const root = resolve(values.root);
+  const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"));
+  const path = resolve(root, config.observability?.file ?? ".etnpilot/state/telemetry.jsonl");
+  console.log(JSON.stringify(await summarizeTelemetryFile(path, { workflowRunId: rest[0] }), null, 2));
 } else if (command === "doctor") {
   const checks = {
     node: process.versions.node,

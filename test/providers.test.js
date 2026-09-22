@@ -14,9 +14,24 @@ test("Copilot provider uses the SDK session and preserves safe approvals", async
     async start() { calls.push(["start"]); }
     async createSession(options) {
       calls.push(["session", options]);
+      let usageListener;
       return {
         sessionId: "session-1",
-        sendAndWait: async ({ prompt }) => ({ data: { content: `answer:${prompt}` } }),
+        on: (type, listener) => {
+          assert.equal(type, "assistant.usage");
+          usageListener = listener;
+        },
+        sendAndWait: async ({ prompt }) => {
+          usageListener({ data: {
+            inputTokens: 120,
+            outputTokens: 30,
+            cacheReadTokens: 20,
+            cacheWriteTokens: 5,
+            cost: 1,
+            model: "copilot-model",
+          } });
+          return { data: { content: `answer:${prompt}` } };
+        },
         disconnect: async () => calls.push(["disconnect"]),
       };
     }
@@ -30,7 +45,18 @@ test("Copilot provider uses the SDK session and preserves safe approvals", async
     skills: [{ content: "Skill" }],
     approve: async () => ({ kind: "reject", reason: "blocked" }),
   });
-  assert.deepEqual(result, { text: "answer:hello", sessionId: "session-1" });
+  assert.deepEqual(result, {
+    text: "answer:hello",
+    sessionId: "session-1",
+    model: "copilot-model",
+    usage: {
+      inputTokens: 120,
+      outputTokens: 30,
+      cacheReadTokens: 20,
+      cacheWriteTokens: 5,
+      providerUnits: 1,
+    },
+  });
   assert.deepEqual(calls.slice(-2), [["disconnect"], ["stop"]]);
 });
 
@@ -78,7 +104,15 @@ test("configured providers resolve API keys through the secret resolver", async 
   let authorization;
   globalThis.fetch = async (_url, options) => {
     authorization = options.headers.authorization;
-    return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), {
+    return new Response(JSON.stringify({
+      model: "team-model",
+      choices: [{ message: { content: "ok" } }],
+      usage: {
+        prompt_tokens: 80,
+        completion_tokens: 20,
+        prompt_tokens_details: { cached_tokens: 10 },
+      },
+    }), {
       status: 200,
       headers: { "content-type": "application/json" },
     });
@@ -91,8 +125,15 @@ test("configured providers resolve API keys through the secret resolver", async 
         apiKeySecret: "model.apiKey",
       },
     }, { secretResolver: resolver, env: {} });
-    await harness.providers.get("model").invoke({ agent: { prompt: "System" }, input: "hello", instructions: [] });
+    const result = await harness.providers.get("model").invoke({ agent: { prompt: "System" }, input: "hello", instructions: [] });
     assert.equal(authorization, "Bearer resolved-model-secret");
+    assert.equal(result.model, "team-model");
+    assert.deepEqual(result.usage, {
+      inputTokens: 80,
+      outputTokens: 20,
+      cacheReadTokens: 10,
+      cacheWriteTokens: 0,
+    });
   } finally {
     globalThis.fetch = originalFetch;
   }

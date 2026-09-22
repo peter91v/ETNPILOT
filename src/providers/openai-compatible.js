@@ -46,7 +46,23 @@ export function createOpenAICompatibleProvider({
         });
       }
       const payload = await response.json();
-      return { text: payload.choices?.[0]?.message?.content ?? "", raw: payload };
+      return {
+        text: payload.choices?.[0]?.message?.content ?? "",
+        raw: payload,
+        model: payload.model ?? context.agent.model ?? model,
+        usage: normalizeUsage(payload.usage),
+      };
     },
+  };
+}
+
+function normalizeUsage(usage = {}) {
+  return {
+    inputTokens: usage.input_tokens ?? usage.prompt_tokens ?? 0,
+    outputTokens: usage.output_tokens ?? usage.completion_tokens ?? 0,
+    cacheReadTokens: usage.input_tokens_details?.cached_tokens
+      ?? usage.prompt_tokens_details?.cached_tokens
+      ?? 0,
+    cacheWriteTokens: usage.input_tokens_details?.cache_creation_tokens ?? 0,
   };
 }

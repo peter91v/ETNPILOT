@@ -17,6 +17,7 @@
 | Approvals | Cross-process human decisions and redacted evidence | SQLite approval inbox |
 | Secrets | Named credential resolution behind a versioned adapter boundary | allow-listed environment and confined files |
 | Policy | Deny-first scope decisions before approval or provider invocation | versioned YAML rules evaluated in-process |
+| Observability | Correlated workflow, agent, provider, and check spans with usage budgets | local OTLP/JSON and optional OTLP/HTTP export |
 
 ## Execution flow
 
@@ -91,6 +92,12 @@ match provider and optional agent. Every matching rule is considered and the saf
 a broad allow cannot override a targeted denial. Policy evidence records only the section, rule,
 and effect in receipts; request paths and URLs are not copied into policy diagnostics.
 
+One workflow trace links its workflow, agent, provider, subagent, and check spans. Provider adapters
+normalize reported usage before the router records standard GenAI token attributes. Configured
+model rates produce a separate estimate, while provider-reported units remain dimensionless. The
+in-memory workflow accumulator enforces token, estimated-cost, or provider-unit budgets after each
+completed provider call and before another workflow step can consume budget.
+
 ## Security defaults
 
 - read-only actions may be approved by policy;
@@ -104,3 +111,6 @@ and effect in receipts; request paths and URLs are not copied into policy diagno
 - secret values are resolved only at runtime and are never included in availability diagnostics.
 - policy-denied operations never reach the human approval handler or provider runtime;
 - paths outside the active workspace cannot match an allow rule.
+- telemetry excludes prompts, generated content, tool arguments, credentials, and upstream error
+  bodies;
+- OTLP exporter credentials resolve through the secret-provider boundary.

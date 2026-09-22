@@ -2,9 +2,10 @@ import { randomUUID } from "node:crypto";
 import { EventBus } from "./events.js";
 import { Registry } from "./registry.js";
 import { createPluginContext, definePlugin } from "../plugins/sdk.js";
+import { telemetryProviderAttributes } from "../observability/telemetry.js";
 
 export class Harness {
-  constructor({ approvalPolicy, approvalHandler, receiptStore, policy } = {}) {
+  constructor({ approvalPolicy, approvalHandler, receiptStore, policy, telemetry } = {}) {
     this.events = new EventBus();
     this.providers = new Registry("provider");
     this.plugins = new Registry("plugin");
@@ -16,6 +17,7 @@ export class Harness {
     this.approvalHandler = approvalHandler;
     this.receiptStore = receiptStore;
     this.policy = policy;
+    this.telemetry = telemetry;
     this.providerRouter = undefined;
   }
 
@@ -71,15 +73,27 @@ export class Harness {
     const runId = randomUUID();
     const startedAt = Date.now();
     const approvals = [];
-    await this.events.emit("run.started", { runId, parentRunId, agent: agentName });
-
+    const runSpan = this.telemetry?.startSpan("invoke_agent", {
+      traceId: metadata.traceId,
+      parentSpanId: metadata.parentSpanId,
+      attributes: {
+        "gen_ai.operation.name": "invoke_agent",
+        "gen_ai.agent.name": agentName,
+        "etnpilot.workflow.run_id": metadata.workflowRunId,
+        "etnpilot.agent.run_id": runId,
+      },
+    });
+    let runSpanEnded = false;
     try {
+      await this.events.emit("run.started", { runId, parentRunId, agent: agentName });
       const context = {
         runId,
         parentRunId,
         agent,
         input,
         metadata,
+        telemetry: this.telemetry,
+        trace: runSpan ? { traceId: runSpan.traceId, parentSpanId: runSpan.spanId } : undefined,
         instructions: [...this.instructions],
         skills: agent.skills.map((name) => this.skills.get(name)),
         spawn: (subagent, subInput) => {
@@ -90,7 +104,10 @@ export class Harness {
             agent: subagent,
             input: subInput,
             parentRunId: runId,
-            metadata,
+            metadata: {
+              ...metadata,
+              ...(runSpan ? { traceId: runSpan.traceId, parentSpanId: runSpan.spanId } : {}),
+            },
           });
         },
         approve: async (request) => {
@@ -123,8 +140,16 @@ export class Harness {
         status: "succeeded",
         durationMs: Date.now() - startedAt,
         approvals,
+        ...(routed.accounting ? { usage: routed.accounting } : {}),
+        ...(runSpan ? { trace: { traceId: runSpan.traceId, spanId: runSpan.spanId } } : {}),
         result: routed.result,
       };
+      runSpanEnded = true;
+      await runSpan?.end({
+        attributes: {
+          "etnpilot.duration_ms": receipt.durationMs,
+        },
+      });
       await this.receiptStore?.append(receipt);
       await this.events.emit("run.completed", receipt);
       return receipt;
@@ -138,8 +163,19 @@ export class Harness {
         status: "failed",
         durationMs: Date.now() - startedAt,
         approvals,
+        ...(runSpan ? { trace: { traceId: runSpan.traceId, spanId: runSpan.spanId } } : {}),
         error: error instanceof Error ? error.message : String(error),
       };
+      if (!runSpanEnded) {
+        runSpanEnded = true;
+        await runSpan?.end({
+          status: "error",
+          attributes: {
+            "error.type": error.code ?? error.name ?? "error",
+            "etnpilot.duration_ms": receipt.durationMs,
+          },
+        });
+      }
       await this.receiptStore?.append(receipt);
       await this.events.emit("run.failed", receipt);
       throw error;
@@ -170,10 +206,63 @@ export class Harness {
       }];
       throw error;
     }
+    const startedAt = Date.now();
+    const providerSpan = this.telemetry?.startSpan("gen_ai.invoke_agent", {
+      traceId: context.trace?.traceId,
+      parentSpanId: context.trace?.parentSpanId,
+      kind: 3,
+      attributes: {
+        "gen_ai.operation.name": "chat",
+        "gen_ai.request.model": context.agent.model,
+        "etnpilot.provider.name": providerName,
+        "etnpilot.agent.name": context.agent.name,
+        "etnpilot.workflow.run_id": context.metadata?.workflowRunId,
+        "etnpilot.agent.run_id": context.runId,
+      },
+    });
+    let result;
+    try {
+      result = await this.providers.get(providerName).invoke(context);
+    } catch (error) {
+      const attempt = { provider: providerName, status: "failed", durationMs: Date.now() - startedAt };
+      await providerSpan?.end({
+        status: "error",
+        attributes: {
+          "error.type": error.code ?? error.name ?? "provider_error",
+          "etnpilot.duration_ms": attempt.durationMs,
+        },
+      });
+      error.provider ??= providerName;
+      error.providerAttempts ??= [attempt];
+      throw error;
+    }
+    const accounting = this.telemetry?.recordProviderUsage({
+      workflowRunId: context.metadata?.workflowRunId,
+      agentRunId: context.runId,
+      provider: providerName,
+      model: result?.model ?? context.agent.model,
+      usage: result?.usage,
+    });
+    const attempt = { provider: providerName, status: "succeeded", durationMs: Date.now() - startedAt };
+    await providerSpan?.end({
+      attributes: {
+        "etnpilot.duration_ms": attempt.durationMs,
+        ...telemetryProviderAttributes(accounting),
+      },
+    });
+    if (accounting?.budgetExceeded) {
+      const error = new Error("Workflow usage budget exceeded.");
+      error.code = "budget_exceeded";
+      error.budget = accounting.budgetExceeded;
+      error.provider = providerName;
+      error.providerAttempts = [attempt];
+      throw error;
+    }
     return {
       provider: providerName,
-      result: await this.providers.get(providerName).invoke(context),
-      attempts: [{ provider: providerName, status: "succeeded" }],
+      result,
+      accounting,
+      attempts: [attempt],
     };
   }
 }
