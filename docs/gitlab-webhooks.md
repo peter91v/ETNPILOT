@@ -54,7 +54,7 @@ queue:
   maxAttempts: 1
 ```
 
-Environment variables:
+The generated configuration maps GitLab's logical secret names to environment variables:
 
 | Variable | Purpose |
 |---|---|
@@ -64,6 +64,25 @@ Environment variables:
 
 At least one webhook authentication secret is mandatory. The API token is mandatory when any
 GitLab write-back feature is enabled.
+
+The mappings may instead select another configured backend, for example files provisioned by the
+host:
+
+```yaml
+secrets:
+  providers:
+    runtime-files:
+      type: file
+      root: /run/secrets/etnpilot
+      requireOwnerOnly: true
+  values:
+    gitlab.webhookSigningSecret: { provider: runtime-files, key: webhook-signing }
+    gitlab.apiToken: { provider: runtime-files, key: api-token }
+```
+
+Use `etnpilot secret check gitlab.webhookSigningSecret --root /path/to/project` to validate
+availability without displaying the secret. See [secrets.md](secrets.md) for backend and file
+permission rules.
 
 ## GitLab setup
 

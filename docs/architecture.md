@@ -15,6 +15,7 @@
 | Queue | Durable intake, leases, checkpoints, restart recovery | SQLite workflow queue and worker |
 | Webhooks | Authenticated, deduplicated event intake | GitLab issue receiver |
 | Approvals | Cross-process human decisions and redacted evidence | SQLite approval inbox |
+| Secrets | Named credential resolution behind a versioned adapter boundary | allow-listed environment and confined files |
 
 ## Execution flow
 
@@ -45,7 +46,7 @@ can access only its declared registration and event APIs.
 
 ## Runnable workflow
 
-`etnpilot run` loads the project's manifests, registers configured providers, and executes the configured DAG. The user chooses an isolated worktree or the current checkout through configuration or CLI flags. Agent steps receive the outputs of their dependencies. Check steps execute argument arrays directly without a shell. A failed dependency blocks downstream work. Cleanup is policy-driven and never removes a worktree with uncommitted changes. Publishing to GitLab requires the explicit `--publish` flag and a token supplied through the environment.
+`etnpilot run` loads the project's manifests, registers configured providers, and executes the configured DAG. The user chooses an isolated worktree or the current checkout through configuration or CLI flags. Agent steps receive the outputs of their dependencies. Check steps execute argument arrays directly without a shell. A failed dependency blocks downstream work. Cleanup is policy-driven and never removes a worktree with uncommitted changes. Publishing to GitLab requires the explicit `--publish` flag and a resolvable API-token reference.
 
 The code graph stores file fingerprints, extracted declarations, raw imports, and resolved project paths in SQLite. Indexing uses file metadata and hashes to update only changed or deleted files. Reverse traversal reports direct and transitive consumers with their depth and highlights test files. Workflow receipts include the graph state before and after execution plus impact evidence for changed source files.
 
@@ -76,12 +77,21 @@ replace it. Only a redacted operation summary is persisted, and the final decisi
 the agent run receipt. The approval carries its workflow job ID, and queue cancellation aborts a
 pending wait. This is live-session continuation, not durable provider-session serialization.
 
+Secret consumers request stable logical names from a resolver. A named reference selects one
+versioned provider and an opaque key. Built-in providers read only an explicit environment
+allow-list or regular files confined beneath a configured root. Resolution failures are normalized
+before they reach logs, and availability checks never return the value. Custom adapters implement
+the same contract, allowing external identity or secret systems without coupling them to the
+harness, GitLab client, or model-provider APIs.
+
 ## Security defaults
 
 - read-only actions may be approved by policy;
 - writes, shell execution, and network access require a human decision;
 - subprocesses use argument arrays with `shell: false`;
 - worktrees are confined to `.etnpilot/worktrees/`;
-- secrets come from environment variables or a future secret-provider plugin;
+- secret consumers use named references through the versioned provider boundary;
+- environment access can be allow-listed and file access is root-confined, size-limited, and
+  owner-only by default on POSIX systems;
 - receipts contain execution metadata, but should never include raw credentials.
-- webhook signing secrets and API tokens are read from the environment and never persisted.
+- secret values are resolved only at runtime and are never included in availability diagnostics.

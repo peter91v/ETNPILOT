@@ -15,6 +15,7 @@ test("init keeps run state and worktrees out of the repository", async () => {
   assert.match(ignore, /^state\/$/m);
   assert.match(ignore, /^worktrees\/$/m);
   assert.match(ignore, /^keys\/$/m);
+  assert.match(ignore, /^secrets\/$/m);
 
   await writeFile(join(root, ".etnpilot", "state", "run.jsonl"), "{}\n");
   await writeFile(join(root, ".etnpilot", "state", "codegraph.sqlite"), "");

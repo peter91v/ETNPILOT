@@ -14,6 +14,7 @@ import { GitLabPublisher } from "../gitlab/publisher.js";
 import { registerConfiguredProviders } from "../providers/register.js";
 import { ProviderRouter } from "../providers/router.js";
 import { WorkflowEngine } from "../workflow/engine.js";
+import { createSecretResolver } from "../secrets/resolver.js";
 
 export async function runProject({
   root = process.cwd(),
@@ -29,15 +30,25 @@ export async function runProject({
   approvalHandler,
   signal,
   metadata = {},
+  secretResolver,
 } = {}) {
   if (!input) throw new TypeError("A task prompt is required.");
   const repositoryRoot = resolve(root);
   const bootstrapConfig = await loadConfig(join(repositoryRoot, ".etnpilot", "etnpilot.yaml"), env);
+  const secrets = secretResolver ?? createSecretResolver({ root: repositoryRoot, config: bootstrapConfig, env });
+  const gitLabToken = await secrets.get("gitlab.apiToken", {
+    fallback: { provider: "env", key: "ETNPILOT_GITLAB_TOKEN" },
+  });
   const useWorktree = worktree ?? (inPlace ? false : bootstrapConfig.workspace?.mode !== "in-place");
   const effectiveCleanupPolicy = cleanupPolicy ?? bootstrapConfig.workspace?.cleanup ?? "never";
   assertCleanupPolicy(effectiveCleanupPolicy);
-  if (publish) assertPublishable(useWorktree, bootstrapConfig, env);
-  const receiptSigner = await loadReceiptSigner({ root: repositoryRoot, config: bootstrapConfig, env });
+  if (publish) assertPublishable(useWorktree, bootstrapConfig, gitLabToken);
+  const receiptSigner = await loadReceiptSigner({
+    root: repositoryRoot,
+    config: bootstrapConfig,
+    env,
+    secretResolver: secrets,
+  });
   const runId = createRunId();
   const branch = `etnpilot/run-${runId}`;
   const worktreeManager = new WorktreeManager(repositoryRoot);
@@ -54,9 +65,10 @@ export async function runProject({
     receiptStore,
   });
   const { config } = await loadProject(harness, workspace.path, env);
-  registerConfiguredProviders(harness, config.providers, {
+  await registerConfiguredProviders(harness, config.providers, {
     workingDirectory: workspace.path,
     env,
+    secretResolver: secrets,
     factories: providerFactories,
   });
   harness.setProviderRouter(new ProviderRouter(harness.providers, config.routing));
@@ -68,7 +80,7 @@ export async function runProject({
     maxSteps: workflow.maxSteps,
     events: harness.events,
   });
-  const publisher = publish ? createPublisher(config, env, fetchImpl) : undefined;
+  const publisher = publish ? createPublisher(config, gitLabToken, fetchImpl) : undefined;
   const codegraph = createCodegraph(repositoryRoot, config);
   let codegraphBefore;
   if (codegraph) {
@@ -245,18 +257,18 @@ function firstLine(value) {
   return String(value).split("\n", 1)[0].slice(0, 72);
 }
 
-function assertPublishable(useWorktree, config, env) {
+function assertPublishable(useWorktree, config, token) {
   if (!useWorktree) throw new Error("Publishing an in-place run is not allowed.");
   if (!config.git?.project) throw new Error("Publishing requires 'git.project' in .etnpilot/etnpilot.yaml.");
-  if (!env.ETNPILOT_GITLAB_TOKEN) throw new Error("ETNPILOT_GITLAB_TOKEN is required for GitLab publishing.");
+  if (!token) throw new Error("A GitLab API token is required for GitLab publishing.");
 }
 
-function createPublisher(config, env, fetchImpl) {
+function createPublisher(config, token, fetchImpl) {
   return new GitLabPublisher({
     baseUrl: config.git?.baseUrl,
     project: config.git?.project,
     remote: config.git?.remote ?? "gitlab",
-    token: env.ETNPILOT_GITLAB_TOKEN,
+    token,
     fetchImpl,
   });
 }

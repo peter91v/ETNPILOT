@@ -54,9 +54,13 @@ export function createReceiptVerifier(publicKeyInput) {
   });
 }
 
-export async function loadReceiptSigner({ root, config = {}, env = process.env } = {}) {
+export async function loadReceiptSigner({ root, config = {}, env = process.env, secretResolver } = {}) {
   const signing = config.receipts?.signing ?? {};
   if (signing.enabled !== true) return undefined;
+  if (signing.privateKeySecret) {
+    if (!secretResolver) throw new Error("Receipt signing uses a secret reference but no resolver is available.");
+    return createReceiptSigner(await secretResolver.get(signing.privateKeySecret, { required: true }));
+  }
   const configuredPath = env.ETNPILOT_RECEIPT_SIGNING_KEY_FILE ?? signing.privateKeyFile;
   if (!configuredPath) {
     throw new Error("Receipt signing is enabled but no private key file is configured.");

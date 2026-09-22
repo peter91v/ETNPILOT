@@ -22,6 +22,7 @@ The repository is in early development. The first runnable vertical slice provid
 - an authenticated GitLab issue webhook backed by a durable SQLite workflow queue with leases,
   checkpoints, cancellation, and conservative restart recovery.
 - optional Ed25519 signatures for sealed, independently verifiable receipt chains.
+- a versioned secret-provider API with policy-restricted environment and confined file backends.
 
 ## Quick start
 
@@ -86,7 +87,7 @@ The default comes from `workspace.mode` in `.etnpilot/etnpilot.yaml`. Cleanup de
 
 `--in-place` remains available as a compatibility alias for `--no-worktree`.
 
-Operations such as writes, shell commands, and network access require confirmation in an interactive terminal and are rejected when no terminal is available. Publishing is never implicit. Once the GitLab remote and `ETNPILOT_GITLAB_TOKEN` are configured, `--publish` commits the reviewed work, pushes its run branch, and opens a draft merge request. Setting `workspace.cleanup` to `after-publish` removes the clean linked worktree after a successful publication while retaining its branch.
+Operations such as writes, shell commands, and network access require confirmation in an interactive terminal and are rejected when no terminal is available. Publishing is never implicit. Once the GitLab remote and the `gitlab.apiToken` secret are configured, `--publish` commits the reviewed work, pushes its run branch, and opens a draft merge request. Setting `workspace.cleanup` to `after-publish` removes the clean linked worktree after a successful publication while retaining its branch.
 
 For GitHub Copilot, authenticate with the Copilot CLI/SDK-supported GitHub login. ETNPilot never auto-approves writes, shell commands, or network access by default.
 
@@ -111,6 +112,37 @@ OpenAI-compatible adapter currently provides `chat`. ETNPilot skips unavailable 
 providers. It retries with another provider only when the adapter marks the failure as both
 retryable and safe to replay. The selected provider and all routing attempts are stored in the run
 receipt.
+
+## Secret providers
+
+Credentials are referenced by stable names instead of being copied into provider, GitLab, or
+receipt-signing configuration. The generated project configuration maps these names to an
+allow-listed environment provider and includes an optional confined file provider:
+
+```yaml
+secrets:
+  providers:
+    env:
+      type: env
+      allow: [ETNPILOT_GITLAB_TOKEN, ETNPILOT_GITHUB_TOKEN]
+    local:
+      type: file
+      root: .etnpilot/secrets
+      requireOwnerOnly: true
+  values:
+    gitlab.apiToken: { provider: env, key: ETNPILOT_GITLAB_TOKEN }
+    github.token: { provider: env, key: ETNPILOT_GITHUB_TOKEN }
+```
+
+Check whether a configured secret is available without printing its value:
+
+```bash
+etnpilot secret check gitlab.apiToken --root .
+```
+
+Provider adapters can select another named reference with `tokenSecret` or `apiKeySecret`; receipt
+signing supports `privateKeySecret`. See [docs/secrets.md](docs/secrets.md) for the full contract,
+file-security rules, and extension example.
 
 ## Plugin SDK
 

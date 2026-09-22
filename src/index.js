@@ -41,3 +41,10 @@ export { runProject } from "./runtime/project-runner.js";
 export { WorkflowEngine } from "./workflow/engine.js";
 export { WorkflowQueue, WorkflowQueueStateError, WORKFLOW_JOB_STATUSES } from "./workflow/queue.js";
 export { WorkflowQueueWorker } from "./workflow/queue-worker.js";
+export { defineSecretProvider, SECRET_PROVIDER_VERSION } from "./secrets/provider.js";
+export {
+  BUILTIN_SECRET_PROVIDER_FACTORIES,
+  createEnvironmentSecretProvider,
+  createFileSecretProvider,
+} from "./secrets/builtins.js";
+export { createSecretResolver, SecretResolutionError, SecretResolver } from "./secrets/resolver.js";

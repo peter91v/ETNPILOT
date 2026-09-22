@@ -29,6 +29,7 @@
 - [x] Persistent human approval inbox for pending tool calls
 - [x] Durable workflow queue with leases, checkpoints, cancellation, and conservative recovery
 - [x] Cryptographically signed receipt chains
+- [x] Versioned secret-provider API with restricted environment and confined file backends
 - [ ] Codegraph parsers for Python, Go, Java, and C#
 
 ## M2 — Production controls

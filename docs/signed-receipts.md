@@ -39,6 +39,28 @@ receipts:
 `ETNPILOT_RECEIPT_SIGNING_KEY_FILE` may override the private-key path at runtime. Store only the
 path in configuration, never the private key itself.
 
+The signing key can alternatively use a named secret reference. This keeps the consumer
+configuration unchanged when the backend changes:
+
+```yaml
+secrets:
+  providers:
+    signing-files:
+      type: file
+      root: .etnpilot/keys
+      requireOwnerOnly: true
+  values:
+    receipt.signingKey: { provider: signing-files, key: receipt-signing-private.pem }
+receipts:
+  signing:
+    enabled: true
+    privateKeySecret: receipt.signingKey
+    publicKeyFile: .etnpilot/receipt-signing-public.pem
+```
+
+When `privateKeySecret` is present it takes precedence over `privateKeyFile` and the environment
+path override. The resolved value is used in memory and is not written to run receipts.
+
 ## Verify a receipt
 
 ```bash
