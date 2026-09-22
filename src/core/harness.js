@@ -4,7 +4,7 @@ import { Registry } from "./registry.js";
 import { createPluginContext, definePlugin } from "../plugins/sdk.js";
 
 export class Harness {
-  constructor({ approvalPolicy, approvalHandler, receiptStore } = {}) {
+  constructor({ approvalPolicy, approvalHandler, receiptStore, policy } = {}) {
     this.events = new EventBus();
     this.providers = new Registry("provider");
     this.plugins = new Registry("plugin");
@@ -15,6 +15,7 @@ export class Harness {
     this.approvalPolicy = approvalPolicy;
     this.approvalHandler = approvalHandler;
     this.receiptStore = receiptStore;
+    this.policy = policy;
     this.providerRouter = undefined;
   }
 
@@ -97,11 +98,13 @@ export class Harness {
             runId,
             agent: agentName,
             queueJobId: metadata.queueJobId,
+            workspace: metadata.workspace,
           });
           approvals.push({
             operationKind: request?.kind ?? "unknown",
             decision: decision.kind,
             at: new Date().toISOString(),
+            ...(decision.policy ? { policy: decision.policy } : {}),
             ...(decision.approvalId ? { approvalId: decision.approvalId } : {}),
             ...(decision.evidence ? { evidence: decision.evidence } : {}),
           });
@@ -110,11 +113,7 @@ export class Harness {
       };
       const routed = this.providerRouter
         ? await this.providerRouter.invoke(context)
-        : {
-            provider: agent.provider,
-            result: await this.providers.get(agent.provider).invoke(context),
-            attempts: [{ provider: agent.provider, status: "succeeded" }],
-          };
+        : await this.#invokeDirect(agent.provider, context);
       const receipt = {
         runId,
         parentRunId,
@@ -154,6 +153,27 @@ export class Harness {
     if (!this.approvalHandler) {
       return { kind: "reject", reason: "Human approval is required, but no approval handler is available." };
     }
-    return this.approvalHandler(request, context);
+    const handled = await this.approvalHandler(request, context);
+    return decision.policy ? { ...handled, policy: decision.policy } : handled;
+  }
+
+  async #invokeDirect(providerName, context) {
+    const policyDecision = this.policy?.evaluateProvider(providerName, { agent: context.agent.name });
+    if (policyDecision?.allowed === false) {
+      const error = new Error(policyDecision.reason ?? "Provider is denied by policy.");
+      error.provider = providerName;
+      error.providerAttempts = [{
+        provider: providerName,
+        status: "skipped",
+        reason: "policy-denied",
+        policy: policyDecision.policy,
+      }];
+      throw error;
+    }
+    return {
+      provider: providerName,
+      result: await this.providers.get(providerName).invoke(context),
+      attempts: [{ provider: providerName, status: "succeeded" }],
+    };
   }
 }

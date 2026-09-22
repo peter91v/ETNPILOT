@@ -50,6 +50,36 @@ approval:
     timeoutMs: 86400000
     pollIntervalMs: 500
 
+policy:
+  operations:
+    default: deny
+    rules:
+      - id: protect-credentials
+        effect: deny
+        kinds: [read, write]
+        paths: [.env, .env.*, "**/.env", "**/.env.*", .npmrc, "**/.npmrc", .netrc, "**/.netrc", "**/*.pem", "**/*.key", "**/*.p12", "**/*.pfx", "**/id_rsa", "**/id_ed25519", .git, .git/**, .etnpilot/keys, .etnpilot/keys/**, .etnpilot/secrets, .etnpilot/secrets/**]
+      - id: read-project
+        effect: allow
+        kinds: [read]
+        paths: ["**"]
+      - id: write-project
+        effect: human
+        kinds: [write]
+        paths: ["**"]
+      - id: shell-with-review
+        effect: human
+        kinds: [shell]
+      - id: approved-network-targets
+        effect: human
+        kinds: [network]
+        hosts: [gitlab.metropol-it.at, github.com, api.github.com]
+  providers:
+    default: deny
+    rules:
+      - id: configured-copilot
+        effect: allow
+        providers: [github-copilot]
+
 workspace:
   mode: worktree
   cleanup: never

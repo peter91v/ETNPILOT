@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { Harness } from "../src/core/harness.js";
 import { ApprovalPolicy } from "../src/core/approval-policy.js";
 import { definePlugin } from "../src/plugins/sdk.js";
+import { PolicyEngine } from "../src/policy/engine.js";
 
 test("harness composes plugins, agents, providers, and subagents", async () => {
   const receipts = [];
@@ -69,4 +70,15 @@ test("harness routes human-required operations through the approval handler", as
   assert.equal(receipt.approvals.length, 1);
   assert.equal(receipt.approvals[0].operationKind, "write");
   assert.equal(receipt.approvals[0].decision, "approve-once");
+});
+
+test("harness enforces provider policy without a router", async () => {
+  let invoked = false;
+  const policy = new PolicyEngine({ providers: { default: "deny", rules: [] } });
+  const harness = new Harness({ policy });
+  harness.registerProvider({ name: "blocked", invoke: async () => { invoked = true; } });
+  harness.registerAgent({ name: "worker", provider: "blocked", prompt: "Work." });
+
+  await assert.rejects(() => harness.run({ agent: "worker", input: "go" }), /default policy/);
+  assert.equal(invoked, false);
 });

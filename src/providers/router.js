@@ -9,8 +9,9 @@ export class ProviderError extends Error {
 }
 
 export class ProviderRouter {
-  constructor(registry, config = {}) {
+  constructor(registry, config = {}, { policy } = {}) {
     this.registry = registry;
+    this.policy = policy;
     this.defaults = normalizeProviderList(config.defaults ?? []);
     this.rules = normalizeRules(config.rules ?? []);
     this.fallback = {
@@ -25,6 +26,16 @@ export class ProviderRouter {
     let invocationCount = 0;
 
     for (const name of route.providers) {
+      const policyDecision = this.policy?.evaluateProvider(name, { agent: context.agent.name });
+      if (policyDecision?.allowed === false) {
+        attempts.push({
+          provider: name,
+          status: "skipped",
+          reason: "policy-denied",
+          policy: policyDecision.policy,
+        });
+        continue;
+      }
       if (!this.registry.has(name)) {
         attempts.push({ provider: name, status: "skipped", reason: "not-registered" });
         continue;

@@ -23,6 +23,7 @@ The repository is in early development. The first runnable vertical slice provid
   checkpoints, cancellation, and conservative restart recovery.
 - optional Ed25519 signatures for sealed, independently verifiable receipt chains.
 - a versioned secret-provider API with policy-restricted environment and confined file backends.
+- deny-first policy-as-code for operation types, workspace paths, network hosts, and providers.
 
 ## Quick start
 
@@ -143,6 +144,43 @@ etnpilot secret check gitlab.apiToken --root .
 Provider adapters can select another named reference with `tokenSecret` or `apiKeySecret`; receipt
 signing supports `privateKeySecret`. See [docs/secrets.md](docs/secrets.md) for the full contract,
 file-security rules, and extension example.
+
+## Policy as code
+
+The optional `policy` section is evaluated before human approval. It can deny protected files,
+require review for writes and shell operations, restrict network hosts, and constrain which agents
+may use a provider. When multiple rules match, the safest effect wins:
+`deny` over `human` over `allow`.
+
+```yaml
+policy:
+  operations:
+    default: deny
+    rules:
+      - id: read-source
+        effect: allow
+        kinds: [read]
+        paths: [src/**, test/**]
+      - id: reviewed-writes
+        effect: human
+        kinds: [write]
+        paths: [src/**, test/**]
+  providers:
+    default: deny
+    rules:
+      - id: copilot
+        effect: allow
+        providers: [github-copilot]
+```
+
+Inspect a decision without executing the operation:
+
+```bash
+etnpilot policy check --kind write --path src/index.js --agent builder
+etnpilot policy check --provider github-copilot --agent reviewer
+```
+
+See [docs/policy.md](docs/policy.md) for matching semantics and secure defaults.
 
 ## Plugin SDK
 

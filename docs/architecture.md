@@ -16,6 +16,7 @@
 | Webhooks | Authenticated, deduplicated event intake | GitLab issue receiver |
 | Approvals | Cross-process human decisions and redacted evidence | SQLite approval inbox |
 | Secrets | Named credential resolution behind a versioned adapter boundary | allow-listed environment and confined files |
+| Policy | Deny-first scope decisions before approval or provider invocation | versioned YAML rules evaluated in-process |
 
 ## Execution flow
 
@@ -84,6 +85,12 @@ before they reach logs, and availability checks never return the value. Custom a
 the same contract, allowing external identity or secret systems without coupling them to the
 harness, GitLab client, or model-provider APIs.
 
+Policy evaluation precedes both provider invocation and the approval handler. Operation rules match
+the operation kind plus optional agent, workspace-relative path, or URL hostname. Provider rules
+match provider and optional agent. Every matching rule is considered and the safest effect wins, so
+a broad allow cannot override a targeted denial. Policy evidence records only the section, rule,
+and effect in receipts; request paths and URLs are not copied into policy diagnostics.
+
 ## Security defaults
 
 - read-only actions may be approved by policy;
@@ -95,3 +102,5 @@ harness, GitLab client, or model-provider APIs.
   owner-only by default on POSIX systems;
 - receipts contain execution metadata, but should never include raw credentials.
 - secret values are resolved only at runtime and are never included in availability diagnostics.
+- policy-denied operations never reach the human approval handler or provider runtime;
+- paths outside the active workspace cannot match an allow rule.

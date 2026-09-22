@@ -13,6 +13,7 @@ import { WorktreeManager } from "../git/worktrees.js";
 import { GitLabPublisher } from "../gitlab/publisher.js";
 import { registerConfiguredProviders } from "../providers/register.js";
 import { ProviderRouter } from "../providers/router.js";
+import { PolicyEngine } from "../policy/engine.js";
 import { WorkflowEngine } from "../workflow/engine.js";
 import { createSecretResolver } from "../secrets/resolver.js";
 
@@ -59,10 +60,12 @@ export async function runProject({
 
   const receiptPath = join(repositoryRoot, ".etnpilot", "state", "runs", `${runId}.jsonl`);
   const receiptStore = new JsonlReceiptStore(receiptPath, { signer: receiptSigner });
+  const policy = new PolicyEngine(bootstrapConfig.policy);
   const harness = new Harness({
-    approvalPolicy: new ApprovalPolicy(bootstrapConfig.approval),
+    approvalPolicy: new ApprovalPolicy(bootstrapConfig.approval, { policy }),
     approvalHandler,
     receiptStore,
+    policy,
   });
   const { config } = await loadProject(harness, workspace.path, env);
   await registerConfiguredProviders(harness, config.providers, {
@@ -71,7 +74,7 @@ export async function runProject({
     secretResolver: secrets,
     factories: providerFactories,
   });
-  harness.setProviderRouter(new ProviderRouter(harness.providers, config.routing));
+  harness.setProviderRouter(new ProviderRouter(harness.providers, config.routing, { policy }));
   const workflow = normalizeWorkflow(config.workflow, agent ?? config.defaultAgent ?? "orchestrator");
   const engine = new WorkflowEngine({
     concurrency: workflow.concurrency,

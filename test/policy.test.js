@@ -1,0 +1,79 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { ApprovalPolicy } from "../src/core/approval-policy.js";
+import { PolicyEngine } from "../src/policy/engine.js";
+
+test("operation policy applies the safest matching rule", () => {
+  const policy = new PolicyEngine({
+    operations: {
+      default: "deny",
+      rules: [
+        { id: "read-project", effect: "allow", kinds: ["read"], paths: ["**"] },
+        { id: "protect-env", effect: "deny", kinds: ["read", "write"], paths: [".env", "**/.env"] },
+        { id: "write-project", effect: "human", kinds: ["write"], paths: ["**"] },
+      ],
+    },
+  });
+  const context = { agent: "builder", workspace: "/workspace/project" };
+
+  assert.deepEqual(policy.evaluateOperation({ kind: "read", fileName: "src/index.js" }, context), {
+    kind: "approve-once",
+    policy: { section: "operations", effect: "allow", rule: "read-project" },
+  });
+  assert.equal(policy.evaluateOperation({ kind: "read", fileName: ".env" }, context).kind, "reject");
+  assert.equal(policy.evaluateOperation({ kind: "write", fileName: "src/index.js" }, context).kind, "human-required");
+  assert.equal(policy.evaluateOperation({ kind: "read", fileName: "../outside.txt" }, context).kind, "reject");
+});
+
+test("network and provider policies match normalized targets", () => {
+  const policy = new PolicyEngine({
+    operations: {
+      rules: [{ id: "review-gitlab", effect: "human", kinds: ["network"], hosts: ["*.example.com"] }],
+    },
+    providers: {
+      default: "deny",
+      rules: [
+        { id: "allow-team", effect: "allow", providers: ["team-*"] },
+        { id: "deny-review-backup", effect: "deny", providers: ["team-backup"], agents: ["reviewer"] },
+      ],
+    },
+  });
+
+  assert.equal(policy.evaluateOperation({ kind: "network", url: "https://git.example.com/api?token=hidden" }).kind, "human-required");
+  assert.equal(policy.evaluateOperation({ kind: "network", url: "https://evil.invalid" }).kind, "reject");
+  assert.equal(policy.evaluateProvider("team-primary", { agent: "reviewer" }).allowed, true);
+  const denied = policy.evaluateProvider("team-backup", { agent: "reviewer" });
+  assert.equal(denied.allowed, false);
+  assert.equal(denied.policy.rule, "deny-review-backup");
+});
+
+test("approval policy cannot override a policy denial", async () => {
+  const policy = new PolicyEngine({
+    operations: {
+      rules: [{ id: "deny-keys", effect: "deny", kinds: ["read"], paths: ["**/*.pem"] }],
+    },
+  });
+  const approval = new ApprovalPolicy({ allow: ["read"] }, { policy });
+  const decision = await approval.evaluate(
+    { kind: "read", fileName: "keys/private.pem", managedApprovalRequired: true },
+    { workspace: "/workspace/project" },
+  );
+  assert.equal(decision.kind, "reject");
+  assert.equal(decision.policy.rule, "deny-keys");
+});
+
+test("policy configuration rejects ambiguous or unsupported rules", () => {
+  assert.throws(() => new PolicyEngine({ operation: {} }), /unknown section 'operation'/);
+  assert.throws(
+    () => new PolicyEngine({ operations: { rules: [{ id: "empty", effect: "allow" }] } }),
+    /requires at least one matcher/,
+  );
+  assert.throws(
+    () => new PolicyEngine({ providers: { rules: [{ id: "human", effect: "human", providers: ["model"] }] } }),
+    /unsupported effect/,
+  );
+  assert.throws(
+    () => new PolicyEngine({ operations: { rules: [{ id: "bad", effect: "allow", commands: ["npm test"] }] } }),
+    /unknown field 'commands'/,
+  );
+});
