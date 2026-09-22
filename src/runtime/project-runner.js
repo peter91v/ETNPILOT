@@ -16,6 +16,7 @@ import { ProviderRouter } from "../providers/router.js";
 import { PolicyEngine } from "../policy/engine.js";
 import { WorkflowEngine } from "../workflow/engine.js";
 import { createSecretResolver } from "../secrets/resolver.js";
+import { createTelemetry } from "../observability/telemetry.js";
 
 export async function runProject({
   root = process.cwd(),
@@ -39,6 +40,12 @@ export async function runProject({
   const secrets = secretResolver ?? createSecretResolver({ root: repositoryRoot, config: bootstrapConfig, env });
   const gitLabToken = await secrets.get("gitlab.apiToken", {
     fallback: { provider: "env", key: "ETNPILOT_GITLAB_TOKEN" },
+  });
+  const telemetry = await createTelemetry({
+    root: repositoryRoot,
+    config: bootstrapConfig,
+    secretResolver: secrets,
+    fetchImpl,
   });
   const useWorktree = worktree ?? (inPlace ? false : bootstrapConfig.workspace?.mode !== "in-place");
   const effectiveCleanupPolicy = cleanupPolicy ?? bootstrapConfig.workspace?.cleanup ?? "never";
@@ -66,6 +73,7 @@ export async function runProject({
     approvalHandler,
     receiptStore,
     policy,
+    telemetry,
   });
   const { config } = await loadProject(harness, workspace.path, env);
   await registerConfiguredProviders(harness, config.providers, {
@@ -100,6 +108,15 @@ export async function runProject({
     }
   }
   const startedAt = Date.now();
+  const workflowSpan = telemetry?.startSpan("etnpilot.workflow", {
+    attributes: {
+      "etnpilot.workflow.run_id": runId,
+      "etnpilot.workspace.mode": useWorktree ? "worktree" : "in-place",
+    },
+  });
+  const traceMetadata = workflowSpan
+    ? { traceId: workflowSpan.traceId, parentSpanId: workflowSpan.spanId }
+    : {};
   let summary;
   try {
     summary = await engine.run(workflow.steps, async (step, execution) => {
@@ -107,16 +124,37 @@ export async function runProject({
         return harness.run({
           agent: step.agent,
           input: composeAgentInput(input, execution.dependencyResults),
-          metadata: { ...metadata, workflowRunId: runId, workflowStep: step.id, workspace: workspace.path },
+          metadata: {
+            ...metadata,
+            ...traceMetadata,
+            workflowRunId: runId,
+            workflowStep: step.id,
+            workspace: workspace.path,
+          },
         });
       }
       if (step.type === "check") {
-        return runCheck(step, { cwd: workspace.path, signal: execution.signal, env });
+        return runObservedCheck(step, {
+          cwd: workspace.path,
+          signal: execution.signal,
+          env,
+          telemetry,
+          trace: traceMetadata,
+          workflowRunId: runId,
+        });
       }
       throw new Error(`Unsupported workflow step type: '${step.type}'.`);
     }, { signal, context: { runId, workspace } });
   } catch (error) {
     summary = error.workflow ?? { status: "failed", error: error.message };
+    const observability = await finishTelemetry({
+      telemetry,
+      span: workflowSpan,
+      workflowRunId: runId,
+      status: "error",
+      durationMs: Date.now() - startedAt,
+      file: bootstrapConfig.observability?.file,
+    });
     const receiptHash = await receiptStore.append({
       type: "workflow",
       terminal: true,
@@ -124,6 +162,7 @@ export async function runProject({
       status: "failed",
       durationMs: Date.now() - startedAt,
       workspace,
+      observability,
       summary,
     });
     codegraph?.graph.close();
@@ -136,6 +175,7 @@ export async function runProject({
         algorithm: receiptSigner.algorithm,
         keyId: receiptSigner.keyId,
       } : undefined,
+      observability,
       summary,
     };
     throw error;
@@ -159,6 +199,14 @@ export async function runProject({
       codegraph.graph.close();
     }
   }
+  const observability = await finishTelemetry({
+    telemetry,
+    span: workflowSpan,
+    workflowRunId: runId,
+    status: summary.status === "succeeded" ? "ok" : "error",
+    durationMs: Date.now() - startedAt,
+    file: bootstrapConfig.observability?.file,
+  });
   const receiptHash = await receiptStore.append({
     type: "workflow",
     terminal: true,
@@ -168,6 +216,7 @@ export async function runProject({
     workspace,
     git: gitEvidence,
     codegraph: codegraphEvidence,
+    observability,
     summary,
   });
   let mergeRequest;
@@ -204,7 +253,49 @@ export async function runProject({
     summary,
     git: gitEvidence,
     codegraph: codegraphEvidence,
+    observability,
     mergeRequest,
+  };
+}
+
+async function runObservedCheck(step, { cwd, signal, env, telemetry, trace, workflowRunId }) {
+  const span = telemetry?.startSpan("etnpilot.check", {
+    traceId: trace.traceId,
+    parentSpanId: trace.parentSpanId,
+    attributes: {
+      "etnpilot.workflow.run_id": workflowRunId,
+      "etnpilot.workflow.step": step.id,
+      "etnpilot.check.name": step.name ?? step.id,
+    },
+  });
+  const startedAt = Date.now();
+  try {
+    const result = await runCheck(step, { cwd, signal, env });
+    await span?.end({ attributes: { "etnpilot.duration_ms": Date.now() - startedAt } });
+    return result;
+  } catch (error) {
+    await span?.end({
+      status: "error",
+      attributes: {
+        "error.type": error.code ?? error.name ?? "check_failed",
+        "etnpilot.duration_ms": Date.now() - startedAt,
+      },
+    });
+    throw error;
+  }
+}
+
+async function finishTelemetry({ telemetry, span, workflowRunId, status, durationMs, file }) {
+  if (!telemetry || !span) return undefined;
+  await span.end({ status, attributes: { "etnpilot.duration_ms": durationMs } });
+  const flushed = await telemetry.flush();
+  return {
+    version: 1,
+    traceId: span.traceId,
+    spanId: span.spanId,
+    file: file ?? ".etnpilot/state/telemetry.jsonl",
+    summary: telemetry.summary(workflowRunId),
+    exportErrors: flushed.errors.length,
   };
 }
 

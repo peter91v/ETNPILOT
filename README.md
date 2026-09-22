@@ -24,6 +24,7 @@ The repository is in early development. The first runnable vertical slice provid
 - optional Ed25519 signatures for sealed, independently verifiable receipt chains.
 - a versioned secret-provider API with policy-restricted environment and confined file backends.
 - deny-first policy-as-code for operation types, workspace paths, network hosts, and providers.
+- OTLP/HTTP traces with provider usage, configurable cost estimates, and workflow budgets.
 
 ## Quick start
 
@@ -181,6 +182,42 @@ etnpilot policy check --provider github-copilot --agent reviewer
 ```
 
 See [docs/policy.md](docs/policy.md) for matching semantics and secure defaults.
+
+## Observability and budgets
+
+Every workflow can write OpenTelemetry-compatible OTLP/JSON spans locally and optionally export
+them to an OTLP/HTTP collector. Provider spans use the GenAI token attributes, while prompts,
+responses, credentials, and tool arguments are excluded from telemetry.
+
+```yaml
+observability:
+  enabled: true
+  file: .etnpilot/state/telemetry.jsonl
+  failureMode: ignore
+  otlp:
+    enabled: false
+    endpoint: http://127.0.0.1:4318/v1/traces
+  pricing:
+    currency: USD
+    models:
+      team-model:
+        inputPerMillion: 2
+        outputPerMillion: 8
+  budgets:
+    maxInputTokensPerWorkflow: 500000
+    maxEstimatedCostPerWorkflow: 5
+```
+
+Pricing is operator-supplied and produces an estimate, not a billing statement. Copilot SDK usage
+units are tracked separately from currency. Inspect all data or one workflow without a collector:
+
+```bash
+etnpilot telemetry summary
+etnpilot telemetry summary <workflow-run-id>
+```
+
+See [docs/observability.md](docs/observability.md) for OTLP authentication, supported budgets, and
+failure behavior.
 
 ## Plugin SDK
 

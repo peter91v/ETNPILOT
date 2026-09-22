@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { Harness } from "../src/core/harness.js";
 import { ProviderError, ProviderRouter } from "../src/providers/router.js";
 import { PolicyEngine } from "../src/policy/engine.js";
+import { Telemetry } from "../src/observability/telemetry.js";
 
 test("router skips unavailable and incompatible providers", async () => {
   const harness = new Harness();
@@ -83,6 +84,32 @@ test("router skips providers denied by policy", async () => {
     reason: "policy-denied",
     policy: { section: "providers", effect: "deny", default: true },
   });
+});
+
+test("router stops after a cumulative usage budget is exceeded", async () => {
+  const harness = new Harness();
+  harness.registerProvider({
+    name: "metered",
+    capabilities: ["chat"],
+    invoke: async () => ({
+      text: "done",
+      model: "metered-model",
+      usage: { inputTokens: 101, outputTokens: 1 },
+    }),
+  });
+  const telemetry = new Telemetry({ budgets: { maxInputTokensPerWorkflow: 100 } });
+  const router = new ProviderRouter(harness.providers, { defaults: ["metered"] });
+  await assert.rejects(
+    () => router.invoke({
+      agent: { name: "builder", requires: ["chat"] },
+      metadata: { workflowRunId: "workflow-budget" },
+      runId: "agent-budget",
+      telemetry,
+    }),
+    (error) => error instanceof ProviderError
+      && error.code === "budget_exceeded"
+      && error.providerAttempts[0].status === "succeeded",
+  );
 });
 
 test("harness receipts record the provider selected by fallback", async () => {

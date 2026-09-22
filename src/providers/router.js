@@ -1,3 +1,5 @@
+import { telemetryProviderAttributes } from "../observability/telemetry.js";
+
 export class ProviderError extends Error {
   constructor(message, { code = "provider_error", retryable = false, safeToRetry = false, cause } = {}) {
     super(message, { cause });
@@ -51,15 +53,37 @@ export class ProviderRouter {
       }
       if (invocationCount >= this.fallback.maxAttempts) break;
       invocationCount += 1;
+      const startedAt = Date.now();
+      const providerSpan = context.telemetry?.startSpan("gen_ai.invoke_agent", {
+        traceId: context.trace?.traceId,
+        parentSpanId: context.trace?.parentSpanId,
+        kind: 3,
+        attributes: {
+          "gen_ai.operation.name": "chat",
+          "gen_ai.request.model": context.agent.model,
+          "etnpilot.provider.name": name,
+          "etnpilot.agent.name": context.agent.name,
+          "etnpilot.workflow.run_id": context.metadata?.workflowRunId,
+          "etnpilot.agent.run_id": context.runId,
+        },
+      });
+      let result;
       try {
-        const result = await provider.invoke(context);
-        attempts.push({ provider: name, status: "succeeded" });
-        return { provider: name, result, attempts };
+        result = await provider.invoke(context);
       } catch (error) {
+        const durationMs = Date.now() - startedAt;
+        await providerSpan?.end({
+          status: "error",
+          attributes: {
+            "error.type": error instanceof ProviderError ? error.code : "provider_error",
+            "etnpilot.duration_ms": durationMs,
+          },
+        });
         const safeFallback = error instanceof ProviderError && error.retryable && error.safeToRetry;
         attempts.push({
           provider: name,
           status: "failed",
+          durationMs,
           code: error instanceof ProviderError ? error.code : "provider_error",
           retryable: error instanceof ProviderError ? error.retryable : false,
           safeToRetry: error instanceof ProviderError ? error.safeToRetry : false,
@@ -67,7 +91,34 @@ export class ProviderRouter {
         if (!this.fallback.enabled || !safeFallback || invocationCount >= this.fallback.maxAttempts) {
           throw annotateError(error, name, attempts);
         }
+        continue;
       }
+      const durationMs = Date.now() - startedAt;
+      const accounting = context.telemetry?.recordProviderUsage({
+        workflowRunId: context.metadata?.workflowRunId,
+        agentRunId: context.runId,
+        provider: name,
+        model: result?.model ?? context.agent.model,
+        usage: result?.usage,
+      });
+      await providerSpan?.end({
+        attributes: {
+          "etnpilot.duration_ms": durationMs,
+          ...telemetryProviderAttributes(accounting),
+        },
+      });
+      attempts.push({
+        provider: name,
+        status: "succeeded",
+        durationMs,
+        ...(accounting ? { usage: compactAccounting(accounting) } : {}),
+      });
+      if (accounting?.budgetExceeded) {
+        const error = new ProviderError("Workflow usage budget exceeded.", { code: "budget_exceeded" });
+        error.budget = accounting.budgetExceeded;
+        throw annotateError(error, name, attempts);
+      }
+      return { provider: name, result, attempts, accounting };
     }
 
     const error = new ProviderError(
@@ -94,6 +145,20 @@ export class ProviderRouter {
       ]),
     };
   }
+}
+
+function compactAccounting(accounting) {
+  return {
+    inputTokens: accounting.inputTokens,
+    outputTokens: accounting.outputTokens,
+    cacheReadTokens: accounting.cacheReadTokens,
+    cacheWriteTokens: accounting.cacheWriteTokens,
+    providerUnits: accounting.providerUnits,
+    ...(accounting.estimatedCost === undefined ? {} : {
+      estimatedCost: accounting.estimatedCost,
+      currency: accounting.currency,
+    }),
+  };
 }
 
 function normalizeRules(rules) {

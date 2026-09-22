@@ -48,6 +48,7 @@ secrets:
         - ETNPILOT_GITLAB_WEBHOOK_TOKEN
         - ETNPILOT_GITHUB_TOKEN
         - ETNPILOT_PROVIDER_API_KEY
+        - ETNPILOT_OTLP_HEADERS
     local:
       type: file
       root: .etnpilot/secrets
@@ -58,6 +59,7 @@ secrets:
     gitlab.webhookToken: { provider: env, key: ETNPILOT_GITLAB_WEBHOOK_TOKEN }
     github.token: { provider: env, key: ETNPILOT_GITHUB_TOKEN }
     provider.apiKey: { provider: env, key: ETNPILOT_PROVIDER_API_KEY }
+    observability.otlpHeaders: { provider: env, key: ETNPILOT_OTLP_HEADERS }
 receipts:
   signing:
     enabled: false
@@ -67,6 +69,21 @@ codegraph:
   database: .etnpilot/state/codegraph.sqlite
   autoIndex: true
   maxImpactDepth: 20
+observability:
+  enabled: true
+  file: .etnpilot/state/telemetry.jsonl
+  serviceName: etnpilot
+  environment: development
+  failureMode: ignore
+  otlp:
+    enabled: false
+    endpoint: http://127.0.0.1:4318/v1/traces
+    headersSecret: observability.otlpHeaders
+    timeoutMs: 5000
+  pricing:
+    currency: USD
+    models: {}
+  budgets: {}
 approval:
   allow: [read]
   requireHuman: [write, shell, network]

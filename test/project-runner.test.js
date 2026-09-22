@@ -49,6 +49,13 @@ test("project runner executes an agent and check in an isolated worktree", async
     "      root: .etnpilot/keys",
     "  values:",
     "    receipt.signingKey: { provider: signing-files, key: receipt-signing-private.pem }",
+    "observability:",
+    "  enabled: true",
+    "  file: .etnpilot/state/telemetry.jsonl",
+    "  pricing:",
+    "    currency: USD",
+    "    models:",
+    "      fake-model: { inputPerMillion: 10, outputPerMillion: 20 }",
     "workflow:",
     "  concurrency: 1",
     "  steps:",
@@ -77,7 +84,11 @@ test("project runner executes an agent and check in an isolated worktree", async
           await mkdir(join(context.workingDirectory, "src"), { recursive: true });
           await writeFile(join(context.workingDirectory, "src", "generated.js"), "export const generated = true;\n");
           await writeFile(join(context.workingDirectory, "result.txt"), String(request.input));
-          return { text: "done" };
+          return {
+            text: "done",
+            model: "fake-model",
+            usage: { inputTokens: 1000, outputTokens: 100 },
+          };
         },
       }),
     },
@@ -94,6 +105,12 @@ test("project runner executes an agent and check in an isolated worktree", async
   assert.equal(receipts.length, 2);
   assert.equal(result.receiptProof.algorithm, "Ed25519");
   assert.equal(result.receiptProof.keyId, receiptKeys.keyId);
+  assert.match(result.observability.traceId, /^[a-f0-9]{32}$/);
+  assert.equal(result.observability.summary.inputTokens, 1000);
+  assert.equal(result.observability.summary.outputTokens, 100);
+  assert.equal(result.observability.summary.estimatedCost, 0.012);
+  const telemetryLines = (await readFile(join(root, ".etnpilot", "state", "telemetry.jsonl"), "utf8")).trim().split("\n");
+  assert.equal(telemetryLines.length, 4);
   const verifier = createReceiptVerifier(await readFile(receiptKeys.publicKeyPath, "utf8"));
   const verification = await verifyReceiptFile(result.receiptPath, {
     verifiers: new Map([[verifier.keyId, verifier]]),

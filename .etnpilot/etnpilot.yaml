@@ -41,6 +41,21 @@ codegraph:
   autoIndex: true
   maxImpactDepth: 20
 
+observability:
+  enabled: true
+  file: .etnpilot/state/telemetry.jsonl
+  serviceName: etnpilot
+  environment: development
+  failureMode: ignore
+  otlp:
+    enabled: false
+    endpoint: http://127.0.0.1:4318/v1/traces
+    timeoutMs: 5000
+  pricing:
+    currency: USD
+    models: {}
+  budgets: {}
+
 approval:
   allow: [read]
   requireHuman: [write, shell, network]
