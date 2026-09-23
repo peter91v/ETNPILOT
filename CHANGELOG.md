@@ -103,6 +103,16 @@ pre-1.0, so breaking changes may appear in any release.
   `git merge-tree`; a conflicting branch is not published by default.
 - `etnpilot init --template minimal|regulated`, `etnpilot pipeline status`.
 
+### Fixed — advice that cannot be followed
+
+- `etnpilot doctor` and the Copilot provider both said "Install
+  '@github/copilot-sdk'" on every platform. The SDK keeps its runtime in
+  per-platform packages that GitHub publishes for linux, macOS and Windows
+  only; elsewhere — Android, for instance — that install reports success and
+  installs nothing, so the advice sent people in a circle. Both now name the
+  platform and point at the `openai-compatible` provider instead. `doctor`
+  reports `copilotSdkAvailableForPlatform`.
+
 ### Fixed — an absent code index no longer costs the run
 
 - CodeGraph ships its compiled library in per-platform bundles and publishes

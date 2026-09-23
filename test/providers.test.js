@@ -183,3 +183,31 @@ test("configured providers resolve API keys through the secret resolver", async 
     globalThis.fetch = originalFetch;
   }
 });
+
+test("where no Copilot build exists, the advice does not send you in a circle", async () => {
+  const { copilotSdkAdvice, copilotSdkPlatformSupported, createCopilotProvider } =
+    await import("../src/providers/copilot.js");
+
+  for (const platform of ["linux", "darwin", "win32"]) {
+    assert.equal(copilotSdkPlatformSupported(platform), true);
+    assert.match(copilotSdkAdvice(platform, "x64"), /^Install '@github\/copilot-sdk'/);
+  }
+
+  // On Android, 'npm install @github/copilot-sdk' reports success and installs
+  // nothing, so telling someone to install it is worse than saying nothing.
+  assert.equal(copilotSdkPlatformSupported("android"), false);
+  const advice = copilotSdkAdvice("android", "arm64");
+  assert.match(advice, /publishes no Copilot SDK build for android-arm64/);
+  assert.doesNotMatch(advice, /^Install/);
+  assert.match(advice, /openai-compatible/);
+
+  // The runtime failure carries the same advice, not a bare module error.
+  const provider = createCopilotProvider({
+    importer: () => { throw new Error("Cannot find module '@github/copilot-sdk'"); },
+  });
+  await assert.rejects(provider.invoke({ input: "x", agent: { name: "a" } }), (error) => {
+    assert.equal(error.code, "sdk_unavailable");
+    assert.match(error.message, /requires '@github\/copilot-sdk'/);
+    return true;
+  });
+});

@@ -17,6 +17,7 @@ import { Harness } from "../core/harness.js";
 import { verifyReceiptFile } from "../core/receipt-store.js";
 import { generateReceiptKeyPair, loadReceiptVerifiers } from "../core/receipt-signing.js";
 import { createTerminalApprovalHandler } from "../core/terminal-approval.js";
+import { copilotSdkAdvice, copilotSdkPlatformSupported } from "../providers/copilot.js";
 import { WorktreeManager } from "../git/worktrees.js";
 import { GitLabClient } from "../gitlab/client.js";
 import { latestPipeline } from "../gitlab/pipelines.js";
@@ -516,6 +517,7 @@ async function diagnose(root) {
     git: await commandExists("git"),
     sqlite: await import("node:sqlite").then(() => true, () => false),
     copilotSdk: await import("@github/copilot-sdk").then(() => true, () => false),
+    copilotSdkAvailableForPlatform: copilotSdkPlatformSupported(),
     project: await access(join(root, ".etnpilot", "etnpilot.yaml")).then(() => true, () => false),
   };
   return {
@@ -524,7 +526,7 @@ async function diagnose(root) {
     hints: [
       checks.nodeSupported ? undefined : "Node.js 22.13 or newer is required for node:sqlite.",
       checks.git ? undefined : "Install git; ETNPilot runs every repository operation through it.",
-      checks.copilotSdk ? undefined : "Install '@github/copilot-sdk' to use the GitHub Copilot provider.",
+      checks.copilotSdk ? undefined : copilotSdkAdvice(),
       checks.project ? undefined : "No '.etnpilot/etnpilot.yaml' found. Run 'etnpilot init' first.",
     ].filter(Boolean),
   };
