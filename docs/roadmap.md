@@ -68,11 +68,15 @@
 ## M6 — Review surface and multi-language support
 
 - [x] Local-first web UI for reviewing runs and approvals
+- [x] Merge-train awareness: which queued merge requests this branch collides with
+- [x] Dependency inventory and license gates for Python, Go, and Rust
+- [x] Building a devcontainer image rather than only reusing a prebuilt one
 
 ## Brainstorming backlog
 
-- merge-train awareness beyond the single-branch rehearsal;
-- richer devcontainer support, including building an image rather than reusing
-  a prebuilt one;
-- policy gates for languages other than JavaScript, whose dependency metadata
-  lives elsewhere.
+- an end-to-end run against a real provider and a real GitLab instance, which
+  nothing in the test suite covers today;
+- vulnerability data (OSV) alongside the license gate;
+- devcontainer `dockerComposeFile` support;
+- license detection for Go and Cargo, which needs the module cache rather than
+  the manifest.

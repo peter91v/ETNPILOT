@@ -22,7 +22,8 @@ import { createSecretResolver } from "../secrets/resolver.js";
 import { PolicyEngine } from "../policy/engine.js";
 import { loadPlugins } from "../plugins/load-plugin.js";
 import { summarizeTelemetryFile } from "../observability/telemetry.js";
-import { checkDependencyPolicy, readInstalledPackages } from "../supply/dependencies.js";
+import { checkDependencyPolicy } from "../supply/dependencies.js";
+import { readProjectPackages } from "../supply/ecosystems.js";
 import { generateSbom } from "../supply/sbom.js";
 import { scanForSecrets } from "../supply/secret-scan.js";
 import { buildRunAttestation } from "../supply/attestation.js";
@@ -372,9 +373,9 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
   } else if (command === "deps" && subcommand === "check") {
     const root = resolve(values.root);
     const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml")).catch(ignoreMissing);
-    const packages = await readInstalledPackages(root);
-    const report = checkDependencyPolicy(packages, config?.supplyChain ?? {});
-    console.log(JSON.stringify(report, null, 2));
+    const inventory = await readProjectPackages(root, config?.supplyChain ?? {});
+    const report = checkDependencyPolicy(inventory.packages, config?.supplyChain ?? {});
+    console.log(JSON.stringify({ ecosystems: inventory.ecosystems, ...report }, null, 2));
     return report.ok ? 0 : 1;
   } else if (command === "sbom") {
     const root = resolve(values.root);

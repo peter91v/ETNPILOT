@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 const SUPPORTED_RUNTIMES = new Set(["docker", "podman"]);
 const DEFAULTS = Object.freeze({
@@ -144,12 +145,20 @@ export async function readDevcontainerImage(root, {
   if (typeof manifest.image === "string" && manifest.image.length > 0) {
     return { image: manifest.image, source: path };
   }
-  if (manifest.build || manifest.dockerFile || manifest.dockerComposeFile) {
-    throw new Error(
-      `'${path}' builds its image rather than naming one. Prebuild it and set sandbox.image,`
-      + " or disable sandbox.useDevcontainerImage.",
-    );
+  const dockerfile = manifest.build?.dockerfile ?? manifest.dockerFile;
+  if (dockerfile) {
+    return {
+      image: undefined,
+      reason: "build-required",
+      build: {
+        dockerfile: join(dirname(path), dockerfile),
+        context: join(dirname(path), manifest.build?.context ?? "."),
+        args: manifest.build?.args ?? {},
+      },
+      source: path,
+    };
   }
+  if (manifest.dockerComposeFile) return { image: undefined, reason: "docker-compose-not-supported" };
   return { image: undefined, reason: "no-image-field" };
 }
 
@@ -187,4 +196,58 @@ function stripJsonComments(content) {
   }
   // Trailing commas are legal in JSONC and fatal in JSON.
   return output.replaceAll(/,(\s*[}\]])/g, "$1");
+}
+
+// Building the devcontainer rather than reusing a published image. The tag is
+// derived from the Dockerfile and its arguments, so an unchanged definition
+// reuses the existing image and a changed one cannot be served stale.
+export async function buildDevcontainerImage(root, {
+  build,
+  runtime = "docker",
+  run = runCommand,
+} = {}) {
+  if (!build?.dockerfile) throw new TypeError("A devcontainer build requires a dockerfile path.");
+  const projectRoot = resolve(root);
+  const dockerfilePath = resolve(projectRoot, build.dockerfile);
+  assertInside(projectRoot, dockerfilePath, "dockerfile");
+  const contextPath = resolve(projectRoot, build.context ?? ".");
+  assertInside(projectRoot, contextPath, "build context");
+  const contents = await readFile(dockerfilePath, "utf8");
+  const args = Object.entries(build.args ?? {}).map(([key, value]) => [key, String(value)]).sort();
+  const tag = `etnpilot-devcontainer:${createHash("sha256")
+    .update(contents)
+    .update(JSON.stringify(args))
+    .digest("hex")
+    .slice(0, 16)}`;
+
+  const existing = await run(runtime, ["image", "inspect", tag], { allowFailure: true });
+  if (existing.code === 0) return { image: tag, built: false, reason: "cached" };
+
+  const buildArgs = args.flatMap(([key, value]) => ["--build-arg", `${key}=${value}`]);
+  const result = await run(runtime, [
+    "build",
+    "--file", dockerfilePath,
+    "--tag", tag,
+    ...buildArgs,
+    contextPath,
+  ]);
+  if (result.code !== 0) {
+    throw new Error(`Building the devcontainer image failed (${runtime} build exited with ${result.code}).`);
+  }
+  return { image: tag, built: true };
+}
+
+function assertInside(root, path, label) {
+  const candidate = relative(root, path);
+  if (candidate.startsWith("..") || isAbsolute(candidate)) {
+    throw new Error(`The devcontainer ${label} must stay inside the project.`);
+  }
+}
+
+function runCommand(command, args, { allowFailure = false } = {}) {
+  return new Promise((resolveRun, reject) => {
+    const child = spawn(command, args, { stdio: ["ignore", "inherit", "inherit"] });
+    child.once("error", (error) => (allowFailure ? resolveRun({ code: 1, error }) : reject(error)));
+    child.once("exit", (code) => resolveRun({ code: code ?? 1 }));
+  });
 }

@@ -120,13 +120,63 @@ test("a devcontainer image is reused when the project already declares one", asy
 
   await writeFile(join(root, ".devcontainer", "devcontainer.json"), JSON.stringify({
     name: "built",
-    build: { dockerfile: "Dockerfile" },
+    build: { dockerfile: "Dockerfile", args: { NODE_VERSION: "24" } },
   }));
-  await assert.rejects(
-    () => readDevcontainerImage(root),
-    /builds its image rather than naming one/,
-  );
+  const building = await readDevcontainerImage(root);
+  assert.equal(building.image, undefined);
+  assert.equal(building.reason, "build-required");
+  assert.deepEqual(building.build, {
+    dockerfile: join(".devcontainer", "Dockerfile"),
+    context: join(".devcontainer", "."),
+    args: { NODE_VERSION: "24" },
+  });
 
   const empty = await mkdtemp(join(tmpdir(), "etnpilot-no-devcontainer-"));
   assert.deepEqual(await readDevcontainerImage(empty), { image: undefined, reason: "no-devcontainer" });
+});
+
+test("a devcontainer image is built once and reused by content", async () => {
+  const { buildDevcontainerImage } = await import("../src/runtime/sandbox.js");
+  const { mkdir } = await import("node:fs/promises");
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-devcontainer-build-"));
+  await mkdir(join(root, ".devcontainer"), { recursive: true });
+  await writeFile(join(root, ".devcontainer", "Dockerfile"), "FROM node:24-bookworm-slim\n");
+  const build = { dockerfile: join(".devcontainer", "Dockerfile"), context: ".devcontainer", args: { NODE_VERSION: "24" } };
+
+  const calls = [];
+  const run = async (command, args) => {
+    calls.push([command, ...args]);
+    // The first inspect misses, later ones find the tag we just built.
+    const isInspect = args[0] === "image";
+    return { code: isInspect && calls.filter(([, verb]) => verb === "build").length === 0 ? 1 : 0 };
+  };
+
+  const first = await buildDevcontainerImage(root, { build, run });
+  assert.equal(first.built, true);
+  assert.match(first.image, /^etnpilot-devcontainer:[a-f0-9]{16}$/);
+  assert.deepEqual(calls[0].slice(0, 3), ["docker", "image", "inspect"]);
+  assert.deepEqual(calls[1].slice(0, 2), ["docker", "build"]);
+  assert.ok(calls[1].includes("--build-arg"));
+  assert.ok(calls[1].includes("NODE_VERSION=24"));
+
+  // An unchanged definition reuses the image instead of rebuilding it.
+  const second = await buildDevcontainerImage(root, { build, run });
+  assert.deepEqual(second, { image: first.image, built: false, reason: "cached" });
+
+  // A changed Dockerfile cannot be served from the old tag.
+  await writeFile(join(root, ".devcontainer", "Dockerfile"), "FROM node:24-bookworm\n");
+  const changed = await buildDevcontainerImage(root, { build, run: async () => ({ code: 0 }) });
+  assert.notEqual(changed.image, first.image);
+
+  // A build that fails is reported rather than returning an unusable tag.
+  await assert.rejects(
+    () => buildDevcontainerImage(root, { build, run: async (_c, args) => ({ code: args[0] === "build" ? 2 : 1 }) }),
+    /Building the devcontainer image failed \(docker build exited with 2\)/,
+  );
+
+  // The build must stay inside the project.
+  await assert.rejects(
+    () => buildDevcontainerImage(root, { build: { dockerfile: "../escape/Dockerfile" }, run }),
+    /must stay inside the project/,
+  );
 });

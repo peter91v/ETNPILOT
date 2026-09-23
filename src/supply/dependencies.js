@@ -35,15 +35,33 @@ export function checkDependencyPolicy(packages, config = {}) {
   const deniedPackages = config.packages?.deny ?? [];
 
   const violations = [];
+  let unlicensedEcosystem = 0;
   for (const entry of packages) {
     if (deniedPackages.some((pattern) => matchesName(pattern, entry.name))) {
-      violations.push({ package: entry.name, version: entry.version, reason: "package-denied" });
+      violations.push({
+        package: entry.name,
+        version: entry.version,
+        ...(entry.ecosystem ? { ecosystem: entry.ecosystem } : {}),
+        reason: "package-denied",
+      });
       continue;
     }
     const alternatives = entry.license === undefined ? [] : parseLicenseExpression(entry.license);
     if (alternatives.length === 0) {
+      // Go modules and Cargo lockfiles carry no license data at all. Counting
+      // that as a violation would be a finding nobody can act on, so it is
+      // reported as a number instead.
+      if (entry.licenseAvailable === false) {
+        unlicensedEcosystem += 1;
+        continue;
+      }
       if (unknownEffect === "deny") {
-        violations.push({ package: entry.name, version: entry.version, reason: "license-unknown" });
+        violations.push({
+          package: entry.name,
+          version: entry.version,
+          ...(entry.ecosystem ? { ecosystem: entry.ecosystem } : {}),
+          reason: "license-unknown",
+        });
       }
       continue;
     }
@@ -54,6 +72,7 @@ export function checkDependencyPolicy(packages, config = {}) {
       violations.push({
         package: entry.name,
         version: entry.version,
+        ...(entry.ecosystem ? { ecosystem: entry.ecosystem } : {}),
         license: entry.license,
         reason: alternatives.flat().some((identifier) => deny.has(identifier))
           ? "license-denied"
@@ -65,6 +84,7 @@ export function checkDependencyPolicy(packages, config = {}) {
     checked: packages.length,
     violations,
     ok: violations.length === 0,
+    ...(unlicensedEcosystem > 0 ? { unlicensedEcosystem } : {}),
     ...(allow.size > 0 ? { allowedLicenses: [...allow].sort() } : {}),
   };
 }

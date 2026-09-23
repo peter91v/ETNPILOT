@@ -493,7 +493,7 @@ because they are one opinion with two voices. One rejection blocks the step.
 ## Supply-chain gates
 
 ```bash
-etnpilot deps check      # licenses and denied packages
+etnpilot deps check      # npm, PyPI, Go, and Cargo: licenses and denied packages
 etnpilot sbom            # CycloneDX inventory
 etnpilot scan secrets    # credentials in tracked files
 etnpilot attest <receipt-file>   # in-toto/SLSA provenance for a run
