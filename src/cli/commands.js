@@ -11,7 +11,7 @@ import {
   unsetSetting,
 } from "../config/settings.js";
 import { verifyProjectContent, writeContentLock } from "../content/provenance.js";
-import { ApprovalInbox } from "../core/approval-inbox.js";
+import { ApprovalInbox, createInboxApprovalHandler } from "../core/approval-inbox.js";
 import { ApprovalPolicy } from "../core/approval-policy.js";
 import { Harness } from "../core/harness.js";
 import { verifyReceiptFile } from "../core/receipt-store.js";
@@ -54,6 +54,7 @@ export const CLI_OPTIONS = Object.freeze({
   status: { type: "string" },
   limit: { type: "string" },
   actor: { type: "string" },
+  approvals: { type: "string" },
   reason: { type: "string" },
   force: { type: "boolean", default: false },
   "private-key": { type: "string" },
@@ -78,7 +79,7 @@ export const USAGE = `ETNPilot
 
 Usage:
   etnpilot init [directory] [--template default|minimal|regulated]
-  etnpilot run <task> [--agent name] [--root directory]
+  etnpilot run <task> [--agent name] [--root directory] [--approvals terminal|inbox]
     [--worktree | --no-worktree] [--cleanup-worktree] [--publish] [--dry-run]
     [--record-fixtures file | --fixtures file]
   etnpilot replay <receipt-file> [--root directory] [--public-key path]
@@ -158,7 +159,7 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
       dryRun: values["dry-run"],
       recordFixtures: values["record-fixtures"],
       fixtures: values.fixtures,
-      approvalHandler: createTerminalApprovalHandler(),
+      approvalHandler: await createRunApprovalHandler(resolve(values.root), values.approvals),
     });
     console.log(JSON.stringify(result, null, 2));
     return result.summary?.status === "succeeded" ? 0 : 1;
@@ -490,6 +491,30 @@ function briefValue(value) {
   }
   const text = JSON.stringify(value);
   return text !== undefined && text.length > 120 ? `${text.slice(0, 117)}...` : String(text);
+}
+
+// Who answers a run's approval requests. The terminal asks the person who
+// started the run, which needs that terminal to stay in front of them. The
+// inbox lets anyone decide from anywhere — the TUI, the page, another window —
+// which is also the only way to answer a run that nobody is sitting in front of.
+async function createRunApprovalHandler(root, source = "terminal") {
+  if (source === "terminal") return createTerminalApprovalHandler();
+  if (source !== "inbox") throw new Error(`Unknown approval source '${source}'. Use 'terminal' or 'inbox'.`);
+  const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml")).catch(ignoreMissing);
+  const inboxConfig = config?.approval?.inbox ?? {};
+  const inbox = new ApprovalInbox(
+    resolve(root, inboxConfig.database ?? ".etnpilot/state/approvals.sqlite"),
+    { redact: inboxConfig.redactSecrets === true },
+  );
+  const handler = createInboxApprovalHandler({
+    inbox,
+    timeoutMs: inboxConfig.timeoutMs ?? 24 * 60 * 60_000,
+    pollIntervalMs: inboxConfig.pollIntervalMs ?? 500,
+    onPending: (record) => {
+      console.error(`Waiting for a decision on ${record.operationKind} ${record.id} — 'etnpilot tui' or 'etnpilot approval approve'.`);
+    },
+  });
+  return handler;
 }
 
 async function writeOrPrint(path, document) {

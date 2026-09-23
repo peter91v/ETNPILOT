@@ -1,5 +1,6 @@
 import { createCopilotProvider } from "./copilot.js";
 import { createOpenAICompatibleProvider } from "./openai-compatible.js";
+import { createScriptedProvider } from "./scripted.js";
 
 const BUILTIN_FACTORIES = {
   "github-copilot": async (name, config, context) => createCopilotProvider({
@@ -26,6 +27,12 @@ const BUILTIN_FACTORIES = {
       fallbackKey: "ETNPILOT_PROVIDER_API_KEY",
       required: Boolean(config.apiKeySecret),
     }),
+  }),
+  scripted: async (name, config, context) => createScriptedProvider({
+    ...config,
+    name,
+    workingDirectory: config.workingDirectory ?? context.workingDirectory,
+    sandbox: context.sandbox,
   }),
 };
 

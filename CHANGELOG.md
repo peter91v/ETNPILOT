@@ -103,6 +103,26 @@ pre-1.0, so breaking changes may appear in any release.
   `git merge-tree`; a conflicting branch is not published by default.
 - `etnpilot init --template minimal|regulated`, `etnpilot pipeline status`.
 
+### Added — trying it out without a provider account
+
+- A `scripted` provider type performs exactly the workspace tool calls the
+  configuration lists, through the same mediated tools and the same approval
+  path every other provider uses. It asks no model and needs no SDK, endpoint
+  or key, so the harness — policy, approvals, worktree, checks, receipts,
+  merge rehearsal — can be exercised on a machine that has none of those.
+  Every test in this repository injected a provider; that seam lived only in
+  the test code, so nobody using ETNPilot could do what its tests do.
+  See `docs/trying-it-out.md`.
+- `etnpilot run --approvals inbox` puts a run's requests in the durable inbox
+  instead of the terminal that started it, so they can be answered from the
+  TUI, the page or another window. Without it a run with no interactive
+  terminal rejects every request, which is safe but unusable unattended.
+- A refused or failed scripted step fails the run and names the step, rather
+  than reporting `succeeded` over a receipt full of denials.
+- When every candidate provider is passed over, the error names why for each
+  one. It used to blame capabilities and send people to the agent manifest
+  when the cause was a denial in `policy.providers`.
+
 ### Fixed — advice that cannot be followed
 
 - `etnpilot doctor` and the Copilot provider both said "Install
