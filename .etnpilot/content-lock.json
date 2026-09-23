@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "algorithm": "sha256",
+  "entries": [
+    {
+      "type": "agent",
+      "name": "builder",
+      "path": ".etnpilot/agents/builder.yaml",
+      "digest": "sha256:302d5fbf93888f1218f6fe6a074ca59199f7c1004585fbf21fac2c7363fac31d",
+      "bytes": 138
+    },
+    {
+      "type": "agent",
+      "name": "orchestrator",
+      "path": ".etnpilot/agents/orchestrator.yaml",
+      "digest": "sha256:6c339fde6347cfba897fbacc9981d5b440a67e665ae0ca27a16c7810fa7277d0",
+      "bytes": 158
+    },
+    {
+      "type": "agent",
+      "name": "reviewer",
+      "path": ".etnpilot/agents/reviewer.yaml",
+      "digest": "sha256:96463c1496dd388a2f40099fc0a8c94987f486926a8cc2bd753ae59a236597a6",
+      "bytes": 133
+    },
+    {
+      "type": "instruction",
+      "name": "project",
+      "path": ".etnpilot/instructions/project.md",
+      "digest": "sha256:b95351251914b295158435f08391084610bf989e6fac1642ee80858efd88c73b",
+      "bytes": 354
+    },
+    {
+      "type": "prompt",
+      "name": "builder",
+      "path": ".etnpilot/prompts/builder.md",
+      "digest": "sha256:11abd19126c6e1f5cdeb96b43e45ef6ebb5760a20815d2b23e65073806f0822c",
+      "bytes": 182
+    },
+    {
+      "type": "prompt",
+      "name": "orchestrator",
+      "path": ".etnpilot/prompts/orchestrator.md",
+      "digest": "sha256:a608acaf6e0a481c0fe4203829605da427d9a22d750c31617c8bfba348f74b98",
+      "bytes": 238
+    },
+    {
+      "type": "prompt",
+      "name": "reviewer",
+      "path": ".etnpilot/prompts/reviewer.md",
+      "digest": "sha256:f110eae6a37ba478e12716c94c50fc8c28eb0184bbe97082f3207082f55a4c02",
+      "bytes": 175
+    },
+    {
+      "type": "skill",
+      "name": "codegraph",
+      "path": ".etnpilot/skills/codegraph/SKILL.md",
+      "digest": "sha256:c0c487f2dfbf0b17cb41ba004747a8bfb0815bcef5eeb743608253ec5649804a",
+      "bytes": 724
+    },
+    {
+      "type": "skill",
+      "name": "evidence",
+      "path": ".etnpilot/skills/evidence/SKILL.md",
+      "digest": "sha256:bce460490c3ec747d057f0d01cd960a4567b0503ca686e38e83664023d12a89b",
+      "bytes": 175
+    }
+  ],
+  "digest": "sha256:b22d046290a16913e4d6e85d6f985bf00ba34fed7059addbf246b383b60498a1"
+}

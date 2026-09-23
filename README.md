@@ -27,6 +27,7 @@ The repository is in early development. The first runnable vertical slice provid
 - OTLP/HTTP traces with provider usage, configurable cost estimates, and workflow budgets.
 - one restricted worker process per plugin with bounded RPC, runtime, memory, and output.
 - an isolated OIDC/Vault secret-provider plugin with scoped secret and HTTPS grants.
+- reviewed SHA-256 pins and run provenance for agents, instructions, prompts, and skills.
 
 ## Quick start
 
@@ -34,6 +35,7 @@ The repository is in early development. The first runnable vertical slice provid
 npm install
 npm install @github/copilot-sdk
 npm run etnpilot -- init .
+npm run etnpilot -- content lock --root .
 npm run etnpilot -- graph build .
 npm test
 ```
@@ -90,6 +92,22 @@ codegraph:
 Set `enabled: false` when a project must run without code intelligence. ETNPilot uses the pinned
 platform bundle installed with its npm dependency, so repository configuration cannot replace the
 MCP executable. CodeGraph telemetry and update checks stay disabled in the managed MCP process.
+
+## Content provenance
+
+Project-owned agents, instructions, prompts, and skills can be locked to a deterministic SHA-256
+manifest. Runs in enforcement mode load the verified in-memory snapshot and check the content and
+lock again before sealing the terminal receipt:
+
+```bash
+etnpilot content lock --root .
+etnpilot content verify --root .
+```
+
+The lock never updates implicitly. Review and commit `.etnpilot/content-lock.json` together with an
+intentional content change. Symbolic links, path escapes, missing or malformed locks, unreviewed
+entries, and mid-run replacement are rejected. See
+[docs/content-provenance.md](docs/content-provenance.md) for configuration and adoption details.
 
 Run the configured workflow in an isolated worktree:
 

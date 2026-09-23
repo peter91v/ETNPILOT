@@ -40,11 +40,14 @@
 - [x] Process-level plugin isolation and resource limits
 - [x] GitLab webhook authentication and external pipeline status synchronization
 
+## M3 — Reproducibility and supply chain
+
+- [x] Version pinning and provenance for agents, instructions, prompts, and skills
+
 ## Brainstorming backlog
 
 - disposable devcontainers per run;
 - reviewer quorum across different providers;
-- prompt/skill version pinning and provenance;
 - replayable runs with redacted fixtures;
 - dependency and license policy gates;
 - SBOM, secret scanning, and SLSA attestations;

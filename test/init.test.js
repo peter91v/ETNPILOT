@@ -35,6 +35,9 @@ test("init keeps run state and worktrees out of the repository", async () => {
   assert.equal(config.pluginIsolation.callTimeoutMs, 30000);
   assert.equal(config.codegraph.enabled, true);
   assert.deepEqual(config.codegraph.tools, ["codegraph_explore"]);
+  assert.equal(config.content.provenance.mode, "enforce");
+  assert.equal(config.content.provenance.lockFile, ".etnpilot/content-lock.json");
+  assert.equal(config.content.provenance.verifyAfterRun, true);
 });
 
 test("init never overwrites an existing configuration", async () => {

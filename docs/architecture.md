@@ -7,7 +7,7 @@
 | Harness | Runs agents, subagents, events, approvals, receipts | `src/core/` |
 | Plugins | Capability-scoped extensions behind bounded worker-process RPC | `src/plugins/` |
 | Providers | Capability-aware model/agent runtime adapters and safe fallback | GitHub Copilot SDK, OpenAI-compatible |
-| Content | Instructions, skills, prompts, agent manifests | `.etnpilot/` |
+| Content | SHA-256-pinned instructions, skills, prompts, and agent manifests | `.etnpilot/` plus reviewed content lock |
 | Git | Safe local operations and isolated branches | native Git worktrees |
 | Forge | Remote repository lifecycle | self-hosted GitLab API |
 | Code intelligence | Local source context, symbols, dependencies, and impact evidence | CodeGraph CLI/API with local stdio MCP |
@@ -19,6 +19,19 @@
 | Secrets | Named credential resolution behind a versioned adapter boundary | allow-listed environment and confined files |
 | Policy | Deny-first scope decisions before approval or provider invocation | versioned YAML rules evaluated in-process |
 | Observability | Correlated workflow, agent, provider, and check spans with usage budgets | local OTLP/JSON and optional OTLP/HTTP export |
+
+## Repository layout
+
+| Path | Purpose |
+|---|---|
+| `bin/` | Thin command-line entry point |
+| `src/` | Runtime modules grouped by architectural boundary |
+| `.etnpilot/` | Project-owned agents, instructions, prompts, skills, configuration, and content lock |
+| `test/` | Node test-runner coverage across boundaries and end-to-end paths |
+| `docs/` | Operator and architecture documentation |
+
+The current single-package layout keeps the boundaries explicit without introducing separately
+versioned workspace packages before independent publication or deployment requires them.
 
 ## Execution flow
 
@@ -63,6 +76,11 @@ published engine for deterministic CLI output and receipt evidence. The index is
 execution; reverse traversal reports direct and transitive consumers with their depth and highlights
 test files. Workflow receipts include graph state before and after execution plus impact evidence for
 changed source files.
+
+Project content is read into a bounded snapshot, compared with the committed SHA-256 lock, and only
+then registered with the harness. A second comparison before the terminal receipt detects content or
+lock replacement during execution. The receipt records both aggregate digests and every resolved
+entry, so a signed chain identifies the exact agent, instruction, prompt, and skill inputs used.
 
 Receipt signing is opt-in and uses an external Ed25519 private key. The proof version, algorithm,
 and public-key fingerprint are included inside each hashed entry before the signature is created.
@@ -130,6 +148,8 @@ completed provider call and before another workflow step can consume budget.
 - secret values are resolved only at runtime and are never included in availability diagnostics.
 - policy-denied operations never reach the human approval handler or provider runtime;
 - paths outside the active workspace cannot match an allow rule.
+- project content must match its reviewed lock when provenance enforcement is enabled; symbolic
+  links, path escapes, and changes during execution are rejected;
 - telemetry excludes prompts, generated content, tool arguments, credentials, and upstream error
   bodies;
 - OTLP exporter credentials resolve through the secret-provider boundary.

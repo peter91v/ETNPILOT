@@ -6,6 +6,7 @@ import { parseArgs } from "node:util";
 import { CodeGraph } from "../src/codegraph/codegraph.js";
 import { initializeProject } from "../src/config/init.js";
 import { loadConfig } from "../src/config/load.js";
+import { verifyProjectContent, writeContentLock } from "../src/content/provenance.js";
 import { ApprovalInbox } from "../src/core/approval-inbox.js";
 import { ApprovalPolicy } from "../src/core/approval-policy.js";
 import { Harness } from "../src/core/harness.js";
@@ -70,6 +71,8 @@ Usage:
   etnpilot graph symbols <file> [--root directory]
   etnpilot graph impact <file...> [--depth number] [--root directory]
   etnpilot graph stats [--root directory]
+  etnpilot content lock [--root directory]
+  etnpilot content verify [--root directory]
   etnpilot webhook serve [--root directory] [--host address] [--port number]
   etnpilot approval list [--status pending|approved|rejected|expired|all] [--limit number]
   etnpilot approval show <id>
@@ -171,6 +174,16 @@ if (command === "init") {
   } finally {
     graph.close();
   }
+} else if (command === "content" && subcommand === "lock") {
+  const root = resolve(values.root);
+  const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"));
+  console.log(JSON.stringify(await writeContentLock(root, config), null, 2));
+} else if (command === "content" && subcommand === "verify") {
+  const root = resolve(values.root);
+  const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"));
+  const result = await verifyProjectContent(root, config);
+  console.log(JSON.stringify(result, null, 2));
+  if (!result.verified) process.exitCode = 1;
 } else if (command === "webhook" && subcommand === "serve") {
   const port = values.port === undefined ? undefined : Number.parseInt(values.port, 10);
   if (port !== undefined && (!Number.isInteger(port) || port < 0 || port > 65_535)) {
