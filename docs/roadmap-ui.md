@@ -16,7 +16,8 @@ nie eingecheckt; eingecheckt ist nur die Default-Einstellung."*
 
 | Modul | Was es liefert |
 | --- | --- |
-| `src/runtime/project-state.js` | `openProjectState({root, env})` → `{ root, config, inbox, queue, runsDirectory, collect(), decide(), cancelJob(), resumeJob(), startRun(), readReceipt(), setSetting(), unsetSetting(), close() }` — **die eine Quelle für jede Oberfläche** |
+| `src/runtime/project-state.js` | `openProjectState({root, env})` → `{ root, config, inbox, queue, runsDirectory, collect(), decide(), cancelJob(), resumeJob(), startRun(), readReceipt(), worktrees(), removeWorktree(), mergeRequests(), setSetting(), unsetSetting(), close() }` — **die eine Quelle für jede Oberfläche** |
+| `src/git/worktrees.js` | `WorktreeManager.describe()` — Branch, Herkunft und ob ein Entfernen Arbeit wegwirft; `removeIfClean(name)` |
 | `src/config/settings.js` | `describeSettings`, `diffSettings`, `setSetting`, `unsetSetting`, `parseSettingValue`, `scopeFile`, `SettingsRefused` |
 | `src/config/layers.js` | Schichten, Modi (`open` / `stricter-only` / `locked`), `settingsEvidence()` |
 | `src/tui/render.js` | Reine Renderer: State + Viewport rein, Zeilen raus |
@@ -47,7 +48,10 @@ Lesepfad, keine zweite Wahrheit.
 | `deps check`, `sbom`, `scan secrets` | ✅ | ✗ | ✗ | — |
 | `graph *`, `content lock/verify` | ✅ | ✗ | ✗ | — |
 | `doctor`, `telemetry summary` | ✅ | ✗ | ✗ | — |
-| `init`, `worktree list/cleanup` | ✅ | ✗ | ✗ | — |
+| `init` | ✅ | ✗ | ✗ | — |
+| Worktrees listen, mit ungespeicherter Arbeit | ✅ | ✅ | ✗ | — |
+| Worktree entfernen (nur wenn sauber) | ✅ | ✅ | ✗ | — |
+| Eigene Merge Requests listen | ✅ | ✅ | ✗ | — |
 
 Die App existiert als Code **gar nicht** — nur als Artboards im Design-Canvas
 (`https://claude.ai/artifact/Rr65iXmq1fgRSZMKMwD1YH`).
@@ -103,9 +107,29 @@ Ergebnis im Panel. Alles bereits vorhandene Funktionen, nur ohne CLI.
 - In der Run-Detailansicht `v` → `verifyReceiptFile` (`src/core/receipt-store.js`), Ergebnis unter „Receipt": gültig, Hash-Kette, Signatur, `encoding`.
 - **Fertig wenn:** ein manipuliertes Receipt in der Ansicht als ungültig erscheint.
 
-### UI-2.3 Worktrees
-- Ansicht oder Panel: `WorktreeManager.list()`, `removeIfClean(name)` auf `x`.
-- **Fertig wenn:** ein Worktree mit ungespeicherter Arbeit **nicht** entfernt wird und das sagt.
+### UI-2.3 Worktrees — erledigt
+- Ansicht `worktrees` (Taste `5`): `WorktreeManager.describe()` — Branch, HEAD,
+  ob ETNPilot ihn angelegt hat, und was ein Entfernen wegwerfen würde. `x` geht
+  durch `removeIfClean(name)`.
+- Dieselbe Beschreibung liefert `etnpilot worktree list`, und `state.worktrees()`
+  in `project-state.js` ist der eine Lesepfad für beide.
+- **Erledigt:** ein Worktree mit ungespeicherter Arbeit wird nicht entfernt und
+  sagt, was er behält (`test/tui-worktrees.test.js`). Die Artefakte, die
+  ETNPilot selbst in einen Workspace schreibt, zählen dabei nicht als Arbeit —
+  dieselbe Liste wie in `removeIfClean`.
+
+### UI-2.5 Eigene Merge Requests — erledigt
+- Ansicht `merges` (Taste `6`): die offenen Merge Requests des Projekts, die
+  eigenen zuerst. Eigen heißt: der Quellbranch beginnt mit `etnpilot/`, nicht
+  ein Name im Titel, den jeder abschreiben kann.
+- Fremde stehen daneben, aus demselben Grund, aus dem ein Run seinen Merge gegen
+  den Zielbranch probt: was vor uns landet, bricht uns.
+- Als einzige Ansicht braucht sie Netz und Token, also liest sie beim Öffnen und
+  auf `g` — nie im Poll. Ohne `git.project`, ohne Token oder bei einer Absage
+  von GitLab sagt sie das; der Rest der Oberfläche arbeitet weiter.
+- Auch als `etnpilot merge list [--status …]`, über denselben Lesepfad
+  (`state.mergeRequests()`).
+- **Offen für Web und App:** beide Ansichten fehlen dort noch (UI-1, UI-3).
 
 ### UI-2.4 Erste Schritte
 - Wenn `.etnpilot/etnpilot.yaml` fehlt: statt eines Fehlers eine Ansicht, die `initializeProject` mit Template-Auswahl anbietet.

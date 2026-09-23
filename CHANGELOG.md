@@ -6,6 +6,29 @@ pre-1.0, so breaking changes may appear in any release.
 
 ## [Unreleased]
 
+### Added — roadmap UI-2.3 and UI-2.5
+
+- The TUI shows the worktrees (`5`): which branch each holds, which ones a run
+  made, and what removing one would throw away. `x` removes the one under the
+  cursor through the same `removeIfClean` the CLI uses, so a worktree holding
+  unsaved work is kept and the screen says what it is keeping.
+- The TUI shows the project's merge requests (`6`), ETNPilot's own first —
+  identified by their `etnpilot/` branch, not by a title anyone could copy —
+  with everyone else's beside them, because what lands before ours is what
+  breaks ours. It is the one view that needs the network, so it reads when
+  opened and on `g`, never on the poll, and says plainly when the project,
+  the token, or GitLab itself is not there.
+- Both go through `project-state.js` like every other surface reads:
+  `state.worktrees()`, `state.removeWorktree()`, `state.mergeRequests()`.
+- `etnpilot merge list [--status opened|merged|closed|all]` prints the same
+  merge requests, and `etnpilot worktree list` now prints the same description
+  the view shows rather than git's porcelain.
+
+### Fixed
+
+- Cutting a line that carried no colour no longer appends a reset sequence,
+  which printed as `\u001B[39m` wherever colour is off.
+
 ### Added — local settings
 
 - Configuration now loads in layers: the committed default, then

@@ -157,7 +157,7 @@ npm run etnpilot -- run "Implement the change" --no-worktree
 npm run etnpilot -- run "Inspect the project" --worktree --cleanup-worktree
 ```
 
-The default comes from `workspace.mode` in `.etnpilot/etnpilot.yaml`. Cleanup defaults to `never`. Requested cleanup only removes a clean worktree; a worktree containing uncommitted changes is retained and reported as `dirty-worktree`. Use `etnpilot worktree list` and `etnpilot worktree cleanup <name>` for manual housekeeping.
+The default comes from `workspace.mode` in `.etnpilot/etnpilot.yaml`. Cleanup defaults to `never`. Requested cleanup only removes a clean worktree; a worktree containing uncommitted changes is retained and reported as `dirty-worktree`. Use `etnpilot worktree list` and `etnpilot worktree cleanup <name>` for manual housekeeping; `etnpilot merge list` shows what those runs published.
 
 `--in-place` remains available as a compatibility alias for `--no-worktree`.
 
@@ -450,12 +450,15 @@ names which layers were in effect. See [docs/settings.md](docs/settings.md).
 etnpilot tui --root .
 ```
 
-Approvals, the queue, runs, and settings in one full-screen view, with the whole
-command and the rule that stopped it. Decisions go to the same inbox the CLI and
+Approvals, the queue, runs, settings, the worktrees, and the project's merge
+requests in one full-screen view, with the whole command and the rule that
+stopped it. Decisions go to the same inbox the CLI and
 the page use; settings are edited against the same layers and refused for the
 same reasons. `n` starts a run whose approvals come back to this same window,
 which is the one thing `etnpilot run` cannot do — it holds the terminal it is
-asking from. See [docs/tui.md](docs/tui.md).
+asking from. The worktrees view says what removing one would throw away and
+refuses to throw it away; the merge requests view puts the ones a run published
+above everyone else's. See [docs/tui.md](docs/tui.md).
 
 ## Local review UI
 

@@ -1,6 +1,6 @@
 import { screen, shortId } from "./ansi.js";
 import { parseSettingValue } from "../config/settings.js";
-import { clamp, renderApp, settingEntries, settingLiteral, settingValue, viewList } from "./render.js";
+import { clamp, mergeEntries, renderApp, settingEntries, settingLiteral, settingValue, viewList } from "./render.js";
 
 const VIEWS = viewList();
 
@@ -12,6 +12,7 @@ export function createTuiApp({
   output = process.stdout,
   input = process.stdin,
   pollIntervalMs = 1000,
+  worktreeIntervalMs = 5000,
   actor = process.env.USER ?? "tui",
   now = Date.now,
 } = {}) {
@@ -33,6 +34,9 @@ export function createTuiApp({
   let help = false;
   let helpOffset = 0;
   let receipt;
+  let worktrees;
+  let worktreesReadAt = 0;
+  let merges;
   const active = new Set();
   let messageTimer;
   let timer;
@@ -53,11 +57,16 @@ export function createTuiApp({
     get help() { return help; },
     get helpOffset() { return helpOffset; },
     get receipt() { return receipt; },
+    get worktrees() { return worktrees; },
+    get merges() { return merges; },
     get active() { return [...active]; },
 
     async refresh() {
       snapshot = await state.collect();
       cursor = clamp(cursor, selection().length);
+      // The worktrees are local but not free — one 'git status' each — so they
+      // are reread while their view is open and not more often than that.
+      if (view === "worktrees" && now() - worktreesReadAt > worktreeIntervalMs) await load("worktrees", { force: true });
       return snapshot;
     },
 
@@ -79,6 +88,8 @@ export function createTuiApp({
         help,
         helpOffset,
         receipt,
+        worktrees,
+        merges,
         active: [...active],
         project: state.config?.git?.project ?? "",
       });
@@ -130,13 +141,11 @@ export function createTuiApp({
         return true;
       }
       if (key === "\t") {
-        view = VIEWS[(VIEWS.indexOf(view) + 1) % VIEWS.length];
-        cursor = 0;
-        detail = false;
+        show(VIEWS[(VIEWS.indexOf(view) + 1) % VIEWS.length]);
       } else if (/^[1-9]$/.test(key) && Number(key) <= VIEWS.length) {
-        view = VIEWS[Number(key) - 1];
-        cursor = 0;
-        detail = false;
+        show(VIEWS[Number(key) - 1]);
+      } else if (key === "x" && view === "worktrees") {
+        await removeWorktree();
       } else if (view === "settings" && key === "/") {
         filtering = true;
       } else if (view === "settings" && (key === "\r" || key === "\n")) {
@@ -162,6 +171,9 @@ export function createTuiApp({
       } else if (key === "R" && view === "queue") {
         await resume();
       } else if (key === "g") {
+        // 'g' means 'ask again now', including the two views that are read on
+        // demand — the merge requests are never fetched behind your back.
+        if (view === "worktrees" || view === "merges") await load(view, { force: true });
         await app.refresh();
       }
       app.paint();
@@ -214,8 +226,66 @@ export function createTuiApp({
   function selection() {
     if (view === "runs") return snapshot.runs ?? [];
     if (view === "queue") return snapshot.queue?.jobs ?? [];
+    if (view === "worktrees") return worktrees?.entries ?? [];
+    if (view === "merges") return mergeEntries(merges);
     if (view === "settings") return settingEntries(snapshot, { filter });
     return snapshot.approvals?.pending ?? [];
+  }
+
+  function show(next) {
+    view = next;
+    cursor = 0;
+    detail = false;
+    // A view that reads on demand starts empty and says it is reading, rather
+    // than showing yesterday's answer or nothing at all.
+    if ((view === "worktrees" || view === "merges") && (view === "merges" ? merges : worktrees) === undefined) {
+      void load(view).then(app.paint, report);
+    }
+  }
+
+  async function load(which, { force = false } = {}) {
+    if (which === "worktrees") {
+      if (worktrees !== undefined && !force) return;
+      try {
+        worktrees = await state.worktrees();
+      } catch (error) {
+        worktrees = { available: false, error: error.message, entries: [] };
+      }
+      worktreesReadAt = now();
+      cursor = clamp(cursor, selection().length);
+      return;
+    }
+    if (merges !== undefined && !force) return;
+    try {
+      merges = await state.mergeRequests();
+    } catch (error) {
+      merges = { configured: true, available: false, error: error.message, entries: [] };
+    }
+    cursor = clamp(cursor, selection().length);
+  }
+
+  // Removing a worktree is the one destructive thing this view can do, so it
+  // goes through removeIfClean: unsaved work is reported, never discarded.
+  async function removeWorktree() {
+    const entry = selection()[clamp(cursor, selection().length)];
+    if (!entry) return;
+    if (!entry.managed || entry.main) {
+      note(`${entry.name} is not a worktree ETNPilot made; remove it with git where you made it.`);
+      return;
+    }
+    if (entry.locked !== undefined) {
+      note(`${entry.name} is locked${entry.locked ? `: ${entry.locked}` : ""}; unlock it with 'git worktree unlock'.`);
+      return;
+    }
+    try {
+      const result = await state.removeWorktree(entry.name);
+      note(result.removed
+        ? `${entry.name} is gone; its branch ${entry.branch ?? ""} still exists.`.trim()
+        : `${entry.name} keeps ${entry.blocking ?? "its"} unsaved change${entry.blocking === 1 ? "" : "s"} — nothing was removed.`);
+    } catch (error) {
+      note(error.message);
+    }
+    await load("worktrees", { force: true });
   }
 
   function openEditor() {

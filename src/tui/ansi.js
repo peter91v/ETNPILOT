@@ -63,7 +63,9 @@ export function truncate(text, width) {
     index += 1;
     visible += 1;
   }
-  return `${output}\u001B[39m…`;
+  // The reset belongs to text that carried colour. Adding it to plain text
+  // would print '\u001B[39m' verbatim wherever colour is off.
+  return output.includes("\u001B") ? `${output}\u001B[39m…` : `${output}…`;
 }
 
 export function pad(text, width) {
