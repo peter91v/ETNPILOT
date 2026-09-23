@@ -25,6 +25,18 @@ pre-1.0, so breaking changes may appear in any release.
 
 ### Added — terminal interface
 
+- The TUI has a settings view: every effective setting with the layer it came
+  from and whether it may be changed, an editor for the one under the cursor,
+  `d` to put it back to the committed default, `s` to choose between the local
+  and the global file, and `/` to filter. Refusals appear in the editor, which
+  stays open so the change can be corrected; a locked setting does not open.
+- A local settings file the loader would refuse is reported above the settings
+  list, rather than leaving the next run to be the first to mention it.
+  `etnpilot config list` and `config diff` fail for the same reason.
+- `queue.database` and `approval.inbox.database` name files an open surface
+  already holds. Changing one is written but reported as needing a restart,
+  instead of showing a setting that has visibly changed and quietly has not.
+
 - `etnpilot tui` shows approvals, the queue, and runs in one full-screen view
   and decides against the same inbox the CLI and the review page use. Its views
   are pure functions of state and viewport, so frames are asserted in tests

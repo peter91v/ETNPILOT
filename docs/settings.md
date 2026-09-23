@@ -82,8 +82,12 @@ $ etnpilot config set approval.allow '[read, write]'
 etnpilot: Cannot change 'approval.allow': entries may only be removed; 'write' would be added.
 ```
 
-The same module backs every surface, so the TUI, the review page, and the app
-refuse a change for exactly the reason the terminal gives.
+The same module backs every surface. `etnpilot tui` has a settings view that
+edits the same files and reports the same refusals — see
+[tui.md](tui.md#changing-settings).
+
+`config list` and `config diff` exit non-zero when a local file contains a
+refused setting, so a scripted check notices before a run does.
 
 ## What the receipt records
 

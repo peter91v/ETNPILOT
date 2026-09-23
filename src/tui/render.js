@@ -4,7 +4,7 @@ import { createStyle, displayWidth, duration, pad, padStart, shortId, since, tru
 // The runtime below only paints what these return, which is what makes the
 // interface testable without a terminal.
 
-const VIEWS = Object.freeze(["approvals", "runs", "queue"]);
+const VIEWS = Object.freeze(["approvals", "runs", "queue", "settings"]);
 
 export function viewList() {
   return [...VIEWS];
@@ -21,6 +21,10 @@ export function renderApp(state, options = {}) {
     color = true,
     message,
     project = "",
+    editor,
+    filter = "",
+    filtering = false,
+    scope = "local",
   } = options;
   const style = createStyle({ color });
   const body = height - 3;
@@ -31,16 +35,21 @@ export function renderApp(state, options = {}) {
 
   const rendered = detail && view === "approvals"
     ? renderApprovalDetail(state, { style, width, height: body, cursor })
-    : renderView(view, state, { style, width, height: body, cursor, now });
+    : renderView(view, state, { style, width, height: body, cursor, now, editor, filter, filtering, scope });
   for (const line of rendered.slice(0, body)) lines.push(truncate(line, width));
   while (lines.length < height - 1) lines.push("");
-  lines.push(footer({ style, width, view, detail, message }));
+  lines.push(footer({ style, width, view, detail, message, editor }));
   return lines.slice(0, height).map((line) => truncate(line, width));
 }
 
 function renderView(view, state, context) {
   if (view === "runs") return renderRuns(state, context);
   if (view === "queue") return renderQueue(state, context);
+  if (view === "settings") {
+    return context.editor
+      ? renderSettingsEditor(state, context)
+      : renderSettings(state, context);
+  }
   return renderApprovals(state, context);
 }
 
@@ -58,15 +67,19 @@ function header(state, { style, width, view, project }) {
   return left + " ".repeat(gap) + right;
 }
 
-function footer({ style, width, view, detail, message }) {
+function footer({ style, width, view, detail, message, editor }) {
   if (message) return truncate(style.warn(message), width);
-  const keys = detail
-    ? [["a", "approve"], ["r", "reject"], ["esc", "back"], ["q", "quit"]]
-    : view === "approvals"
-      ? [["↑↓", "move"], ["enter", "open"], ["a", "approve"], ["r", "reject"], ["tab", "view"], ["q", "quit"]]
-      : view === "queue"
-        ? [["↑↓", "move"], ["c", "cancel"], ["tab", "view"], ["q", "quit"]]
-        : [["↑↓", "move"], ["tab", "view"], ["?", "help"], ["q", "quit"]];
+  const keys = editor
+    ? [["enter", "save"], ["esc", "cancel"], ["^u", "clear"]]
+    : detail
+      ? [["a", "approve"], ["r", "reject"], ["esc", "back"], ["q", "quit"]]
+      : view === "approvals"
+        ? [["↑↓", "move"], ["enter", "open"], ["a", "approve"], ["r", "reject"], ["tab", "view"], ["q", "quit"]]
+        : view === "queue"
+          ? [["↑↓", "move"], ["c", "cancel"], ["tab", "view"], ["q", "quit"]]
+          : view === "settings"
+            ? [["↑↓", "move"], ["enter", "edit"], ["d", "default"], ["s", "scope"], ["/", "filter"], ["tab", "view"], ["q", "quit"]]
+            : [["↑↓", "move"], ["tab", "view"], ["?", "help"], ["q", "quit"]];
   return truncate(keys.map(([key, label]) => `${style.accent(key)} ${style.dim(label)}`).join(style.dim("  ")), width);
 }
 
@@ -229,3 +242,106 @@ function queueTone(status) {
   return "muted";
 }
 
+// The settings list and its editor. Which entries are on screen is a pure
+// function of the filter, so the app selects exactly what a person can see.
+export function settingEntries(state, { filter = "" } = {}) {
+  const entries = state.settings?.entries ?? [];
+  const needle = filter.trim().toLowerCase();
+  if (!needle) return entries;
+  return entries.filter((entry) => entry.path.toLowerCase().includes(needle));
+}
+
+function renderSettings(state, { style, width, height, cursor, filter, filtering, scope }) {
+  const settings = state.settings;
+  if (settings?.error) {
+    return [
+      style.bad("The local settings file was refused."),
+      "",
+      ...wrap(settings.error, width - 2).map((line) => `  ${style.ink(line)}`),
+      "",
+      style.dim("Fix the file, or remove the setting with 'etnpilot config unset'."),
+    ];
+  }
+  const entries = settingEntries(state, { filter });
+  const changed = settings?.overrides?.length ?? 0;
+  const summary = [
+    `${entries.length} ${entries.length === 1 ? "setting" : "settings"}`,
+    changed > 0 ? `${changed} changed locally` : "none changed",
+    `writing to ${scope}`,
+  ].join(" · ");
+  // While a filter is being typed the caret has to be visible, or there is no
+  // way to tell whether 'q' would quit or become part of the filter.
+  const prompt = filtering
+    ? `${style.dim("  ·  filter ")}${style.ink(filter)}${style.invert(" ")}`
+    : filter ? style.dim(`  ·  filter '${filter}'`) : "";
+  const head = [style.dim(summary) + prompt, ""];
+  // A refused setting would stop the next run. Saying so here, above the list,
+  // is the difference between a warning and a surprise an hour later.
+  const refusals = settings?.refusals ?? [];
+  if (refusals.length > 0) {
+    head.unshift(
+      style.bad(refusals.length === 1
+        ? "1 local setting is refused; a run will not start until it is gone:"
+        : `${refusals.length} local settings are refused; a run will not start until they are gone:`),
+      ...refusals.slice(0, 3).flatMap((refusal) => wrap(`${refusal.path} — ${refusal.reason}`, width - 4)
+        .map((line) => `  ${style.muted(line)}`)),
+      "",
+    );
+  }
+  if (entries.length === 0) return [...head, style.dim("Nothing matches that filter.")];
+  const columns = [
+    { label: "SETTING", width: Math.max(24, Math.floor(width * 0.4)), value: (entry) => entry.path },
+    { label: "VALUE", width: Math.max(14, Math.floor(width * 0.25)), value: (entry) => settingValue(entry.value) },
+    { label: "FROM", width: 12, value: (entry) => sourceLabel(entry.source), tone: (entry) => (entry.source === "project" ? "muted" : "accent") },
+    { label: "CHANGE", width: 14, value: (entry) => entry.mode, tone: (entry) => modeTone(entry.mode) },
+  ];
+  return [...head, ...table(entries, columns, { style, width, height: height - head.length, cursor })];
+}
+
+function renderSettingsEditor(state, { style, width, height, editor }) {
+  const entry = editor.entry;
+  const lines = [
+    `${style.bold(style.ink(entry.path))}  ${style.tone(entry.mode, modeTone(entry.mode))}`,
+    "",
+  ];
+  const field = (label, value) => {
+    lines.push(style.dim(label));
+    for (const piece of wrap(settingValue(value), width - 2)) lines.push(`  ${style.muted(piece)}`);
+    lines.push("");
+  };
+  field("Committed default", entry.defaultValue);
+  if (entry.source !== "project") field(`In effect, from ${sourceLabel(entry.source)}`, entry.value);
+  if (entry.mode === "stricter-only") {
+    lines.push(style.warn("This setting may only be narrowed, never widened."), "");
+  }
+  lines.push(style.dim(`New value as YAML, written to ${editor.scope === "global" ? "~/.config" : "this project, locally"}`));
+  lines.push(`  ${style.ink(editor.buffer)}${style.invert(" ")}`, "");
+  if (editor.error) for (const piece of wrap(editor.error, width - 2)) lines.push(style.bad(`  ${piece}`));
+  return lines.slice(0, height);
+}
+
+// What the editor starts from: JSON is valid YAML, so a value round-trips
+// through the prompt unchanged unless the person edits it.
+export function settingLiteral(value) {
+  return value === undefined ? "" : JSON.stringify(value);
+}
+
+export function settingValue(value) {
+  if (value === undefined) return "—";
+  if (Array.isArray(value) && value.some((entry) => entry && typeof entry === "object")) {
+    return `${value.length} entries`;
+  }
+  return JSON.stringify(value);
+}
+
+function sourceLabel(source) {
+  if (source === "user-local") return "local";
+  if (source === "user-global") return "global";
+  return "committed";
+}
+
+function modeTone(mode) {
+  if (mode === "locked") return "bad";
+  if (mode === "stricter-only") return "warn";
+  return "muted";
+}

@@ -235,11 +235,13 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     }
   } else if (command === "config" && (subcommand === "list" || subcommand === undefined)) {
     const root = resolve(values.root);
-    const { entries, layers, overrides } = await describeSettings({ root });
+    const { entries, layers, overrides, refusals } = await describeSettings({ root });
     const shown = entries
       .filter((entry) => (values.path ? entry.path === values.path || entry.path.startsWith(`${values.path}.`) : true))
       .filter((entry) => (values.changed ? overrides.includes(entry.path) : true));
-    console.log(JSON.stringify({ layers, overrides, settings: shown }, null, 2));
+    console.log(JSON.stringify({ layers, overrides, refusals, settings: shown }, null, 2));
+    // A refused setting stops the next run, so listing must not report success.
+    if (refusals.length > 0) return 1;
   } else if (command === "config" && subcommand === "set") {
     const [path, ...valueParts] = rest;
     if (!path || valueParts.length === 0) throw new Error("Usage: etnpilot config set <path> <value>");

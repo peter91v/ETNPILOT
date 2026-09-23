@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import YAML from "yaml";
+import { SettingsError } from "./layers.js";
 import {
   getIn,
   globalConfigFile,
@@ -43,11 +44,15 @@ export async function describeSettings({ root = process.cwd(), env = process.env
   const projectFile = projectConfigFile(root);
   const layers = await readLayers(projectFile, { env });
   const merged = mergeLayers(layers);
+  const project = layers.find((layer) => layer.source === "project");
   const entries = leaves(merged.config)
     .filter(([path]) => !path.startsWith("settings."))
     .map(([path, value]) => ({
       path,
       value,
+      // What the committed file says, so a surface can show what resetting
+      // this setting would go back to.
+      defaultValue: getIn(project.data, path),
       source: merged.sources.get(path) ?? "project",
       mode: modeFor(path, merged.modes),
     }));
@@ -64,6 +69,7 @@ export async function diffSettings({ root = process.cwd(), env = process.env } =
   const layers = await readLayers(projectFile, { env });
   const project = layers.find((layer) => layer.source === "project");
   const merged = mergeLayers(layers);
+  if (merged.refusals.length > 0) throw new SettingsError(merged.refusals);
   return merged.overrides.map((path) => ({
     path,
     from: getIn(project.data, path),

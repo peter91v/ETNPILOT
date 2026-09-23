@@ -450,9 +450,10 @@ names which layers were in effect. See [docs/settings.md](docs/settings.md).
 etnpilot tui --root .
 ```
 
-Approvals, the queue, and runs in one full-screen view, with the whole command
-and the rule that stopped it. Decisions go to the same inbox the CLI and the
-page use. See [docs/tui.md](docs/tui.md).
+Approvals, the queue, runs, and settings in one full-screen view, with the whole
+command and the rule that stopped it. Decisions go to the same inbox the CLI and
+the page use; settings are edited against the same layers and refused for the
+same reasons. See [docs/tui.md](docs/tui.md).
 
 ## Local review UI
 

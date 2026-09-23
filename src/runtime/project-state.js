@@ -1,8 +1,14 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { loadConfig } from "../config/load.js";
+import { describeSettings, setSetting, unsetSetting } from "../config/settings.js";
 import { ApprovalInbox } from "../core/approval-inbox.js";
 import { WorkflowQueue } from "../workflow/queue.js";
+
+// These name files this state opened when it started. Changing one is allowed,
+// but the open handles cannot follow it, so a surface says so rather than
+// showing a setting that has visibly changed and quietly has not.
+const HELD_OPEN = Object.freeze(["queue.database", "approval.inbox.database"]);
 
 // What every surface reads: approvals waiting, the queue, and finished runs
 // taken from their receipt files. One implementation, so the terminal, the
@@ -19,15 +25,28 @@ export async function openProjectState({ root = process.cwd(), env = process.env
   );
   const runsDirectory = join(projectRoot, ".etnpilot", "state", "runs");
 
+  let current = config;
   return {
     root: projectRoot,
-    config,
+    get config() { return current; },
     inbox,
     queue,
     runsDirectory,
-    collect: (options) => collectState({ inbox, queue, runsDirectory }, options),
+    collect: (options) => collectState({ inbox, queue, runsDirectory, root: projectRoot, env }, options),
     decide: (id, decision, options) => inbox.decide(id, decision, options),
     cancelJob: (id, options) => queue.requestCancel(id, options),
+    // Changing a setting from any surface goes through the same module the
+    // CLI uses, so every surface is refused for the same reason.
+    async setSetting(path, value, options = {}) {
+      const result = await setSetting(path, value, { root: projectRoot, env, ...options });
+      current = await loadConfig(join(projectRoot, ".etnpilot", "etnpilot.yaml"), env);
+      return { ...result, restartRequired: HELD_OPEN.includes(path) };
+    },
+    async unsetSetting(path, options = {}) {
+      const result = await unsetSetting(path, { root: projectRoot, env, ...options });
+      current = await loadConfig(join(projectRoot, ".etnpilot", "etnpilot.yaml"), env);
+      return { ...result, restartRequired: HELD_OPEN.includes(path) };
+    },
     close() {
       inbox.close();
       queue.close();
@@ -35,9 +54,10 @@ export async function openProjectState({ root = process.cwd(), env = process.env
   };
 }
 
-export async function collectState({ inbox, queue, runsDirectory }, { runLimit = 20 } = {}) {
+export async function collectState({ inbox, queue, runsDirectory, root, env }, { runLimit = 20 } = {}) {
   return {
     generatedAt: new Date().toISOString(),
+    settings: root ? await describeSettings({ root, env }).catch(settingsUnreadable) : undefined,
     approvals: {
       pending: inbox.list({ status: "pending", limit: 50 }),
       recent: inbox.list({ status: "all", limit: 20 }),
@@ -45,6 +65,13 @@ export async function collectState({ inbox, queue, runsDirectory }, { runLimit =
     queue: { counts: queue.counts(), jobs: queue.list({ status: "all", limit: 20 }) },
     runs: await readRuns(runsDirectory, { limit: runLimit }),
   };
+}
+
+// A local settings file that the loader refuses must not black out the rest of
+// the screen: the surface still shows approvals and runs, and says what is
+// wrong with the file.
+function settingsUnreadable(error) {
+  return { entries: [], layers: [], overrides: [], error: error.message };
 }
 
 // Runs are read from their receipt files, so every surface shows what was
