@@ -18,9 +18,11 @@ import { ProviderRouter } from "../providers/router.js";
 import { PolicyEngine } from "../policy/engine.js";
 import { loadPlugins } from "../plugins/load-plugin.js";
 import { WorkflowEngine } from "../workflow/engine.js";
+import { evaluateQuorum, parseVerdict, QUORUM_INSTRUCTION, quorumError } from "../workflow/quorum.js";
 import { createSecretResolver } from "../secrets/resolver.js";
 import { createTelemetry } from "../observability/telemetry.js";
-import { createSandbox } from "./sandbox.js";
+import { createSandbox, readDevcontainerImage } from "./sandbox.js";
+import { createFixtureRecorder, fixtureProviderFactories, loadFixtures } from "./fixtures.js";
 
 export async function runProject({
   root = process.cwd(),
@@ -30,6 +32,8 @@ export async function runProject({
   inPlace = false,
   baseRef,
   dryRun = false,
+  recordFixtures,
+  fixtures,
   cleanupPolicy,
   publish = false,
   env = process.env,
@@ -70,6 +74,8 @@ export async function runProject({
   let contentEvidence;
   let workflow;
   let sandbox;
+  let recorder;
+  let fixturePlayer;
   try {
     const bootstrapPlugins = (bootstrapConfig.plugins ?? []).filter(isBootstrapPlugin);
     await loadPlugins(bootstrapPlugins, harness, repositoryRoot, {
@@ -120,20 +126,41 @@ export async function runProject({
         "Query it before planning broad edits and use its refreshed index when reviewing changes.",
       ].join("\n"));
     }
-    sandbox = createSandbox(config.sandbox ?? {}, { workspace: workspace.path });
+    sandbox = createSandbox(await resolveSandboxConfig(config.sandbox ?? {}, workspace.path), {
+      workspace: workspace.path,
+    });
     // Fail before the first step rather than halfway through a run.
     if (sandbox && !dryRun) await sandbox.assertAvailable();
+    let effectiveFactories = providerFactories;
+    if (fixtures) {
+      // Offline execution: recorded answers stand in for every provider.
+      const replay = fixtureProviderFactories(await loadFixtures(resolve(repositoryRoot, fixtures)), {
+        types: Object.values(config.providers ?? {}).map((entry) => entry.type),
+        strict: config.fixtures?.strict !== false,
+      });
+      fixturePlayer = replay.player;
+      effectiveFactories = replay.factories;
+    }
     await registerConfiguredProviders(harness, config.providers, {
       workingDirectory: workspace.path,
       env,
       secretResolver: secrets,
-      factories: providerFactories,
+      factories: effectiveFactories,
       sandbox,
       ...(codegraph ? {
         mcpServers: { codegraph: codegraph.mcp },
         readOnlyMcpTools: codegraph.mcp.tools,
       } : {}),
     });
+    if (recordFixtures) {
+      recorder = createFixtureRecorder({
+        path: resolve(repositoryRoot, recordFixtures),
+        redact: config.fixtures?.redact !== false,
+      });
+      for (const name of harness.providers.list()) {
+        harness.providers.replace(name, recorder.wrap(harness.providers.get(name)));
+      }
+    }
     harness.setProviderRouter(new ProviderRouter(harness.providers, config.routing, { policy }));
     workflow = normalizeWorkflow(config.workflow, agent ?? config.defaultAgent ?? "orchestrator");
     assertWorkflowAgents(harness, workflow);
@@ -179,6 +206,16 @@ export async function runProject({
             workspace: workspace.path,
           },
           signal: execution.signal,
+        });
+      }
+      if (step.type === "quorum") {
+        return runQuorumStep(step, harness, {
+          input,
+          execution,
+          metadata,
+          traceMetadata,
+          runId,
+          workspace,
         });
       }
       if (step.type === "check") {
@@ -250,6 +287,7 @@ export async function runProject({
 
   await harness.close();
 
+  const fixtureEvidence = await finishFixtures(recorder, fixturePlayer);
   const gitEvidence = await collectGitEvidence(workspace.path);
   // Rehearsed even when nothing will be published: knowing the branch has
   // drifted from its target is evidence a reviewer wants either way.
@@ -298,6 +336,7 @@ export async function runProject({
     workspace: { ...workspace, ...(sandbox ? { sandbox: sandbox.describe() } : {}) },
     content: contentEvidence,
     git: { ...gitEvidence, ...(rehearsal ? { mergeRehearsal: rehearsal } : {}) },
+    ...(fixtureEvidence ? { fixtures: fixtureEvidence } : {}),
     codegraph: codegraphEvidence,
     observability,
     summary,
@@ -347,6 +386,7 @@ export async function runProject({
     content: contentEvidence,
     git: gitEvidence,
     ...(rehearsal ? { mergeRehearsal: rehearsal } : {}),
+    ...(fixtureEvidence ? { fixtures: fixtureEvidence } : {}),
     codegraph: codegraphEvidence,
     observability,
     mergeRequest,
@@ -370,11 +410,26 @@ function checkEnvironment(env, config = {}) {
   return { ...inherited, ...(config.env ?? {}), ETNPILOT_CHECK: "1" };
 }
 
+async function resolveSandboxConfig(sandboxConfig, workspacePath) {
+  if (sandboxConfig.enabled !== true || sandboxConfig.useDevcontainerImage !== true) return sandboxConfig;
+  const devcontainer = await readDevcontainerImage(workspacePath, sandboxConfig.devcontainerPath
+    ? { path: sandboxConfig.devcontainerPath }
+    : {});
+  if (!devcontainer.image) {
+    throw new Error(
+      `sandbox.useDevcontainerImage is set, but no image was found (${devcontainer.reason}).`
+      + " Add an 'image' to the devcontainer, or unset the option to use sandbox.image.",
+    );
+  }
+  return { ...sandboxConfig, image: devcontainer.image, imageSource: devcontainer.source };
+}
+
 function assertWorkflowAgents(harness, workflow) {
-  const missing = [...new Set(workflow.steps
-    .filter((step) => step.type === "agent" || step.type === undefined)
-    .map((step) => step.agent)
-    .filter((name) => name && !harness.agents.has(name)))];
+  const referenced = workflow.steps.flatMap((step) => {
+    if (step.type === "quorum") return step.agents ?? [];
+    return step.type === "agent" || step.type === undefined ? [step.agent] : [];
+  });
+  const missing = [...new Set(referenced.filter((name) => name && !harness.agents.has(name)))];
   if (missing.length === 0) return;
   const available = harness.agents.list();
   throw new Error([
@@ -408,10 +463,63 @@ async function discardWorkspace(workspace, manager, branch) {
   }
 }
 
+async function finishFixtures(recorder, player) {
+  if (recorder) {
+    const written = await recorder.flush();
+    return { mode: "recorded", ...written };
+  }
+  if (player) {
+    return { mode: "replayed", exchanges: player.consumed.length, unusedExchanges: player.remaining() };
+  }
+  return undefined;
+}
+
 async function verifyContentAfterRun(root, config, initial) {
   if (!initial || initial.mode === "off" || initial.verifyAfterRun === false) return initial;
   const verified = await verifyProjectContent(root, config, initial);
   return { ...verified, verifiedAfterRun: true };
+}
+
+// Independent reviewers, usually on different providers, must agree before a
+// change is considered reviewed. Their verdicts and the arithmetic are part of
+// the receipt, so the decision can be re-checked later.
+async function runQuorumStep(step, harness, { input, execution, metadata, traceMetadata, runId, workspace }) {
+  const agents = step.agents ?? [];
+  if (agents.length === 0) throw new Error(`Quorum step '${step.id}' requires at least one agent.`);
+  const run = (agentName) => harness.run({
+    agent: agentName,
+    input: `${composeAgentInput(input, execution.dependencyResults)}\n\n${QUORUM_INSTRUCTION}`,
+    metadata: {
+      ...metadata,
+      ...traceMetadata,
+      workflowRunId: runId,
+      workflowStep: step.id,
+      workspace: workspace.path,
+    },
+    signal: execution.signal,
+  });
+
+  const receipts = step.sequential === true
+    ? await runSequentially(agents, run)
+    : await Promise.all(agents.map(run));
+  const votes = receipts.map((receipt, index) => ({
+    agent: agents[index],
+    provider: receipt.provider,
+    verdict: parseVerdict(receipt.result?.text),
+    runId: receipt.runId,
+  }));
+  const outcome = evaluateQuorum(votes, {
+    required: step.required,
+    distinctProviders: step.distinctProviders !== false,
+  });
+  if (!outcome.satisfied) throw quorumError(outcome);
+  return outcome;
+}
+
+async function runSequentially(agents, run) {
+  const receipts = [];
+  for (const agent of agents) receipts.push(await run(agent));
+  return receipts;
 }
 
 async function runObservedCheck(step, { cwd, signal, env, telemetry, trace, workflowRunId, sandbox }) {

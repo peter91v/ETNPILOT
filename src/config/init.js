@@ -179,6 +179,8 @@ sandbox:
   network: none
   readOnlyRoot: true
   workdir: /workspace
+  # Reuse the image a .devcontainer/devcontainer.json already names.
+  useDevcontainerImage: false
 workspace:
   mode: worktree
   cleanup: never

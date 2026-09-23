@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 
 const SUPPORTED_RUNTIMES = new Set(["docker", "podman"]);
 const DEFAULTS = Object.freeze({
@@ -124,4 +125,66 @@ function probeRuntime(runtime) {
       ? { available: true }
       : { available: false, reason: `'${runtime} info' exited with ${code}` }));
   });
+}
+
+// Projects that already describe their toolchain in a devcontainer should not
+// have to describe it twice. Only a prebuilt image can be reused: building
+// from a Dockerfile is a separate job ETNPilot does not take on.
+export async function readDevcontainerImage(root, {
+  path = join(".devcontainer", "devcontainer.json"),
+} = {}) {
+  let content;
+  try {
+    content = await readFile(resolve(root, path), "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return { image: undefined, reason: "no-devcontainer" };
+    throw error;
+  }
+  const manifest = JSON.parse(stripJsonComments(content));
+  if (typeof manifest.image === "string" && manifest.image.length > 0) {
+    return { image: manifest.image, source: path };
+  }
+  if (manifest.build || manifest.dockerFile || manifest.dockerComposeFile) {
+    throw new Error(
+      `'${path}' builds its image rather than naming one. Prebuild it and set sandbox.image,`
+      + " or disable sandbox.useDevcontainerImage.",
+    );
+  }
+  return { image: undefined, reason: "no-image-field" };
+}
+
+// devcontainer.json is JSONC. Strings are tracked so a '//' inside one stays.
+function stripJsonComments(content) {
+  let output = "";
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < content.length; index += 1) {
+    const character = content[index];
+    if (inString) {
+      output += character;
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      output += character;
+      continue;
+    }
+    if (character === "/" && content[index + 1] === "/") {
+      while (index < content.length && content[index] !== "\n") index += 1;
+      output += "\n";
+      continue;
+    }
+    if (character === "/" && content[index + 1] === "*") {
+      index += 2;
+      while (index < content.length && !(content[index] === "*" && content[index + 1] === "/")) index += 1;
+      index += 1;
+      continue;
+    }
+    output += character;
+  }
+  // Trailing commas are legal in JSONC and fatal in JSON.
+  return output.replaceAll(/,(\s*[}\]])/g, "$1");
 }

@@ -55,13 +55,21 @@
 - [x] Bounded subagent recursion (audit finding)
 - [x] Reading GitLab pipeline verdicts back into the run (audit finding)
 
+## M5 — Supply chain and reproducibility
+
+- [x] Disposable container sandbox, reusing a devcontainer image where declared
+- [x] Reviewer quorum across different providers
+- [x] Replayable runs from redacted fixtures, which also gives offline execution
+- [x] Dependency and license policy gates
+- [x] SBOM, secret scanning, and in-toto/SLSA run attestations
+- [x] Merge rehearsal against the target branch before publishing
+- [x] Organization-level project templates (`init --template`)
+
 ## Brainstorming backlog
 
-- disposable devcontainers per run;
-- reviewer quorum across different providers;
-- replayable runs with redacted fixtures;
-- dependency and license policy gates;
-- SBOM, secret scanning, and SLSA attestations;
-- local-first web UI and offline execution;
-- merge-train awareness and automatic rebase rehearsal;
-- organization-level templates for regulated teams.
+- local-first web UI for reviewing runs and approvals;
+- merge-train awareness beyond the single-branch rehearsal;
+- richer devcontainer support, including building an image rather than reusing
+  a prebuilt one;
+- policy gates for languages other than JavaScript, whose dependency metadata
+  lives elsewhere.

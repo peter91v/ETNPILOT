@@ -56,6 +56,8 @@ export const CLI_OPTIONS = Object.freeze({
   provider: { type: "string" },
   out: { type: "string", short: "o" },
   template: { type: "string", short: "t" },
+  "record-fixtures": { type: "string" },
+  fixtures: { type: "string" },
 });
 
 export const USAGE = `ETNPilot
@@ -64,6 +66,7 @@ Usage:
   etnpilot init [directory] [--template default|minimal|regulated]
   etnpilot run <task> [--agent name] [--root directory]
     [--worktree | --no-worktree] [--cleanup-worktree] [--publish] [--dry-run]
+    [--record-fixtures file | --fixtures file]
   etnpilot replay <receipt-file> [--root directory] [--public-key path]
     [--require-signatures]
   etnpilot worktree list [--root directory]
@@ -120,6 +123,9 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     if (values.worktree && (values["no-worktree"] || values["in-place"])) {
       throw new Error("Choose either --worktree or --no-worktree, not both.");
     }
+    if (values["record-fixtures"] && values.fixtures) {
+      throw new Error("Choose either --record-fixtures or --fixtures, not both.");
+    }
     const task = [subcommand, ...rest].filter(Boolean).join(" ");
     const worktree = values.worktree ? true : (values["no-worktree"] || values["in-place"]) ? false : undefined;
     const result = await runProject({
@@ -130,6 +136,8 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
       cleanupPolicy: values["cleanup-worktree"] ? "on-success" : undefined,
       publish: values.publish,
       dryRun: values["dry-run"],
+      recordFixtures: values["record-fixtures"],
+      fixtures: values.fixtures,
       approvalHandler: createTerminalApprovalHandler(),
     });
     console.log(JSON.stringify(result, null, 2));

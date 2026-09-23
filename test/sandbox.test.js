@@ -96,3 +96,37 @@ test("workspace tools route approved commands through the sandbox", async () => 
   // The human still approves the command the model asked for.
   assert.equal(approved[0].fullCommandText, "npm test");
 });
+
+test("a devcontainer image is reused when the project already declares one", async () => {
+  const { readDevcontainerImage } = await import("../src/runtime/sandbox.js");
+  const { mkdir } = await import("node:fs/promises");
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-devcontainer-"));
+  await mkdir(join(root, ".devcontainer"), { recursive: true });
+
+  // devcontainer.json is JSONC: comments and trailing commas are legal.
+  await writeFile(join(root, ".devcontainer", "devcontainer.json"), [
+    "{",
+    '  // The team image, with the full toolchain.',
+    '  "name": "team", /* inline */',
+    '  "image": "registry.example.invalid/team/dev:2026.01",',
+    '  "note": "a // slash inside a string stays",',
+    "}",
+    "",
+  ].join("\n"));
+  assert.deepEqual(await readDevcontainerImage(root), {
+    image: "registry.example.invalid/team/dev:2026.01",
+    source: join(".devcontainer", "devcontainer.json"),
+  });
+
+  await writeFile(join(root, ".devcontainer", "devcontainer.json"), JSON.stringify({
+    name: "built",
+    build: { dockerfile: "Dockerfile" },
+  }));
+  await assert.rejects(
+    () => readDevcontainerImage(root),
+    /builds its image rather than naming one/,
+  );
+
+  const empty = await mkdtemp(join(tmpdir(), "etnpilot-no-devcontainer-"));
+  assert.deepEqual(await readDevcontainerImage(empty), { image: undefined, reason: "no-devcontainer" });
+});
