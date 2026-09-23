@@ -18,9 +18,11 @@ setting changed here is refused for the same reasons.
 | `↑` `↓`, `k` `j` | Move the cursor |
 | `enter` | Open the approval under the cursor |
 | `a` / `r` | Approve once / reject |
-| `c` | Request cancellation of the queue job under the cursor |
+| `c` / `R` | Request cancellation of / resume the queue job under the cursor |
+| `n` | Start a run |
 | `esc` | Leave the detail view |
 | `g` | Refresh now, rather than waiting for the next poll |
+| `?` | Every key, on one screen |
 | `q`, `ctrl-c` | Quit |
 
 In the settings view:
@@ -35,6 +37,46 @@ In the settings view:
 While a filter or a value is being typed, every printable key is text. `q` does
 not quit and `d` does not reset — the caret on screen says which mode you are
 in.
+
+## Starting a run
+
+`n` asks for a task and, optionally, an agent. Leaving the agent empty runs
+whatever the project runs by itself, and the prompt names those steps rather
+than showing a blank:
+
+```
+Task
+  Add a health check endpoint
+
+Agent
+  the project's workflow: build → verify
+```
+
+Naming an agent runs that agent instead of the configured steps.
+
+The run works in its own worktree, exactly as `etnpilot run` does, and it does
+not block the screen. Everything it needs approved appears under approvals in
+this same window, where you can read the whole command and answer it — the
+decision is recorded as `tui:<you>`. That is the one thing the terminal command
+cannot do: `etnpilot run` holds the terminal it is asking from.
+
+Quitting stops any run started here rather than stranding it: each is asked to
+abort, its waiting request is closed, and its receipt records why.
+
+## What a run's receipt shows
+
+`enter` on a run opens what was sealed: the branch and sandbox, the merge
+rehearsal and any conflicts, the approvals with who decided them, and which
+settings layers were in effect:
+
+```
+Settings in effect
+  project → user-local
+  2 changed locally  queue.workers, sandbox.enabled
+```
+
+That last part matters for review: it says whether a run used the committed
+configuration or something a person changed for themselves.
 
 ## What the detail view shows
 

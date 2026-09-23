@@ -25,6 +25,17 @@ pre-1.0, so breaking changes may appear in any release.
 
 ### Added — terminal interface
 
+- `n` starts a run from the TUI. It works in its own worktree and does not
+  block the screen; everything it needs approved appears under approvals in the
+  same window, recorded as `tui:<you>`. Quitting aborts any run started there
+  rather than stranding it. An empty agent field names the workflow steps that
+  would run instead of showing a blank.
+- `enter` on a run opens what its receipt sealed: branch and sandbox, the merge
+  rehearsal and its conflicts, the approvals with who decided them, and which
+  settings layers were in effect.
+- `R` resumes a queue job; `?` shows every key on one screen, in two columns
+  where one will not fit and scrolling where neither does.
+
 - The TUI has a settings view: every effective setting with the layer it came
   from and whether it may be changed, an editor for the one under the cursor,
   `d` to put it back to the committed default, `s` to choose between the local
@@ -91,6 +102,13 @@ pre-1.0, so breaking changes may appear in any release.
 - Every worktree run rehearses the merge into its target branch with
   `git merge-tree`; a conflicting branch is not published by default.
 - `etnpilot init --template minimal|regulated`, `etnpilot pipeline status`.
+
+### Fixed — asking for an agent by name
+
+- Naming an agent was silently ignored wherever a project defined
+  `workflow.steps`: `etnpilot run --agent`, `git.issueTrigger.agent`, and any
+  caller of `runProject({ agent })` ran the configured steps instead. A named
+  agent now runs that agent. Projects that never named one are unaffected.
 
 ### Fixed — first-run experience
 

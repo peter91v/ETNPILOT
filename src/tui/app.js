@@ -1,4 +1,4 @@
-import { screen } from "./ansi.js";
+import { screen, shortId } from "./ansi.js";
 import { parseSettingValue } from "../config/settings.js";
 import { clamp, renderApp, settingEntries, settingLiteral, settingValue, viewList } from "./render.js";
 
@@ -29,6 +29,11 @@ export function createTuiApp({
   let filtering = false;
   let filter = "";
   let scope = "local";
+  let prompt;
+  let help = false;
+  let helpOffset = 0;
+  let receipt;
+  const active = new Set();
   let messageTimer;
   let timer;
   let stopped = false;
@@ -44,6 +49,11 @@ export function createTuiApp({
     get filter() { return filter; },
     get filtering() { return filtering; },
     get scope() { return scope; },
+    get prompt() { return prompt; },
+    get help() { return help; },
+    get helpOffset() { return helpOffset; },
+    get receipt() { return receipt; },
+    get active() { return [...active]; },
 
     async refresh() {
       snapshot = await state.collect();
@@ -65,6 +75,11 @@ export function createTuiApp({
         filter,
         filtering,
         scope,
+        prompt,
+        help,
+        helpOffset,
+        receipt,
+        active: [...active],
         project: state.config?.git?.project ?? "",
       });
     },
@@ -87,7 +102,33 @@ export function createTuiApp({
         app.paint();
         return true;
       }
+      if (prompt) {
+        await promptKey(key);
+        app.paint();
+        return true;
+      }
       if (key === "q" || key === "\u0003") return false;
+      if (help) {
+        if (key === "?" || key === "\u001B") help = false;
+        else if (key === "\u001B[B" || key === "j") helpOffset += 1;
+        else if (key === "\u001B[A" || key === "k") helpOffset = Math.max(0, helpOffset - 1);
+        app.paint();
+        return true;
+      }
+      if (key === "?") {
+        help = true;
+        helpOffset = 0;
+        app.paint();
+        return true;
+      }
+      if (key === "n") {
+        // An empty agent field runs whatever the project runs by itself, so
+        // the prompt names those steps rather than leaving a blank.
+        const steps = (state.config?.workflow?.steps ?? []).map((step) => step.id ?? step.agent).filter(Boolean);
+        prompt = { buffer: "", agent: "", field: "task", steps };
+        app.paint();
+        return true;
+      }
       if (key === "\t") {
         view = VIEWS[(VIEWS.indexOf(view) + 1) % VIEWS.length];
         cursor = 0;
@@ -111,12 +152,15 @@ export function createTuiApp({
         cursor = clamp(cursor - 1, selection().length);
       } else if (key === "\r" || key === "\n") {
         if (view === "approvals" && selection().length > 0) detail = true;
+        else if (view === "runs" && selection().length > 0) await openRun();
       } else if (key === "\u001B") {
         detail = false;
       } else if (key === "a" || key === "r") {
         await decide(key === "a" ? "approved" : "rejected");
       } else if (key === "c" && view === "queue") {
         await cancel();
+      } else if (key === "R" && view === "queue") {
+        await resume();
       } else if (key === "g") {
         await app.refresh();
       }
@@ -147,6 +191,9 @@ export function createTuiApp({
       stopped = true;
       clearInterval(timer);
       clearTimeout(messageTimer);
+      // Quitting must not leave a run half-finished in a worktree nobody is
+      // watching: each one is asked to stop, and its receipt records why.
+      for (const run of active) run.controller.abort();
       input.off("data", onData);
       output.off?.("resize", app.paint);
       if (input.isTTY) {
@@ -238,6 +285,87 @@ export function createTuiApp({
     } catch (error) {
       note(error.message);
     }
+    await app.refresh();
+  }
+
+  async function openRun() {
+    const run = selection()[clamp(cursor, selection().length)];
+    if (!run) return;
+    detail = true;
+    receipt = undefined;
+    try {
+      receipt = await state.readReceipt(run.receiptFile);
+    } catch (error) {
+      note(error.message);
+      detail = false;
+    }
+  }
+
+  async function resume() {
+    const job = selection()[clamp(cursor, selection().length)];
+    if (!job) return;
+    try {
+      const result = state.resumeJob(job.id);
+      note(`${result.id.slice(0, 8)} is ${result.status} again.`);
+    } catch (error) {
+      note(error.message);
+    }
+    await app.refresh();
+  }
+
+  async function promptKey(key) {
+    if (key === "\u0003" || key === "\u001B") {
+      prompt = undefined;
+      return;
+    }
+    if (key === "\t") {
+      prompt = { ...prompt, field: prompt.field === "task" ? "agent" : "task" };
+      return;
+    }
+    if (key === "\r" || key === "\n") return startRun();
+    const field = prompt.field === "agent" ? "agent" : "buffer";
+    if (key === "\u0015") {
+      prompt = { ...prompt, [field]: "" };
+      return;
+    }
+    if (key === "\u007F" || key === "\b") {
+      prompt = { ...prompt, [field]: prompt[field].slice(0, -1) };
+      return;
+    }
+    if (key.startsWith("\u001B") || key.length !== 1 || key < " ") return;
+    prompt = { ...prompt, [field]: prompt[field] + key };
+  }
+
+  async function startRun() {
+    const { buffer, agent } = prompt;
+    if (!buffer.trim()) {
+      prompt = { ...prompt, error: "A run needs a task to work on." };
+      return;
+    }
+    const controller = new AbortController();
+    const run = { input: buffer.trim(), agent: agent.trim() || undefined, startedAt: now(), controller };
+    let started;
+    try {
+      started = state.startRun({ input: run.input, agent: run.agent, signal: controller.signal });
+    } catch (error) {
+      prompt = { ...prompt, error: error.message };
+      return;
+    }
+    prompt = undefined;
+    active.add(run);
+    note(`Started: ${run.input}. Its approvals will appear here.`);
+    // The run proceeds while the screen keeps painting; it is not awaited, or
+    // the interface would freeze exactly when it is needed to answer a request.
+    void started.then(
+      (result) => {
+        active.delete(run);
+        note(`${shortId(result.runId, { kind: "run" })} ${result.summary?.status ?? result.status}.`);
+      },
+      (error) => {
+        active.delete(run);
+        note(`The run failed: ${error.message}`);
+      },
+    ).then(() => app.refresh()).then(app.paint, report);
     await app.refresh();
   }
 

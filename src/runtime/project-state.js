@@ -2,7 +2,8 @@ import { readdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { loadConfig } from "../config/load.js";
 import { describeSettings, setSetting, unsetSetting } from "../config/settings.js";
-import { ApprovalInbox } from "../core/approval-inbox.js";
+import { ApprovalInbox, createInboxApprovalHandler } from "../core/approval-inbox.js";
+import { runProject } from "./project-runner.js";
 import { WorkflowQueue } from "../workflow/queue.js";
 
 // These name files this state opened when it started. Changing one is allowed,
@@ -35,6 +36,35 @@ export async function openProjectState({ root = process.cwd(), env = process.env
     collect: (options) => collectState({ inbox, queue, runsDirectory, root: projectRoot, env }, options),
     decide: (id, decision, options) => inbox.decide(id, decision, options),
     cancelJob: (id, options) => queue.requestCancel(id, options),
+    resumeJob: (id, options) => queue.resume(id, options),
+    // A run started from a live surface asks that surface for its approvals:
+    // the requests land in the same inbox the screen is already showing, so
+    // nobody has to open a second window to answer their own run.
+    startRun({ input, agent, signal, dryRun, providerFactories } = {}) {
+      if (!input || !String(input).trim()) throw new TypeError("A task is required to start a run.");
+      const inboxConfig = current.approval?.inbox ?? {};
+      if (inboxConfig.enabled === false) {
+        throw new Error("approval.inbox.enabled is false, so a run started here would have nobody to ask.");
+      }
+      return runProject({
+        root: projectRoot,
+        env,
+        input: String(input).trim(),
+        agent,
+        signal,
+        dryRun,
+        providerFactories,
+        approvalHandler: createInboxApprovalHandler({
+          inbox,
+          timeoutMs: inboxConfig.timeoutMs ?? 24 * 60 * 60_000,
+          pollIntervalMs: inboxConfig.pollIntervalMs ?? 500,
+          signal,
+        }),
+      });
+    },
+    // Receipts are read on demand rather than in every poll: a detail view is
+    // opened now and then, and the files grow with the run.
+    readReceipt: (file) => readReceipt(runsDirectory, file),
     // Changing a setting from any surface goes through the same module the
     // CLI uses, so every surface is refused for the same reason.
     async setSetting(path, value, options = {}) {
@@ -109,6 +139,22 @@ export async function readRuns(directory, { limit = 20 } = {}) {
     });
   }
   return runs;
+}
+
+export async function readReceipt(directory, file) {
+  if (typeof file !== "string" || file.includes("/") || file.includes("\\") || !file.endsWith(".jsonl")) {
+    throw new TypeError(`'${file}' is not a receipt file in this project.`);
+  }
+  const content = await readFile(join(directory, file), "utf8");
+  const entries = [];
+  for (const line of content.split("\n").filter(Boolean)) {
+    try {
+      entries.push(JSON.parse(line));
+    } catch {
+      entries.push({ malformed: true });
+    }
+  }
+  return { file, entries, terminal: entries.findLast((entry) => entry.terminal === true) };
 }
 
 function countApprovals(lines) {

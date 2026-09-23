@@ -82,6 +82,7 @@ Every surface should be able to do everything; none of them is the junior one.
 - [x] Local settings layer: a user's changes stay local, only defaults are committed
 - [x] Editing settings, policy included, from the TUI
 - [ ] Editing settings from the page and the app
+- [x] Starting a run from the TUI, deciding its approvals in the same window
 - [ ] Starting a run from the page and the app
 
 ## Brainstorming backlog

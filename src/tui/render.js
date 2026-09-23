@@ -25,20 +25,32 @@ export function renderApp(state, options = {}) {
     filter = "",
     filtering = false,
     scope = "local",
+    prompt,
+    help = false,
+    helpOffset = 0,
+    receipt,
+    active = [],
   } = options;
   const style = createStyle({ color });
   const body = height - 3;
   const lines = [
-    header(state, { style, width, view, project }),
+    header(state, { style, width, view, project, active }),
     "",
   ];
 
-  const rendered = detail && view === "approvals"
-    ? renderApprovalDetail(state, { style, width, height: body, cursor })
-    : renderView(view, state, { style, width, height: body, cursor, now, editor, filter, filtering, scope });
+  const context = { style, width, height: body, cursor, now, editor, filter, filtering, scope, receipt, active };
+  const rendered = help
+    ? renderHelp({ style, width, height: body, offset: helpOffset })
+    : prompt
+      ? renderRunPrompt(prompt, { style, width, height: body })
+      : detail && view === "approvals"
+        ? renderApprovalDetail(state, context)
+        : detail && view === "runs"
+          ? renderRunDetail(state, context)
+          : renderView(view, state, context);
   for (const line of rendered.slice(0, body)) lines.push(truncate(line, width));
   while (lines.length < height - 1) lines.push("");
-  lines.push(footer({ style, width, view, detail, message, editor }));
+  lines.push(footer({ style, width, view, detail, message, editor, prompt, help }));
   return lines.slice(0, height).map((line) => truncate(line, width));
 }
 
@@ -53,10 +65,12 @@ function renderView(view, state, context) {
   return renderApprovals(state, context);
 }
 
-function header(state, { style, width, view, project }) {
+function header(state, { style, width, view, project, active = [] }) {
   const pending = state.approvals?.pending?.length ?? 0;
   const counts = state.queue?.counts ?? {};
-  const running = counts.running ?? 0;
+  // Runs this window started count too, or a run you are watching would not
+  // appear in the one place that claims to say how many are running.
+  const running = (counts.running ?? 0) + active.length;
   const tabs = VIEWS.map((name) => {
     const label = name === "approvals" && pending > 0 ? `${name} ${pending}` : name;
     return name === view ? style.bold(style.accent(label)) : style.dim(label);
@@ -67,20 +81,30 @@ function header(state, { style, width, view, project }) {
   return left + " ".repeat(gap) + right;
 }
 
-function footer({ style, width, view, detail, message, editor }) {
+function footer({ style, width, view, detail, message, editor, prompt, help }) {
   if (message) return truncate(style.warn(message), width);
-  const keys = editor
-    ? [["enter", "save"], ["esc", "cancel"], ["^u", "clear"]]
-    : detail
-      ? [["a", "approve"], ["r", "reject"], ["esc", "back"], ["q", "quit"]]
-      : view === "approvals"
-        ? [["↑↓", "move"], ["enter", "open"], ["a", "approve"], ["r", "reject"], ["tab", "view"], ["q", "quit"]]
-        : view === "queue"
-          ? [["↑↓", "move"], ["c", "cancel"], ["tab", "view"], ["q", "quit"]]
-          : view === "settings"
-            ? [["↑↓", "move"], ["enter", "edit"], ["d", "default"], ["s", "scope"], ["/", "filter"], ["tab", "view"], ["q", "quit"]]
-            : [["↑↓", "move"], ["tab", "view"], ["?", "help"], ["q", "quit"]];
+  const keys = footerKeys({ view, detail, editor, prompt, help });
   return truncate(keys.map(([key, label]) => `${style.accent(key)} ${style.dim(label)}`).join(style.dim("  ")), width);
+}
+
+// Whatever is on screen decides which keys the footer promises. A key it names
+// has to do something here, or the footer is teaching the wrong thing.
+function footerKeys({ view, detail, editor, prompt, help }) {
+  if (help) return [["↑↓", "scroll"], ["?", "close"], ["esc", "close"], ["q", "quit"]];
+  if (prompt) return [["enter", "start"], ["tab", "agent"], ["esc", "cancel"], ["^u", "clear"]];
+  if (editor) return [["enter", "save"], ["esc", "cancel"], ["^u", "clear"]];
+  if (detail && view === "runs") return [["esc", "back"], ["↑↓", "move"], ["n", "run"], ["q", "quit"]];
+  if (detail) return [["a", "approve"], ["r", "reject"], ["esc", "back"], ["q", "quit"]];
+  if (view === "approvals") {
+    return [["↑↓", "move"], ["enter", "open"], ["a", "approve"], ["r", "reject"], ["n", "run"], ["tab", "view"], ["q", "quit"]];
+  }
+  if (view === "queue") {
+    return [["↑↓", "move"], ["c", "cancel"], ["R", "resume"], ["n", "run"], ["tab", "view"], ["q", "quit"]];
+  }
+  if (view === "settings") {
+    return [["↑↓", "move"], ["enter", "edit"], ["d", "default"], ["s", "scope"], ["/", "filter"], ["tab", "view"], ["q", "quit"]];
+  }
+  return [["↑↓", "move"], ["enter", "open"], ["n", "run"], ["tab", "view"], ["?", "help"], ["q", "quit"]];
 }
 
 function renderApprovals(state, { style, width, height, cursor, now }) {
@@ -241,6 +265,159 @@ function queueTone(status) {
   if (status === "running") return "warn";
   return "muted";
 }
+
+// Starting a run from here. The task is the whole input; the agent is whatever
+// the project's default is unless one is named.
+function renderRunPrompt(prompt, { style, width, height }) {
+  const lines = [
+    style.bold(style.ink("Start a run")),
+    "",
+    style.dim("Task"),
+    `  ${style.ink(prompt.buffer)}${prompt.field === "agent" ? "" : style.invert(" ")}`,
+    "",
+  ];
+  lines.push(style.dim("Agent"));
+  lines.push(prompt.agent
+    ? `  ${style.ink(prompt.agent)}${prompt.field === "agent" ? style.invert(" ") : ""}`
+    // Empty means: whatever the project would run by itself. Saying which
+    // steps those are turns an empty field from a blank into an answer.
+    : `  ${prompt.field === "agent" ? style.invert(" ") : ""}${style.muted(prompt.steps?.length > 0 ? `the project's workflow: ${prompt.steps.join(" → ")}` : "the project's default agent")}`);
+  lines.push("");
+  if (prompt.error) {
+    for (const piece of wrap(prompt.error, width - 2)) lines.push(style.bad(`  ${piece}`));
+    lines.push("");
+  }
+  lines.push(
+    style.dim("The run works in its own worktree. Anything it needs approved"),
+    style.dim("appears under approvals here, where you can answer it."),
+  );
+  return lines.slice(0, height);
+}
+
+function renderRunDetail(state, { style, width, height, cursor, receipt }) {
+  const runs = state.runs ?? [];
+  const run = runs[clamp(cursor, runs.length)];
+  if (!run) return [style.dim("No runs have been recorded yet.")];
+  const lines = [
+    `${style.bold(style.ink(run.runId))} ${style.tone(run.status, statusTone(run.status))} ${style.dim(`${run.mode} · ${duration(run.durationMs)}`)}`,
+    "",
+  ];
+  if (!receipt || receipt.file !== run.receiptFile) return [...lines, style.dim("Reading the receipt…")];
+  const terminal = receipt.terminal ?? {};
+  const field = (label, value) => {
+    if (value === undefined || value === "") return;
+    lines.push(style.dim(label));
+    for (const piece of wrap(String(value), width - 2)) lines.push(`  ${style.ink(piece)}`);
+    lines.push("");
+  };
+  field("Branch", terminal.workspace?.branch);
+  field("Sandbox", terminal.workspace?.sandbox?.image);
+  if (terminal.git?.mergeRehearsal) {
+    const rehearsal = terminal.git.mergeRehearsal;
+    lines.push(style.dim("Merge rehearsal"));
+    lines.push(rehearsal.clean
+      ? `  ${style.ok("clean")} ${style.muted(`into ${rehearsal.targetBranch ?? "the target branch"}`)}`
+      : `  ${style.bad("conflicts")} ${style.muted((rehearsal.conflicts ?? []).join(", "))}`);
+    lines.push("");
+  }
+  // Which settings were in effect is evidence, so it belongs next to the run
+  // rather than only in the file.
+  if (terminal.settings) {
+    lines.push(style.dim("Settings in effect"));
+    lines.push(`  ${style.muted(terminal.settings.layers.map((layer) => layer.source).join(" → "))}`);
+    const overrides = terminal.settings.overrides ?? [];
+    lines.push(overrides.length === 0
+      ? `  ${style.ok("the committed default, unchanged")}`
+      : `  ${style.warn(`${overrides.length} changed locally`)} ${style.muted(overrides.join(", "))}`);
+    lines.push("");
+  }
+  const approvals = receipt.entries.flatMap((entry) => entry.approvals ?? []);
+  if (approvals.length > 0) {
+    lines.push(style.dim(`Approvals (${approvals.length})`));
+    // Three lines are held back for the receipt below. A count that disagrees
+    // with the rows under it is worse than a list that says it is short.
+    const room = Math.max(1, height - lines.length - 3);
+    for (const approval of approvals.slice(0, room)) {
+      const tone = approval.decision === "approve-once" ? "ok" : "bad";
+      lines.push(`  ${style.tone(padStart(String(approval.operationKind).toUpperCase(), 7), tone)} ${style.muted(approval.decision)} ${style.dim(approval.evidence?.decidedBy ?? "")}`);
+    }
+    if (approvals.length > room) lines.push(style.dim(`  … ${approvals.length - room} more, in the receipt`));
+    lines.push("");
+  }
+  lines.push(style.dim("Receipt"));
+  lines.push(`  ${style.muted(run.receiptFile)} · ${run.entries} entries · ${run.signed ? style.ok("signed") : style.warn("unsigned")}`);
+  if (terminal.error) {
+    lines.push("", style.dim("Error"));
+    for (const piece of wrap(terminal.error, width - 2)) lines.push(`  ${style.bad(piece)}`);
+  }
+  return lines.slice(0, height);
+}
+
+function renderHelp({ style, width, height, offset = 0 }) {
+  const sections = HELP_SECTIONS;
+  const render = ([title, keys], columnWidth) => [
+    style.dim(title),
+    ...keys.map(([key, label]) => truncate(`  ${style.accent(pad(key, 10))} ${style.ink(label)}`, columnWidth)),
+    "",
+  ];
+  const single = sections.flatMap((section) => render(section, width));
+  const rows = single.length <= height ? single : twoColumns(sections, render, width);
+  if (rows.length <= height) return rows;
+
+  // Below a certain height nothing lays out. Help that scrolls off the bottom
+  // without saying so teaches the wrong keys, so the cut is on screen.
+  const start = Math.min(Math.max(0, offset), rows.length - (height - 1));
+  const visible = rows.slice(start, start + height - 1);
+  const more = rows.length - start - visible.length;
+  visible.push(style.dim(more > 0 ? `↑↓ scroll · ${more} more lines` : "↑↓ scroll · the end"));
+  return visible;
+}
+
+export function helpLength(width, height) {
+  const measure = ([title, keys], columnWidth) => [title, ...keys.map(([key]) => key), ""].length;
+  const single = HELP_SECTIONS.reduce((total, section) => total + measure(section), 0);
+  if (single <= height) return single;
+  const half = Math.ceil(HELP_SECTIONS.length / 2);
+  const left = HELP_SECTIONS.slice(0, half).reduce((total, section) => total + measure(section), 0);
+  const right = HELP_SECTIONS.slice(half).reduce((total, section) => total + measure(section), 0);
+  return Math.max(left, right);
+}
+
+function twoColumns(sections, render, width) {
+  const columnWidth = Math.floor((width - 2) / 2);
+  const half = Math.ceil(sections.length / 2);
+  const left = sections.slice(0, half).flatMap((section) => render(section, columnWidth));
+  const right = sections.slice(half).flatMap((section) => render(section, columnWidth));
+  const rows = [];
+  for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+    rows.push(`${pad(left[index] ?? "", columnWidth)}  ${right[index] ?? ""}`);
+  }
+  return rows;
+}
+
+const HELP_SECTIONS = Object.freeze([
+  ["Everywhere", [
+    ["tab / 1-4", "switch view"],
+    ["↑ ↓ / k j", "move the cursor"],
+    ["n", "start a run"],
+    ["g", "refresh now"],
+    ["?", "this help"],
+    ["q / ^c", "quit"],
+  ]],
+  ["Approvals", [
+    ["enter", "open in full, with the rule"],
+    ["a / r", "approve once / reject"],
+    ["esc", "back to the list"],
+  ]],
+  ["Runs", [["enter", "open the receipt"]]],
+  ["Queue", [["c", "request cancellation"], ["R", "resume a failed job"]]],
+  ["Settings", [
+    ["enter", "edit"],
+    ["d", "back to the default"],
+    ["s", "local or ~/.config"],
+    ["/", "filter"],
+  ]],
+]);
 
 // The settings list and its editor. Which entries are on screen is a pure
 // function of the filter, so the app selects exactly what a person can see.

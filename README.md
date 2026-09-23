@@ -453,7 +453,9 @@ etnpilot tui --root .
 Approvals, the queue, runs, and settings in one full-screen view, with the whole
 command and the rule that stopped it. Decisions go to the same inbox the CLI and
 the page use; settings are edited against the same layers and refused for the
-same reasons. See [docs/tui.md](docs/tui.md).
+same reasons. `n` starts a run whose approvals come back to this same window,
+which is the one thing `etnpilot run` cannot do — it holds the terminal it is
+asking from. See [docs/tui.md](docs/tui.md).
 
 ## Local review UI
 

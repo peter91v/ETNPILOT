@@ -166,7 +166,10 @@ export async function runProject({
       }
     }
     harness.setProviderRouter(new ProviderRouter(harness.providers, config.routing, { policy }));
-    workflow = normalizeWorkflow(config.workflow, agent ?? config.defaultAgent ?? "orchestrator");
+    workflow = normalizeWorkflow(config.workflow, {
+      requested: agent,
+      fallback: config.defaultAgent ?? "orchestrator",
+    });
     assertWorkflowAgents(harness, workflow);
   } catch (error) {
     codegraph?.graph.close();
@@ -611,10 +614,15 @@ async function finishTelemetry({ telemetry, span, workflowRunId, status, duratio
   };
 }
 
-function normalizeWorkflow(workflow = {}, defaultAgent) {
-  const steps = workflow.steps?.length
-    ? workflow.steps
-    : [{ id: "agent", type: "agent", agent: defaultAgent }];
+function normalizeWorkflow(workflow = {}, { requested, fallback } = {}) {
+  // Asking for an agent by name means running that agent. Letting the
+  // configured steps win would make '--agent', the issue trigger's agent, and
+  // the run prompt quietly decorative wherever a project defines a workflow.
+  const steps = requested
+    ? [{ id: "agent", type: "agent", agent: requested }]
+    : workflow.steps?.length
+      ? workflow.steps
+      : [{ id: "agent", type: "agent", agent: fallback }];
   return {
     concurrency: workflow.concurrency ?? 1,
     failFast: workflow.failFast ?? true,
