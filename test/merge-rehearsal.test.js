@@ -72,3 +72,75 @@ test("project templates override the documented default and keep its comments", 
   assert.equal(initialized.template, "minimal");
   assert.equal((await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"))).observability.enabled, false);
 });
+
+test("merge-train inspection names the queued merge requests a branch collides with", async () => {
+  const { inspectMergeTrain } = await import("../src/gitlab/merge-train.js");
+  const { mkdtemp, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+
+  // An "upstream" repository holding two queued merge requests.
+  const upstream = await mkdtemp(join(tmpdir(), "etnpilot-train-upstream-"));
+  await git(["init", "-b", "main"], { cwd: upstream });
+  await git(["config", "user.email", "test@example.invalid"], { cwd: upstream });
+  await git(["config", "user.name", "ETNPilot Test"], { cwd: upstream });
+  await writeFile(join(upstream, "shared.txt"), "base\n");
+  await writeFile(join(upstream, "other.txt"), "base\n");
+  await git(["add", "."], { cwd: upstream });
+  await git(["commit", "-m", "base"], { cwd: upstream });
+
+  for (const [iid, file, content] of [[7, "shared.txt", "from mr 7\n"], [9, "other.txt", "from mr 9\n"]]) {
+    await git(["checkout", "-q", "-b", `feature-${iid}`, "main"], { cwd: upstream });
+    await writeFile(join(upstream, file), content);
+    await git(["commit", "-qam", `mr ${iid}`], { cwd: upstream });
+    // GitLab exposes merge-request heads under this ref namespace.
+    await git(["update-ref", `refs/merge-requests/${iid}/head`, "HEAD"], { cwd: upstream });
+  }
+  await git(["checkout", "-q", "main"], { cwd: upstream });
+
+  const local = await mkdtemp(join(tmpdir(), "etnpilot-train-local-"));
+  await git(["clone", "-q", upstream, local], { cwd: upstream });
+  await git(["config", "user.email", "test@example.invalid"], { cwd: local });
+  await git(["config", "user.name", "ETNPilot Test"], { cwd: local });
+  await git(["checkout", "-q", "-b", "etnpilot/run-1"], { cwd: local });
+  await writeFile(join(local, "shared.txt"), "from the run\n");
+  await git(["commit", "-qam", "run change"], { cwd: local });
+
+  const client = {
+    mergeRequests: async () => [
+      { iid: 7, title: "Touches shared.txt\u0007", source_branch: "feature-7", web_url: "https://gitlab.invalid/mr/7" },
+      { iid: 9, title: "Touches other.txt", source_branch: "feature-9", web_url: "https://gitlab.invalid/mr/9" },
+      { iid: 11, title: "This run", source_branch: "etnpilot/run-1", web_url: "https://gitlab.invalid/mr/11" },
+    ],
+  };
+
+  const report = await inspectMergeTrain({
+    client,
+    project: "group/project",
+    cwd: local,
+    remote: "origin",
+    targetBranch: "main",
+    ownBranch: "etnpilot/run-1",
+  });
+
+  assert.equal(report.inspected, true);
+  // The run's own merge request is not compared against itself.
+  assert.equal(report.queued, 2);
+  assert.equal(report.clear, false);
+  assert.equal(report.conflicts.length, 1);
+  assert.deepEqual(
+    { iid: report.conflicts[0].iid, files: report.conflicts[0].files, branch: report.conflicts[0].sourceBranch },
+    { iid: 7, files: ["shared.txt"], branch: "feature-7" },
+  );
+  // Titles come from other people, so control characters are escaped.
+  assert.equal(report.conflicts[0].title, "Touches shared.txt\\u{0007}");
+
+  const unavailable = await inspectMergeTrain({
+    client: { mergeRequests: async () => { throw new Error("401 Unauthorized"); } },
+    project: "group/project",
+    cwd: local,
+    targetBranch: "main",
+  });
+  assert.equal(unavailable.inspected, false);
+  assert.equal(unavailable.reason, "merge-requests-unavailable");
+});

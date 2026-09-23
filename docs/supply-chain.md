@@ -10,8 +10,22 @@ and as workflow check steps.
 etnpilot deps check --root .
 ```
 
-Reads what is installed under `node_modules` — a lockfile says what should be
-there, `node_modules` says what is — and gates it:
+Reads each ecosystem where its truth lives — a lockfile says what should be
+there, the installed tree says what is:
+
+| Ecosystem | Read from | Licenses |
+| --- | --- | --- |
+| npm | `node_modules/*/package.json` | yes |
+| PyPI | `.venv/lib/*/site-packages/*.dist-info/METADATA` | yes |
+| Go | `go.mod` | no |
+| Cargo | `Cargo.lock` | no |
+
+Go modules and Cargo lockfiles carry no license metadata at all. Those packages
+are inventoried and counted as `unlicensedEcosystem`, never reported as
+violations — a finding nobody can act on is noise, and noise gets gates
+switched off.
+
+The gate is configured per project:
 
 ```yaml
 supplyChain:

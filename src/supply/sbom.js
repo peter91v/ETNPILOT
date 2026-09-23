@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { readInstalledPackages } from "./dependencies.js";
+import { ecosystemPurl, readProjectPackages } from "./ecosystems.js";
 
 const SPEC_VERSION = "1.5";
 
@@ -10,13 +10,13 @@ const SPEC_VERSION = "1.5";
 export async function generateSbom(root, { packages, serialNumber, timestamp = new Date() } = {}) {
   const projectRoot = resolve(root);
   const manifest = await readJson(join(projectRoot, "package.json"));
-  const installed = packages ?? await readInstalledPackages(projectRoot);
+  const installed = packages ?? (await readProjectPackages(projectRoot)).packages;
   const components = installed.map((entry) => ({
     type: "library",
-    "bom-ref": `pkg:npm/${entry.name}@${entry.version}`,
+    "bom-ref": ecosystemPurl(entry),
     name: entry.name,
     version: entry.version,
-    purl: `pkg:npm/${encodeURIComponent(entry.name).replaceAll("%40", "@").replaceAll("%2F", "/")}@${entry.version}`,
+    purl: ecosystemPurl(entry),
     ...(entry.license ? { licenses: [{ license: { id: entry.license } }] } : {}),
     ...(entry.repository ? { externalReferences: [{ type: "vcs", url: entry.repository }] } : {}),
   }));

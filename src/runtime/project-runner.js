@@ -12,6 +12,8 @@ import { CodeGraph, createCodeGraphMcpServer, isCodeGraphSourcePath } from "../c
 import { git } from "../git/command.js";
 import { rehearseMerge } from "../git/merge-rehearsal.js";
 import { WorktreeManager } from "../git/worktrees.js";
+import { GitLabClient } from "../gitlab/client.js";
+import { inspectMergeTrain } from "../gitlab/merge-train.js";
 import { GitLabPublisher } from "../gitlab/publisher.js";
 import { registerConfiguredProviders } from "../providers/register.js";
 import { ProviderRouter } from "../providers/router.js";
@@ -21,7 +23,7 @@ import { WorkflowEngine } from "../workflow/engine.js";
 import { evaluateQuorum, parseVerdict, QUORUM_INSTRUCTION, quorumError } from "../workflow/quorum.js";
 import { createSecretResolver } from "../secrets/resolver.js";
 import { createTelemetry } from "../observability/telemetry.js";
-import { createSandbox, readDevcontainerImage } from "./sandbox.js";
+import { buildDevcontainerImage, createSandbox, readDevcontainerImage } from "./sandbox.js";
 import { createFixtureRecorder, fixtureProviderFactories, loadFixtures } from "./fixtures.js";
 
 export async function runProject({
@@ -299,6 +301,9 @@ export async function runProject({
         fetch: config.git?.rehearseFetch !== false,
       })
     : undefined;
+  const mergeTrain = rehearsal?.clean === true
+    ? await inspectTrain({ config, token: gitLabToken, workspace, branch, fetchImpl })
+    : undefined;
 
   let codegraphEvidence;
   if (codegraph) {
@@ -335,7 +340,11 @@ export async function runProject({
     durationMs: Date.now() - startedAt,
     workspace: { ...workspace, ...(sandbox ? { sandbox: sandbox.describe() } : {}) },
     content: contentEvidence,
-    git: { ...gitEvidence, ...(rehearsal ? { mergeRehearsal: rehearsal } : {}) },
+    git: {
+      ...gitEvidence,
+      ...(rehearsal ? { mergeRehearsal: rehearsal } : {}),
+      ...(mergeTrain ? { mergeTrain } : {}),
+    },
     ...(fixtureEvidence ? { fixtures: fixtureEvidence } : {}),
     codegraph: codegraphEvidence,
     observability,
@@ -386,6 +395,7 @@ export async function runProject({
     content: contentEvidence,
     git: gitEvidence,
     ...(rehearsal ? { mergeRehearsal: rehearsal } : {}),
+    ...(mergeTrain ? { mergeTrain } : {}),
     ...(fixtureEvidence ? { fixtures: fixtureEvidence } : {}),
     codegraph: codegraphEvidence,
     observability,
@@ -415,6 +425,20 @@ async function resolveSandboxConfig(sandboxConfig, workspacePath) {
   const devcontainer = await readDevcontainerImage(workspacePath, sandboxConfig.devcontainerPath
     ? { path: sandboxConfig.devcontainerPath }
     : {});
+  if (!devcontainer.image && devcontainer.build) {
+    if (sandboxConfig.buildDevcontainerImage !== true) {
+      throw new Error(
+        `The devcontainer builds its image rather than naming one (${devcontainer.reason}).`
+        + " Set sandbox.buildDevcontainerImage to build it, prebuild it and set sandbox.image,"
+        + " or unset sandbox.useDevcontainerImage.",
+      );
+    }
+    const built = await buildDevcontainerImage(workspacePath, {
+      build: devcontainer.build,
+      runtime: sandboxConfig.runtime ?? "docker",
+    });
+    return { ...sandboxConfig, image: built.image, imageSource: devcontainer.source, imageBuilt: built.built };
+  }
   if (!devcontainer.image) {
     throw new Error(
       `sandbox.useDevcontainerImage is set, but no image was found (${devcontainer.reason}).`
@@ -460,6 +484,26 @@ async function discardWorkspace(workspace, manager, branch) {
     return { ...removal, branch, branchRemoved: true };
   } catch (error) {
     return { removed: false, reason: "cleanup-failed", error: error.message };
+  }
+}
+
+// Only worth asking once the branch itself merges: a branch that already
+// conflicts with its target has a nearer problem than the queue behind it.
+async function inspectTrain({ config, token, workspace, branch, fetchImpl }) {
+  const train = config.git?.mergeTrain ?? {};
+  if (train.enabled !== true || !config.git?.project || !token) return undefined;
+  try {
+    return await inspectMergeTrain({
+      client: new GitLabClient({ baseUrl: config.git.baseUrl, token, fetchImpl }),
+      project: config.git.project,
+      cwd: workspace.path,
+      remote: config.git.remote,
+      targetBranch: config.git.targetBranch ?? "main",
+      ownBranch: branch,
+      limit: train.maxMergeRequests ?? 10,
+    });
+  } catch (error) {
+    return { inspected: false, reason: "merge-train-failed", error: error.message };
   }
 }
 

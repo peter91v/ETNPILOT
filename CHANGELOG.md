@@ -6,6 +6,22 @@ pre-1.0, so breaking changes may appear in any release.
 
 ## [Unreleased]
 
+### Added — roadmap M6
+
+- `etnpilot ui` serves a local review page for pending approvals, the workflow
+  queue, and finished runs, read from the same databases and receipt files the
+  CLI uses. Loopback-bound, token-protected, and loading nothing from anywhere.
+- Merge-train awareness: after a clean rehearsal, a run can report which other
+  open merge requests its branch would collide with once they land
+  (`git.mergeTrain`).
+- Dependency inventory and license gates now cover PyPI (from installed
+  `dist-info` metadata), Go (`go.mod`), and Cargo (`Cargo.lock`) alongside npm.
+  Ecosystems that carry no license data are counted rather than reported as
+  violations, because a finding nobody can act on is noise.
+- The sandbox can build a devcontainer image when the devcontainer defines a
+  Dockerfile, tagging it by content so an unchanged definition is reused and a
+  changed one cannot be served stale.
+
 ### Added — roadmap M4 and M5
 
 - Policy resolves symbolic links before matching paths, so a link created

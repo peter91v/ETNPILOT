@@ -23,6 +23,11 @@ git:
   committer:
     name: ETNPilot
     email: etnpilot@localhost
+  mergeTrain:
+    # Report which other open merge requests this run's branch would collide
+    # with once they land. Needs gitlab.apiToken.
+    enabled: false
+    maxMergeRequests: 10
   webhook:
     path: /webhooks/gitlab
     host: 127.0.0.1
@@ -179,8 +184,10 @@ sandbox:
   network: none
   readOnlyRoot: true
   workdir: /workspace
-  # Reuse the image a .devcontainer/devcontainer.json already names.
+  # Reuse the image a .devcontainer/devcontainer.json already names, and
+  # optionally build it when the devcontainer defines a Dockerfile instead.
   useDevcontainerImage: false
+  buildDevcontainerImage: false
 workspace:
   mode: worktree
   cleanup: never

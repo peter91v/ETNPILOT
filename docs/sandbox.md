@@ -67,9 +67,20 @@ sandbox:
   useDevcontainerImage: true
 ```
 
-Only a prebuilt `image` is reused. A devcontainer that builds from a Dockerfile
-is rejected with a message asking you to prebuild it and name it in
-`sandbox.image`; building images is a job ETNPilot does not take on.
+A devcontainer that defines a Dockerfile rather than naming an image can be
+built:
+
+```yaml
+sandbox:
+  enabled: true
+  useDevcontainerImage: true
+  buildDevcontainerImage: true
+```
+
+The tag is derived from the Dockerfile and its build arguments, so an
+unchanged definition reuses the existing image and a changed one cannot be
+served stale. The Dockerfile and its context must stay inside the project.
+`dockerComposeFile` devcontainers are not supported.
 
 ## Receipts
 

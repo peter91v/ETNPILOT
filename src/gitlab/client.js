@@ -30,6 +30,15 @@ export class GitLabClient {
     });
   }
 
+  mergeRequests(project, { state = "opened", targetBranch, perPage = 50 } = {}) {
+    return this.requestAll(
+      "GET",
+      `/projects/${encodeURIComponent(project)}/merge_requests`,
+      { state, ...(targetBranch ? { target_branch: targetBranch } : {}) },
+      { perPage },
+    );
+  }
+
   mergeRequest(project, iid) {
     return this.request("GET", `/projects/${encodeURIComponent(project)}/merge_requests/${iid}`);
   }
