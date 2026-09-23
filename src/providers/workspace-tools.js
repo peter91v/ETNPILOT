@@ -62,7 +62,7 @@ export const WORKSPACE_TOOL_DEFINITIONS = Object.freeze([
   },
 ]);
 
-export function createWorkspaceTools({ workingDirectory, limits = {}, signal } = {}) {
+export function createWorkspaceTools({ workingDirectory, limits = {}, signal, sandbox } = {}) {
   if (!workingDirectory) throw new TypeError("Workspace tools require a workingDirectory.");
   const root = resolve(workingDirectory);
   const bounds = { ...DEFAULT_LIMITS, ...limits };
@@ -75,7 +75,7 @@ export function createWorkspaceTools({ workingDirectory, limits = {}, signal } =
         case "read_file": return readWorkspaceFile(root, bounds, args, context);
         case "list_files": return listWorkspaceFiles(root, bounds, args, context);
         case "write_file": return writeWorkspaceFile(root, bounds, args, context);
-        case "run_command": return runWorkspaceCommand(root, bounds, args, context, signal);
+        case "run_command": return runWorkspaceCommand(root, bounds, args, context, signal, sandbox);
         default: return { ok: false, error: `Unknown tool '${name}'.` };
       }
     },
@@ -143,7 +143,7 @@ async function writeWorkspaceFile(root, bounds, args, context) {
   }
 }
 
-async function runWorkspaceCommand(root, bounds, args, context, signal) {
+async function runWorkspaceCommand(root, bounds, args, context, signal, sandbox) {
   const command = args.command;
   if (!Array.isArray(command) || command.length === 0 || command.some((part) => typeof part !== "string")) {
     return { ok: false, error: "'command' must be a non-empty array of strings, for example [\"npm\",\"test\"]." };
@@ -155,8 +155,11 @@ async function runWorkspaceCommand(root, bounds, args, context, signal) {
     toolArguments: command,
   });
   if (decision.kind !== "approve-once") return denied(decision);
+  // The approval names the command the model asked for; the sandbox decides
+  // where it actually runs.
+  const executed = sandbox ? sandbox.wrap(command) : command;
   return new Promise((resolveResult) => {
-    const [executable, ...rest] = command;
+    const [executable, ...rest] = executed;
     // No shell: the argv array is passed through, so quoting and metacharacters
     // are never interpreted on the agent's behalf.
     const child = spawn(executable, rest, { cwd: root, shell: false, signal, stdio: ["ignore", "pipe", "pipe"] });
@@ -180,7 +183,15 @@ async function runWorkspaceCommand(root, bounds, args, context, signal) {
     });
     child.once("close", (code, exitSignal) => {
       clearTimeout(timer);
-      resolveResult({ ok: code === 0, exitCode: code, signal: exitSignal ?? undefined, stdout, stderr, truncated });
+      resolveResult({
+        ok: code === 0,
+        exitCode: code,
+        signal: exitSignal ?? undefined,
+        stdout,
+        stderr,
+        truncated,
+        ...(sandbox ? { sandbox: sandbox.describe() } : {}),
+      });
     });
   });
 }

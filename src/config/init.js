@@ -35,12 +35,23 @@ git:
     # Required once enabled: only these GitLab users may start a run.
     allowedUsers: []
     fetchBeforeRun: true
+    # Wait for the merge-request pipeline and report its verdict back.
+    awaitPipeline: false
+    pipelineTimeoutMs: 900000
+    approvals:
+      # 'inbox' decides through the CLI; 'gitlab' also accepts
+      # '/etnpilot approve <id>' comments from allowedApprovers.
+      source: inbox
+      allowedApprovers: []
+      pollIntervalMs: 5000
     allowConfidential: false
     publish: false
     syncStatus: true
     comment: false
 queue:
   database: .etnpilot/state/workflows.sqlite
+  # More workers let an issue proceed while another waits for approval.
+  workers: 1
   pollIntervalMs: 500
   leaseMs: 30000
   retryDelayMs: 5000
@@ -148,6 +159,15 @@ checks:
   # Checks run agent-authored code. They inherit only these variables, so
   # repository and provider credentials stay out of their environment.
   envAllow: []
+sandbox:
+  # Runs checks and approved commands in a disposable container. Requires a
+  # local container runtime; the run fails rather than silently using the host.
+  enabled: false
+  runtime: docker
+  image: node:24-bookworm-slim
+  network: none
+  readOnlyRoot: true
+  workdir: /workspace
 workspace:
   mode: worktree
   cleanup: never

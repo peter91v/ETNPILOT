@@ -6,6 +6,7 @@ import { WorkflowQueue } from "../workflow/queue.js";
 import { WorkflowQueueWorkerPool } from "../workflow/queue-worker.js";
 import { createSecretResolver } from "../secrets/resolver.js";
 import { GitLabClient } from "./client.js";
+import { createGitLabApprovalHandler } from "./approvals.js";
 import { GitLabIssueTrigger } from "./issue-trigger.js";
 import { authenticateGitLabWebhook, deliveryIdFromHeaders } from "./webhook-auth.js";
 
@@ -43,10 +44,18 @@ export async function createGitLabWebhookServer({
       "git.issueTrigger.allowedUsers must name at least one GitLab user while the issue trigger is enabled.",
     );
   }
+  const approvalsConfig = issueTriggerConfig.approvals ?? {};
+  const gitLabApprovals = approvalsConfig.source === "gitlab";
+  if (gitLabApprovals && !(approvalsConfig.allowedApprovers?.length > 0)) {
+    throw new Error(
+      "git.issueTrigger.approvals.allowedApprovers must name at least one GitLab user for comment approvals.",
+    );
+  }
   const requiresApiToken = issueTriggerConfig.enabled === true && (
     issueTriggerConfig.syncStatus !== false
     || issueTriggerConfig.comment === true
     || issueTriggerConfig.publish === true
+    || gitLabApprovals
   );
   if (requiresApiToken && !apiToken) {
     throw new Error("A GitLab API token is required when the GitLab issue trigger is enabled.");
@@ -83,10 +92,9 @@ export async function createGitLabWebhookServer({
     onError,
     execute: async (job, execution) => {
       if (job.kind !== "gitlab-issue") throw new Error(`Unsupported workflow job kind: '${job.kind}'.`);
-      const inboxHandler = approvalInbox ? createInboxApprovalHandler({
+      const approvalOptions = {
         inbox: approvalInbox,
         timeoutMs: inboxConfig.timeoutMs ?? 24 * 60 * 60_000,
-        pollIntervalMs: inboxConfig.pollIntervalMs ?? 500,
         signal: execution.signal,
         onPending: (approval) => execution.checkpoint({
           phase: "waiting-approval",
@@ -97,7 +105,21 @@ export async function createGitLabWebhookServer({
           approvalId: approval.id,
           approvalStatus: approval.status,
         }),
-      }) : undefined;
+      };
+      const inboxHandler = !approvalInbox ? undefined : gitLabApprovals
+        ? createGitLabApprovalHandler({
+          ...approvalOptions,
+          client,
+          project: config.git.project,
+          issueIid: job.payload?.object_attributes?.iid,
+          allowedApprovers: approvalsConfig.allowedApprovers,
+          pollIntervalMs: approvalsConfig.pollIntervalMs ?? 5_000,
+          onError,
+        })
+        : createInboxApprovalHandler({
+          ...approvalOptions,
+          pollIntervalMs: inboxConfig.pollIntervalMs ?? 500,
+        });
       const approvalHandler = inboxHandler
         ? (request, context = {}) => inboxHandler(request, { ...context, queueJobId: job.id })
         : undefined;

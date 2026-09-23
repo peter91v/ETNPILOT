@@ -19,6 +19,7 @@ const BUILTIN_FACTORIES = {
     ...config,
     name,
     workingDirectory: config.workingDirectory ?? context.workingDirectory,
+    sandbox: context.sandbox,
     apiKey: config.apiKey ?? await resolveProviderSecret({
       resolver: context.secretResolver,
       name: config.apiKeySecret ?? "provider.apiKey",

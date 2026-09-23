@@ -38,6 +38,19 @@ export class GitLabClient {
     return this.request("POST", `/projects/${encodeURIComponent(project)}/merge_requests/${iid}/notes`, { body });
   }
 
+  issueNotes(project, iid, { sort = "desc", orderBy = "created_at", perPage = 100 } = {}) {
+    return this.requestAll(
+      "GET",
+      `/projects/${encodeURIComponent(project)}/issues/${iid}/notes`,
+      { sort, order_by: orderBy },
+      { perPage },
+    );
+  }
+
+  mergeRequestApprovals(project, iid) {
+    return this.request("GET", `/projects/${encodeURIComponent(project)}/merge_requests/${iid}/approvals`);
+  }
+
   addIssueNote(project, iid, body) {
     return this.request("POST", `/projects/${encodeURIComponent(project)}/issues/${iid}/notes`, { body });
   }

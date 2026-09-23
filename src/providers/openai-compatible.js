@@ -11,6 +11,7 @@ export function createOpenAICompatibleProvider({
   tools = false,
   workingDirectory,
   toolLimits,
+  sandbox,
   maxToolIterations = DEFAULT_MAX_TOOL_ITERATIONS,
   fetchImpl = globalThis.fetch,
   toolsImpl,
@@ -30,7 +31,12 @@ export function createOpenAICompatibleProvider({
     async invoke(context) {
       context.signal?.throwIfAborted();
       const workspaceTools = tools
-        ? toolsImpl ?? createWorkspaceTools({ workingDirectory, limits: toolLimits, signal: context.signal })
+        ? toolsImpl ?? createWorkspaceTools({
+          workingDirectory,
+          limits: toolLimits,
+          signal: context.signal,
+          sandbox,
+        })
         : undefined;
       const messages = [
         { role: "system", content: buildSystemMessage(context) },

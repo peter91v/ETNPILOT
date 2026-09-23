@@ -11,6 +11,8 @@ import { verifyReceiptFile } from "../core/receipt-store.js";
 import { generateReceiptKeyPair, loadReceiptVerifiers } from "../core/receipt-signing.js";
 import { createTerminalApprovalHandler } from "../core/terminal-approval.js";
 import { WorktreeManager } from "../git/worktrees.js";
+import { GitLabClient } from "../gitlab/client.js";
+import { latestPipeline } from "../gitlab/pipelines.js";
 import { createGitLabWebhookServer } from "../gitlab/webhook-server.js";
 import { runProject } from "../runtime/project-runner.js";
 import { replayRun } from "../runtime/replay.js";
@@ -83,6 +85,7 @@ Usage:
   etnpilot secret check <name> [--root directory]
   etnpilot policy check (--kind kind [--path path | --url url] | --provider name)
     [--agent name] [--root directory]
+  etnpilot pipeline status [ref] [--root directory]
   etnpilot telemetry summary [workflow-run-id] [--root directory]
   etnpilot doctor [--root directory]
 
@@ -335,6 +338,20 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     console.log(JSON.stringify(report, null, 2));
     const denied = values.provider ? result?.allowed === false : result?.kind === "reject";
     return denied || !result ? 1 : 0;
+  } else if (command === "pipeline" && subcommand === "status") {
+    const root = resolve(values.root);
+    const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"));
+    if (!config.git?.project) throw new Error("'git.project' is required to query pipelines.");
+    const resolver = createSecretResolver({ root, config });
+    const token = await resolver.get("gitlab.apiToken", {
+      fallback: { provider: "env", key: "ETNPILOT_GITLAB_TOKEN" },
+      required: true,
+    });
+    const client = new GitLabClient({ baseUrl: config.git.baseUrl, token });
+    const ref = rest[0] ?? config.git.targetBranch ?? "main";
+    const pipeline = latestPipeline(await client.pipelines(config.git.project, ref));
+    console.log(JSON.stringify(pipeline ?? { ref, status: "none" }, null, 2));
+    return pipeline === undefined || pipeline.status === "failed" ? 1 : 0;
   } else if (command === "telemetry" && subcommand === "summary") {
     const root = resolve(values.root);
     const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"));

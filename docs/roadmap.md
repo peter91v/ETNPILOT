@@ -44,14 +44,16 @@
 
 - [x] Version pinning and provenance for agents, instructions, prompts, and skills
 
-## M4 — Operability (next)
+## M4 — Operability
 
-- [ ] disposable container per run, so an approved shell command is contained;
-- [ ] concurrent queue workers, so one pending approval stops blocking other issues;
-- [ ] tool support in the OpenAI-compatible adapter, so a second provider can edit code;
-- [ ] approvals from GitLab comments or merge-request approvals with verified identity;
-- [ ] symlink-aware path policy (`realpath` before matching);
-- [ ] dry-run and replay modes.
+- [x] Disposable container sandbox for checks and approved commands
+- [x] Concurrent queue workers, so one pending approval no longer blocks other issues
+- [x] Tool support in the OpenAI-compatible adapter, with mediated workspace tools
+- [x] Approvals from GitLab comments with GitLab-asserted identity
+- [x] Symlink-aware path policy
+- [x] Dry-run mode, and replay of the deterministic half of a recorded run
+- [x] Bounded subagent recursion (audit finding)
+- [x] Reading GitLab pipeline verdicts back into the run (audit finding)
 
 ## Brainstorming backlog
 

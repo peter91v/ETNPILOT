@@ -19,6 +19,7 @@ import { loadPlugins } from "../plugins/load-plugin.js";
 import { WorkflowEngine } from "../workflow/engine.js";
 import { createSecretResolver } from "../secrets/resolver.js";
 import { createTelemetry } from "../observability/telemetry.js";
+import { createSandbox } from "./sandbox.js";
 
 export async function runProject({
   root = process.cwd(),
@@ -67,6 +68,7 @@ export async function runProject({
   let codegraphBefore;
   let contentEvidence;
   let workflow;
+  let sandbox;
   try {
     const bootstrapPlugins = (bootstrapConfig.plugins ?? []).filter(isBootstrapPlugin);
     await loadPlugins(bootstrapPlugins, harness, repositoryRoot, {
@@ -117,11 +119,15 @@ export async function runProject({
         "Query it before planning broad edits and use its refreshed index when reviewing changes.",
       ].join("\n"));
     }
+    sandbox = createSandbox(config.sandbox ?? {}, { workspace: workspace.path });
+    // Fail before the first step rather than halfway through a run.
+    if (sandbox && !dryRun) await sandbox.assertAvailable();
     await registerConfiguredProviders(harness, config.providers, {
       workingDirectory: workspace.path,
       env,
       secretResolver: secrets,
       factories: providerFactories,
+      sandbox,
       ...(codegraph ? {
         mcpServers: { codegraph: codegraph.mcp },
         readOnlyMcpTools: codegraph.mcp.tools,
@@ -181,6 +187,7 @@ export async function runProject({
           cwd: workspace.path,
           signal: execution.signal,
           env: checkEnv,
+          sandbox,
           telemetry,
           trace: traceMetadata,
           workflowRunId: runId,
@@ -276,7 +283,7 @@ export async function runProject({
     mode: dryRun ? "dry-run" : "execute",
     status: summary.status,
     durationMs: Date.now() - startedAt,
-    workspace,
+    workspace: { ...workspace, ...(sandbox ? { sandbox: sandbox.describe() } : {}) },
     content: contentEvidence,
     git: gitEvidence,
     codegraph: codegraphEvidence,
@@ -392,7 +399,7 @@ async function verifyContentAfterRun(root, config, initial) {
   return { ...verified, verifiedAfterRun: true };
 }
 
-async function runObservedCheck(step, { cwd, signal, env, telemetry, trace, workflowRunId }) {
+async function runObservedCheck(step, { cwd, signal, env, telemetry, trace, workflowRunId, sandbox }) {
   const span = telemetry?.startSpan("etnpilot.check", {
     traceId: trace.traceId,
     parentSpanId: trace.parentSpanId,
@@ -404,9 +411,10 @@ async function runObservedCheck(step, { cwd, signal, env, telemetry, trace, work
   });
   const startedAt = Date.now();
   try {
-    const result = await runCheck(step, { cwd, signal, env });
+    const command = sandbox ? sandbox.wrap(step.command, { env, cwd }) : step.command;
+    const result = await runCheck({ ...step, command }, { cwd, signal, env });
     await span?.end({ attributes: { "etnpilot.duration_ms": Date.now() - startedAt } });
-    return result;
+    return sandbox ? { ...result, sandbox: sandbox.describe(), declaredCommand: step.command } : result;
   } catch (error) {
     await span?.end({
       status: "error",
