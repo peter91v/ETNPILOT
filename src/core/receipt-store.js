@@ -27,8 +27,7 @@ export class JsonlReceiptStore {
       previousHash,
       ...(this.signer ? { proof: this.signer.proof } : {}),
     };
-    const canonical = JSON.stringify(payload);
-    const hash = createHash("sha256").update(canonical).digest("hex");
+    const hash = receiptHash(payload);
     const signature = this.signer?.sign(hash);
     await appendFile(this.path, `${JSON.stringify({
       ...payload,
@@ -63,6 +62,7 @@ export async function verifyReceiptFile(path, {
   if (lines.at(-1) === "") lines.pop();
   if (lines.length === 0) return verificationFailure("empty-file");
   let previousHash = null;
+  let legacyEntries = 0;
   let signed = 0;
   let unsigned = 0;
   let terminal = false;
@@ -78,9 +78,13 @@ export async function verifyReceiptFile(path, {
       return verificationFailure("invalid-entry", { line: lineNumber, entries: index, signed, unsigned });
     }
     const { hash, signature, ...payload } = entry;
-    const expectedHash = createHash("sha256").update(JSON.stringify(payload)).digest("hex");
-    if (hash !== expectedHash) {
-      return verificationFailure("hash-mismatch", { line: lineNumber, entries: index, signed, unsigned });
+    if (hash !== receiptHash(payload)) {
+      // Receipts written before canonical serialization hashed the payload in
+      // file order. They stay verifiable; new entries are always canonical.
+      if (hash !== createHash("sha256").update(JSON.stringify(payload)).digest("hex")) {
+        return verificationFailure("hash-mismatch", { line: lineNumber, entries: index, signed, unsigned });
+      }
+      legacyEntries += 1;
     }
     if (payload.previousHash !== previousHash) {
       return verificationFailure("chain-mismatch", { line: lineNumber, entries: index, signed, unsigned });
@@ -125,12 +129,32 @@ export async function verifyReceiptFile(path, {
   return {
     valid: true,
     entries: lines.length,
+    encoding: legacyEntries === 0 ? "canonical" : "mixed",
+    ...(legacyEntries > 0 ? { legacyEntries } : {}),
     signed,
     unsigned,
     terminal,
     lastHash: previousHash,
     keyIds: [...new Set(lines.map((line) => JSON.parse(line).proof?.keyId).filter(Boolean))],
   };
+}
+
+// Receipts are hashed over sorted-key JSON so an independent verifier in any
+// language can rebuild the exact bytes that were signed.
+export function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const entries = Object.keys(value)
+      .filter((key) => value[key] !== undefined)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`);
+    return `{${entries.join(",")}}`;
+  }
+  return JSON.stringify(value === undefined ? null : value);
+}
+
+function receiptHash(payload) {
+  return createHash("sha256").update(canonicalJson(payload)).digest("hex");
 }
 
 function verificationFailure(reason, details = {}) {

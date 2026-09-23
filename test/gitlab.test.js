@@ -64,3 +64,51 @@ test("GitLab client retries commit-status update conflicts", async () => {
   assert.equal(result.status, "success");
   assert.equal(calls, 2);
 });
+
+test("GitLab client follows list pages and reports failures with context", async () => {
+  const requested = [];
+  const client = new GitLabClient({
+    baseUrl: "https://gitlab.example.invalid",
+    token: "secret",
+    fetchImpl: async (url) => {
+      requested.push(String(url));
+      const page = Number(new URL(url).searchParams.get("page"));
+      const body = page === 1
+        ? Array.from({ length: 100 }, (_, index) => ({ name: `branch-${index}` }))
+        : [{ name: "branch-100" }];
+      return new Response(JSON.stringify(body), { status: 200 });
+    },
+  });
+
+  const branches = await client.branches("group/project");
+  assert.equal(branches.length, 101);
+  assert.equal(requested.length, 2);
+  assert.match(requested[0], /per_page=100&page=1$/);
+
+  const failing = new GitLabClient({
+    baseUrl: "https://gitlab.example.invalid",
+    token: "secret",
+    fetchImpl: async () => new Response(JSON.stringify({ message: "404 Project Not Found" }), { status: 404 }),
+  });
+  await assert.rejects(
+    () => failing.project("group/missing"),
+    /GitLab API failed \(404\): 404 Project Not Found/,
+  );
+});
+
+test("GitLab client reports request timeouts", async () => {
+  const client = new GitLabClient({
+    baseUrl: "https://gitlab.example.invalid",
+    token: "secret",
+    timeoutMs: 5,
+    fetchImpl: (url, options) => new Promise((_, reject) => {
+      // Keeps the loop alive until the request signal fires.
+      const keepAlive = setTimeout(() => reject(new Error("signal never fired")), 1000);
+      options.signal.addEventListener("abort", () => {
+        clearTimeout(keepAlive);
+        reject(options.signal.reason);
+      }, { once: true });
+    }),
+  });
+  await assert.rejects(() => client.project("group/project"), /timed out after 5 ms/);
+});

@@ -4,7 +4,7 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { JsonlReceiptStore, verifyReceiptFile } from "../src/core/receipt-store.js";
+import { canonicalJson, JsonlReceiptStore, verifyReceiptFile } from "../src/core/receipt-store.js";
 import { createReceiptSigner, createReceiptVerifier } from "../src/core/receipt-signing.js";
 
 test("receipt store serializes concurrent writes into a verifiable hash chain", async () => {
@@ -21,9 +21,31 @@ test("receipt store serializes concurrent writes into a verifiable hash chain", 
   assert.equal(entries[0].previousHash, null);
   for (let index = 0; index < entries.length; index += 1) {
     const { hash, ...payload } = entries[index];
-    assert.equal(hash, createHash("sha256").update(JSON.stringify(payload)).digest("hex"));
+    assert.equal(hash, createHash("sha256").update(canonicalJson(payload)).digest("hex"));
     if (index > 0) assert.equal(entries[index].previousHash, entries[index - 1].hash);
   }
+});
+
+test("receipt hashes are independent of key order and stay backward compatible", async () => {
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-canonical-receipts-"));
+  assert.equal(canonicalJson({ b: 1, a: [2, { d: 4, c: 3 }] }), '{"a":[2,{"c":3,"d":4}],"b":1}');
+
+  // A chain written before canonical hashing must still verify.
+  const legacyPath = join(root, "legacy.jsonl");
+  const first = { sequence: 1, previousHash: null };
+  const firstHash = createHash("sha256").update(JSON.stringify(first)).digest("hex");
+  const second = { sequence: 2, terminal: true, previousHash: firstHash };
+  const secondHash = createHash("sha256").update(JSON.stringify(second)).digest("hex");
+  await writeFile(legacyPath, [
+    JSON.stringify({ ...first, hash: firstHash }),
+    JSON.stringify({ ...second, hash: secondHash }),
+    "",
+  ].join("\n"));
+
+  const result = await verifyReceiptFile(legacyPath);
+  assert.equal(result.valid, true);
+  assert.equal(result.encoding, "mixed");
+  assert.equal(result.legacyEntries, 2);
 });
 
 test("signed receipt chains verify with a trusted Ed25519 key", async () => {

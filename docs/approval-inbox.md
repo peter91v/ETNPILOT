@@ -47,13 +47,27 @@ and `expired`. A second decision for the same request fails instead of replacing
 ## Stored evidence
 
 The database records the run ID, agent, operation type, timestamps, decision, reviewer, reason, and
-a redacted operation summary. Shell secrets, authorization headers, URL queries, and credential-like
-environment assignments are removed before persistence. Raw prompts and complete provider requests
-are not stored. The database file is created with owner-only permissions where the operating system
-supports POSIX file modes.
+the operation summary. A reviewer can only approve what they can read, so the summary carries the
+full command, file name, tool arguments, and URL rather than an abbreviation. Control characters are
+escaped, because the text is agent-controlled and would otherwise be able to hide part of itself in
+a terminal. Text beyond 8192 characters is cut and the record is flagged with `truncated: true`.
+Raw prompts and complete provider requests are not stored. The database file is created with
+owner-only permissions where the operating system supports POSIX file modes.
+
+Projects that prefer masking credential-looking text over full fidelity can opt in:
+
+```yaml
+approval:
+  inbox:
+    redactSecrets: true
+```
+
+Masking rewrites what the reviewer sees, so enable it only where the approval database is more
+exposed than the credentials themselves. The approval `fingerprint` is always computed over the
+original request, so it identifies the same operation under either setting.
 
 Each provider approval result is also written to the run receipt with the approval ID, decision,
-redacted details, reviewer, and decision timestamp.
+details, reviewer, and decision timestamp.
 
 ## Lifecycle limits
 

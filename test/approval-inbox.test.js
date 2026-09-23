@@ -10,22 +10,56 @@ import {
   createInboxApprovalHandler,
 } from "../src/core/approval-inbox.js";
 
-test("approval inbox persists redacted operation summaries", async () => {
+test("approval inbox shows the full operation a reviewer approves", async () => {
   const { inbox } = await createInbox();
+  try {
+    const command = "curl https://example.test/run?token=hidden\r# rm -rf /";
+    const approval = inbox.create({ kind: "shell", fullCommandText: command }, {
+      runId: "run-1",
+      agent: "builder",
+    }, { timeoutMs: 60_000 });
+    assert.equal(approval.status, "pending");
+    assert.equal(approval.runId, "run-1");
+    assert.equal(approval.details.command, "curl https://example.test/run?token=hidden\\r# rm -rf /");
+    assert.equal(approval.details.redacted, undefined);
+    assert.equal(inbox.list()[0].id, approval.id);
+  } finally {
+    inbox.close();
+  }
+});
+
+test("approval inbox can redact credential-looking text on request", async () => {
+  const { inbox } = await createInbox({ redact: true });
   try {
     const approval = inbox.create({
       kind: "shell",
       fullCommandText: "API_TOKEN=secret curl -H 'Authorization: Bearer hidden' https://example.test/run?token=hidden",
     }, { runId: "run-1", agent: "builder" }, { timeoutMs: 60_000 });
-    assert.equal(approval.status, "pending");
-    assert.equal(approval.runId, "run-1");
     assert.match(approval.details.command, /API_TOKEN=\[redacted\]/);
     assert.match(approval.details.command, /Bearer \[redacted\]/);
     assert.match(approval.details.command, /\?\[redacted\]/);
+    assert.equal(approval.details.redacted, true);
     assert.doesNotMatch(JSON.stringify(approval), /secret|hidden/);
-    assert.equal(inbox.list()[0].id, approval.id);
   } finally {
     inbox.close();
+  }
+});
+
+test("approval fingerprints identify the original request, not its rendering", async () => {
+  const { inbox } = await createInbox();
+  const { inbox: redacting } = await createInbox({ redact: true });
+  try {
+    const request = { kind: "shell", fullCommandText: "API_TOKEN=secret deploy --now" };
+    const plain = inbox.create(request, {}, { timeoutMs: 60_000 });
+    const masked = redacting.create(request, {}, { timeoutMs: 60_000 });
+    assert.equal(plain.details.fingerprint, masked.details.fingerprint);
+    const other = inbox.create({ kind: "shell", fullCommandText: "API_TOKEN=other deploy --now" }, {}, {
+      timeoutMs: 60_000,
+    });
+    assert.notEqual(plain.details.fingerprint, other.details.fingerprint);
+  } finally {
+    inbox.close();
+    redacting.close();
   }
 });
 
@@ -84,7 +118,7 @@ test("inbox approval handler rejects expired requests", async () => {
   }
 });
 
-async function createInbox() {
+async function createInbox(options) {
   const root = await mkdtemp(join(tmpdir(), "etnpilot-approval-inbox-"));
-  return { root, inbox: new ApprovalInbox(join(root, "approvals.sqlite")) };
+  return { root, inbox: new ApprovalInbox(join(root, "approvals.sqlite"), options) };
 }

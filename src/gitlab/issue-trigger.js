@@ -50,7 +50,8 @@ export class GitLabIssueTrigger {
     const issue = payload.object_attributes;
     const project = this.config.git.project;
     const ref = payload.project?.default_branch ?? this.config.git.targetBranch ?? "main";
-    const baseSha = (await git(["rev-parse", "HEAD"], { cwd: this.root })).stdout;
+    const baseRef = await this.#fetchBaseRef(ref);
+    const baseSha = baseRef ?? (await git(["rev-parse", "HEAD"], { cwd: this.root })).stdout;
     const statusName = `etnpilot/issue-${issue.iid}`;
     const targetUrl = issue.url;
     await this.#syncStatus(project, baseSha, {
@@ -68,6 +69,7 @@ export class GitLabIssueTrigger {
         input: formatIssueTask(payload),
         agent: this.trigger.agent,
         worktree: this.trigger.worktree,
+        baseRef,
         cleanupPolicy: this.trigger.cleanup,
         publish: this.trigger.publish === true,
         env: this.env,
@@ -110,6 +112,21 @@ export class GitLabIssueTrigger {
       const failedRun = error.run?.runId ? ` Run: \`${error.run.runId}\`.` : "";
       await this.#comment(project, issue.iid, `ETNPilot could not complete this request.${failedRun} Check the server logs and run receipt for details.`);
       throw error;
+    }
+  }
+
+  // A long-running receiver would otherwise keep building on the checkout it
+  // started with. Runs base on the freshly fetched tip of the target branch.
+  async #fetchBaseRef(ref) {
+    const remote = this.config.git?.remote;
+    if (this.trigger.fetchBeforeRun === false || !remote) return undefined;
+    try {
+      await git(["fetch", "--quiet", "--prune", remote, ref], { cwd: this.root });
+      return (await git(["rev-parse", "FETCH_HEAD"], { cwd: this.root })).stdout;
+    } catch (error) {
+      // Falling back to the local HEAD is reported, never silent.
+      this.onSyncError(error);
+      return undefined;
     }
   }
 

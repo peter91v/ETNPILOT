@@ -115,6 +115,7 @@ test("webhook server acknowledges quickly and deduplicates deliveries", async ()
     "    enabled: true",
     "    labels: [etnpilot]",
     "    actions: [open]",
+    "    allowedUsers: [maintainer]",
     "    syncStatus: false",
     "    comment: false",
     "    publish: false",
@@ -186,6 +187,64 @@ function issuePayload() {
     },
   };
 }
+
+test("the issue trigger refuses to run without an explicit user allow-list", async () => {
+  const root = await createRepository("etnpilot-webhook-users-");
+  await mkdir(join(root, ".etnpilot", "secrets"), { recursive: true });
+  await writeFile(join(root, ".etnpilot", "secrets", "webhook-token"), "hook-secret\n", { mode: 0o600 });
+  await writeFile(join(root, ".etnpilot", "etnpilot.yaml"), [
+    "version: 1",
+    "secrets:",
+    "  providers:",
+    "    local: { type: file, root: .etnpilot/secrets }",
+    "  values:",
+    "    gitlab.webhookToken: { provider: local, key: webhook-token }",
+    "git:",
+    "  baseUrl: https://gitlab.example.invalid",
+    "  project: group/project",
+    "  issueTrigger:",
+    "    enabled: true",
+    "    labels: [etnpilot]",
+    "    syncStatus: false",
+    "",
+  ].join("\n"));
+
+  await assert.rejects(
+    () => createGitLabWebhookServer({ root, env: {}, run: async () => ({}) }),
+    /allowedUsers must name at least one GitLab user/,
+  );
+});
+
+test("the webhook server answers a local health probe without exposing events", async () => {
+  const root = await createRepository("etnpilot-webhook-health-");
+  await mkdir(join(root, ".etnpilot", "secrets"), { recursive: true });
+  await writeFile(join(root, ".etnpilot", "secrets", "webhook-token"), "hook-secret\n", { mode: 0o600 });
+  await writeFile(join(root, ".etnpilot", "etnpilot.yaml"), [
+    "version: 1",
+    "secrets:",
+    "  providers:",
+    "    local: { type: file, root: .etnpilot/secrets }",
+    "  values:",
+    "    gitlab.webhookToken: { provider: local, key: webhook-token }",
+    "git:",
+    "  baseUrl: https://gitlab.example.invalid",
+    "  project: group/project",
+    "",
+  ].join("\n"));
+
+  const app = await createGitLabWebhookServer({ root, env: {}, run: async () => ({}) });
+  try {
+    const address = await app.listen({ port: 0 });
+    const response = await fetch(`http://127.0.0.1:${address.port}/healthz`);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.status, "ok");
+    assert.equal(body.issueTrigger, false);
+    assert.equal(typeof body.queue, "object");
+  } finally {
+    await app.close();
+  }
+});
 
 async function createRepository(prefix) {
   const root = await mkdtemp(join(tmpdir(), prefix));

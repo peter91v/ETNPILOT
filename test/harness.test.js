@@ -70,3 +70,22 @@ test("harness enforces provider policy without a router", async () => {
   await assert.rejects(() => harness.run({ agent: "worker", input: "go" }), /default policy/);
   assert.equal(invoked, false);
 });
+
+test("a failing event listener neither fails the run nor adds a second receipt", async () => {
+  const receipts = [];
+  const listenerErrors = [];
+  const harness = new Harness({
+    approvalPolicy: new ApprovalPolicy(),
+    receiptStore: { append: async (receipt) => receipts.push(receipt) },
+  });
+  harness.events.onListenerError = (error) => listenerErrors.push(error.message);
+  harness.registerProvider({ name: "fake", invoke: async () => ({ text: "ok" }) });
+  harness.registerAgent({ name: "worker", provider: "fake", prompt: "Work." });
+  harness.events.on("run.completed", () => { throw new Error("observer failed"); });
+
+  const receipt = await harness.run({ agent: "worker", input: "go" });
+
+  assert.equal(receipt.status, "succeeded");
+  assert.deepEqual(receipts.map((entry) => entry.status), ["succeeded"]);
+  assert.deepEqual(listenerErrors, ["observer failed"]);
+});

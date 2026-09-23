@@ -14,11 +14,11 @@
   },
   "scripts": {
     "test": "node --test test/*.test.js",
-    "check": "node --check bin/etnpilot.js && node --test test/*.test.js",
+    "check": "node scripts/check-syntax.mjs && node --test test/*.test.js",
     "etnpilot": "node bin/etnpilot.js"
   },
   "engines": {
-    "node": ">=22.12"
+    "node": ">=22.13"
   },
   "dependencies": {
     "@colbymchenry/codegraph": "1.6.0",

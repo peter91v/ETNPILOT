@@ -83,6 +83,7 @@ export class Harness {
     const runId = randomUUID();
     const startedAt = Date.now();
     const approvals = [];
+    let receiptWritten = false;
     const runSpan = this.telemetry?.startSpan("invoke_agent", {
       traceId: metadata.traceId,
       parentSpanId: metadata.parentSpanId,
@@ -163,6 +164,7 @@ export class Harness {
         },
       });
       await this.receiptStore?.append(receipt);
+      receiptWritten = true;
       await this.events.emit("run.completed", receipt);
       return receipt;
     } catch (error) {
@@ -188,7 +190,9 @@ export class Harness {
           },
         });
       }
-      await this.receiptStore?.append(receipt);
+      // A run contributes exactly one receipt. Anything that fails after the
+      // success receipt was sealed is reported, never rewritten.
+      if (!receiptWritten) await this.receiptStore?.append(receipt);
       await this.events.emit("run.failed", receipt);
       throw error;
     }

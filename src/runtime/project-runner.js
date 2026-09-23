@@ -26,6 +26,7 @@ export async function runProject({
   agent,
   worktree,
   inPlace = false,
+  baseRef,
   cleanupPolicy,
   publish = false,
   env = process.env,
@@ -63,6 +64,7 @@ export async function runProject({
   let codegraph;
   let codegraphBefore;
   let contentEvidence;
+  let workflow;
   try {
     const bootstrapPlugins = (bootstrapConfig.plugins ?? []).filter(isBootstrapPlugin);
     await loadPlugins(bootstrapPlugins, harness, repositoryRoot, {
@@ -92,7 +94,7 @@ export async function runProject({
       ? await worktreeManager.create({
           name: `run-${runId}`,
           branch,
-          startPoint: bootstrapConfig.git?.baseRef ?? "HEAD",
+          startPoint: baseRef ?? bootstrapConfig.git?.baseRef ?? "HEAD",
         })
       : { name: "in-place", branch: await currentBranch(repositoryRoot), path: repositoryRoot, managed: false };
     if (useWorktree) workspace.managed = true;
@@ -104,7 +106,7 @@ export async function runProject({
       secretResolver: secrets,
       fetchImpl,
       bootstrapPluginsLoaded: true,
-    }));
+    }).catch((error) => { throw describeProjectLoadError(error, useWorktree); }));
     codegraph = createCodegraph(workspace.path, config);
     if (codegraph) {
       codegraphBefore = await codegraph.graph.indexDirectory(workspace.path, { signal });
@@ -124,12 +126,16 @@ export async function runProject({
       } : {}),
     });
     harness.setProviderRouter(new ProviderRouter(harness.providers, config.routing, { policy }));
+    workflow = normalizeWorkflow(config.workflow, agent ?? config.defaultAgent ?? "orchestrator");
+    assertWorkflowAgents(harness, workflow);
   } catch (error) {
     codegraph?.graph.close();
     await harness.close();
+    // Setup never reached the workflow, so the run left no evidence worth
+    // keeping. Remove the workspace instead of leaking a worktree per attempt.
+    error.workspaceCleanup = await discardWorkspace(workspace, worktreeManager, branch);
     throw error;
   }
-  const workflow = normalizeWorkflow(config.workflow, agent ?? config.defaultAgent ?? "orchestrator");
   const engine = new WorkflowEngine({
     concurrency: workflow.concurrency,
     failFast: workflow.failFast,
@@ -137,6 +143,7 @@ export async function runProject({
     maxSteps: workflow.maxSteps,
     events: harness.events,
   });
+  const checkEnv = checkEnvironment(env, config.checks);
   const publisher = publish ? createPublisher(config, gitLabToken, fetchImpl) : undefined;
   const startedAt = Date.now();
   const workflowSpan = telemetry?.startSpan("etnpilot.workflow", {
@@ -169,7 +176,7 @@ export async function runProject({
         return runObservedCheck(step, {
           cwd: workspace.path,
           signal: execution.signal,
-          env,
+          env: checkEnv,
           telemetry,
           trace: traceMetadata,
           workflowRunId: runId,
@@ -271,7 +278,12 @@ export async function runProject({
     summary,
   });
   let mergeRequest;
-  if (publisher) {
+  let publication;
+  if (publisher && summary.status !== "succeeded") {
+    // Unreviewed work from a failed workflow is never pushed, even when
+    // fail-fast is disabled and the engine returned without throwing.
+    publication = { published: false, reason: "workflow-not-succeeded" };
+  } else if (publisher) {
     mergeRequest = await publisher.publish({
       cwd: workspace.path,
       branch,
@@ -284,6 +296,7 @@ export async function runProject({
         keyId: receiptSigner.keyId,
       } : undefined,
     });
+    publication = { published: true, ...(mergeRequest?.noteError ? { noteError: mergeRequest.noteError } : {}) };
   }
   const cleanup = await cleanupWorkspace({
     policy: effectiveCleanupPolicy,
@@ -293,6 +306,7 @@ export async function runProject({
   });
   return {
     runId,
+    status: summary.status,
     workspace,
     cleanup,
     receiptPath,
@@ -307,7 +321,62 @@ export async function runProject({
     codegraph: codegraphEvidence,
     observability,
     mergeRequest,
+    ...(publication ? { publication } : {}),
   };
+}
+
+const DEFAULT_CHECK_ENV_ALLOW = Object.freeze(["PATH", "HOME", "LANG", "LC_ALL", "TZ", "TMPDIR"]);
+
+// Checks execute code the agent just wrote. They inherit an allow-listed
+// environment so repository and provider credentials cannot be read by them.
+function checkEnvironment(env, config = {}) {
+  const extra = config.envAllow ?? [];
+  if (!Array.isArray(extra) || extra.some((name) => typeof name !== "string" || !/^[A-Z][A-Z0-9_]*$/.test(name))) {
+    throw new TypeError("checks.envAllow must contain uppercase environment variable names.");
+  }
+  const allow = new Set([...DEFAULT_CHECK_ENV_ALLOW, ...extra]);
+  const inherited = Object.fromEntries(
+    Object.entries(env).filter(([key, value]) => allow.has(key) && value !== undefined),
+  );
+  return { ...inherited, ...(config.env ?? {}), ETNPILOT_CHECK: "1" };
+}
+
+function assertWorkflowAgents(harness, workflow) {
+  const missing = [...new Set(workflow.steps
+    .filter((step) => step.type === "agent" || step.type === undefined)
+    .map((step) => step.agent)
+    .filter((name) => name && !harness.agents.has(name)))];
+  if (missing.length === 0) return;
+  const available = harness.agents.list();
+  throw new Error([
+    `Unknown workflow agent${missing.length > 1 ? "s" : ""}: ${missing.map((name) => `'${name}'`).join(", ")}.`,
+    available.length > 0
+      ? `Configured agents: ${available.join(", ")}.`
+      : "No agents are defined. Add a manifest under '.etnpilot/agents/'.",
+  ].join(" "));
+}
+
+function describeProjectLoadError(error, useWorktree) {
+  if (error?.code !== "ENOENT" || !useWorktree) return error;
+  const detailed = new Error(
+    "The run worktree has no '.etnpilot/etnpilot.yaml'. A worktree is created from the committed"
+    + " base ref, so commit '.etnpilot/' first or run with --no-worktree.",
+  );
+  detailed.code = "etnpilot_content_not_committed";
+  detailed.cause = error;
+  return detailed;
+}
+
+async function discardWorkspace(workspace, manager, branch) {
+  if (!workspace?.managed) return { removed: false, reason: "in-place-run" };
+  try {
+    const removal = await manager.removeIfClean(workspace.name);
+    if (!removal.removed) return removal;
+    await manager.deleteBranch(branch).catch(() => {});
+    return { ...removal, branch, branchRemoved: true };
+  } catch (error) {
+    return { removed: false, reason: "cleanup-failed", error: error.message };
+  }
 }
 
 async function verifyContentAfterRun(root, config, initial) {
@@ -420,6 +489,7 @@ function createPublisher(config, token, fetchImpl) {
     baseUrl: config.git?.baseUrl,
     project: config.git?.project,
     remote: config.git?.remote ?? "gitlab",
+    committer: config.git?.committer,
     token,
     fetchImpl,
   });

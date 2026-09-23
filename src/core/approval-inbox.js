@@ -3,14 +3,19 @@ import { chmodSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
+import { redactSecrets, sanitizeForDisplay } from "./text-safety.js";
 
 const DECISIONS = new Set(["approved", "rejected"]);
 const STATUSES = new Set(["pending", "approved", "rejected", "expired", "all"]);
 
 export class ApprovalInbox {
-  constructor(databasePath, { now = Date.now } = {}) {
+  constructor(databasePath, { now = Date.now, redact = false, maxDetailLength = 8192 } = {}) {
     this.path = resolve(databasePath);
     this.now = now;
+    // Full fidelity by default: an operator can only approve what they see.
+    // Projects that would rather mask credential-looking text opt in.
+    this.redact = redact === true;
+    this.maxDetailLength = maxDetailLength;
     mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
     this.database = new DatabaseSync(this.path);
     chmodSync(this.path, 0o600);
@@ -48,7 +53,10 @@ export class ApprovalInbox {
       workflowJobId: context.queueJobId,
       agent: context.agent,
       operationKind: request?.kind ?? "unknown",
-      details: summarizeApprovalRequest(request),
+      details: summarizeApprovalRequest(request, {
+        redact: this.redact,
+        maxLength: this.maxDetailLength,
+      }),
       createdAt,
       expiresAt: createdAt + timeoutMs,
       serviceInstanceId,
@@ -178,17 +186,38 @@ export function createInboxApprovalHandler({
   };
 }
 
-export function summarizeApprovalRequest(request = {}) {
+// A reviewer approves what they can read in full: the whole command and the
+// whole URL, not an abbreviated summary. The fingerprint is taken over the
+// original request, so display limits can never change what was identified.
+export function summarizeApprovalRequest(request = {}, { redact = false, maxLength = 8192 } = {}) {
   const details = {};
-  if (request.fileName) details.file = truncate(String(request.fileName), 500);
-  if (request.fullCommandText) details.command = redactCommand(String(request.fullCommandText));
-  if (request.toolName) details.tool = truncate(String(request.toolName), 200);
-  if (request.url) details.origin = safeOrigin(request.url);
+  const present = (value) => {
+    const sanitized = sanitizeForDisplay(redact ? redactSecrets(value) : value, { maxLength });
+    if (sanitized.truncated) details.truncated = true;
+    return sanitized.text;
+  };
+  if (request.fileName) details.file = present(request.fileName);
+  if (request.fullCommandText) details.command = present(request.fullCommandText);
+  if (request.toolName) details.tool = present(request.toolName);
+  if (request.toolArguments !== undefined) details.arguments = present(stringify(request.toolArguments));
+  if (request.url) {
+    details.url = present(request.url);
+    details.origin = safeOrigin(request.url);
+  }
+  if (redact) details.redacted = true;
   details.fingerprint = createHash("sha256").update(JSON.stringify({
     kind: request?.kind ?? "unknown",
-    ...details,
+    fileName: request.fileName ?? null,
+    command: request.fullCommandText ?? null,
+    tool: request.toolName ?? null,
+    arguments: request.toolArguments === undefined ? null : stringify(request.toolArguments),
+    url: request.url ?? null,
   })).digest("hex");
   return details;
+}
+
+function stringify(value) {
+  return typeof value === "string" ? value : JSON.stringify(value) ?? String(value);
 }
 
 export class ApprovalStateError extends Error {
@@ -199,25 +228,12 @@ export class ApprovalStateError extends Error {
   }
 }
 
-function redactCommand(command) {
-  return truncate(command, 500)
-    .replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASS|API_KEY|AUTH)[A-Z0-9_]*)=\S+/gi, "$1=[redacted]")
-    .replace(/(--?(?:token|secret|password|pass|api-key|authorization))(?:=|\s+)\S+/gi, "$1 [redacted]")
-    .replace(/((?:Authorization|PRIVATE-TOKEN|JOB-TOKEN):\s*(?:Bearer\s+|Basic\s+)?)[^\s"']+/gi, "$1[redacted]")
-    .replace(/(https?:\/\/)[^@\s/]+@/gi, "$1[redacted]@")
-    .replace(/(https?:\/\/[^\s?]+)\?\S+/gi, "$1?[redacted]");
-}
-
 function safeOrigin(value) {
   try {
     return new URL(String(value)).origin;
   } catch {
     return "invalid-url";
   }
-}
-
-function truncate(value, length) {
-  return value.length <= length ? value : `${value.slice(0, length - 1)}…`;
 }
 
 function fromRow(row) {

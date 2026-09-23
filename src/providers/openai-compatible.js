@@ -12,10 +12,12 @@ export function createOpenAICompatibleProvider({
     name,
     capabilities: ["chat"],
     async invoke(context) {
+      context.signal?.throwIfAborted();
       let response;
       try {
         response = await fetchImpl(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
           method: "POST",
+          signal: context.signal,
           headers: {
             "content-type": "application/json",
             ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
@@ -29,6 +31,9 @@ export function createOpenAICompatibleProvider({
           }),
         });
       } catch (error) {
+        // A cancelled step must not be replayed by the router; the workflow
+        // engine owns timeouts and aborts.
+        if (context.signal?.aborted) throw context.signal.reason ?? error;
         throw new ProviderError("Provider network request failed.", {
           code: "network_error",
           retryable: true,
