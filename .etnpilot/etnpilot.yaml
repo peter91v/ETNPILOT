@@ -43,6 +43,14 @@ codegraph:
   startupTimeoutMs: 30000
   tools: [codegraph_explore]
 
+content:
+  provenance:
+    mode: enforce
+    lockFile: .etnpilot/content-lock.json
+    verifyAfterRun: true
+    maxEntries: 1000
+    maxFileBytes: 1048576
+
 observability:
   enabled: true
   file: .etnpilot/state/telemetry.jsonl

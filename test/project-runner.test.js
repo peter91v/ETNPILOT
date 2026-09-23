@@ -7,6 +7,7 @@ import { git } from "../src/git/command.js";
 import { runProject } from "../src/runtime/project-runner.js";
 import { verifyReceiptFile } from "../src/core/receipt-store.js";
 import { createReceiptVerifier, generateReceiptKeyPair } from "../src/core/receipt-signing.js";
+import { writeContentLock } from "../src/content/provenance.js";
 
 test("project runner executes an agent and check in an isolated worktree", async () => {
   const root = await mkdtemp(join(tmpdir(), "etnpilot-run-"));
@@ -245,4 +246,69 @@ test("project runner interpolates the project config with the injected environme
   });
   assert.equal(result.summary.status, "succeeded");
   assert.equal(seenModel, "injected-model");
+});
+
+test("project runner aborts when pinned content changes during execution", async () => {
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-content-drift-"));
+  const promptPath = join(root, ".etnpilot", "prompts", "worker.md");
+  await Promise.all([
+    mkdir(join(root, ".etnpilot", "agents"), { recursive: true }),
+    mkdir(join(root, ".etnpilot", "prompts"), { recursive: true }),
+  ]);
+  await writeFile(join(root, ".gitignore"), ".etnpilot/state/\n.etnpilot/worktrees/\n");
+  await writeFile(promptPath, "Trusted prompt.\n");
+  await writeFile(join(root, ".etnpilot", "agents", "worker.yaml"), "name: worker\nprovider: fake\npromptRef: worker\n");
+  await writeFile(join(root, ".etnpilot", "etnpilot.yaml"), [
+    "version: 1",
+    "defaultAgent: worker",
+    "providers:",
+    "  fake: { type: fake }",
+    "codegraph:",
+    "  enabled: false",
+    "content:",
+    "  provenance:",
+    "    mode: enforce",
+    "    lockFile: .etnpilot/content-lock.json",
+    "    verifyAfterRun: true",
+    "workflow:",
+    "  steps:",
+    "    - { id: build, type: agent, agent: worker }",
+    "",
+  ].join("\n"));
+  const config = {
+    content: { provenance: { mode: "enforce", lockFile: ".etnpilot/content-lock.json", verifyAfterRun: true } },
+  };
+  await writeContentLock(root, config);
+  await git(["init", "-b", "main"], { cwd: root });
+  await git(["config", "user.email", "test@example.invalid"], { cwd: root });
+  await git(["config", "user.name", "ETNPilot Test"], { cwd: root });
+  await git(["add", "."], { cwd: root });
+  await git(["commit", "-m", "initial"], { cwd: root });
+
+  let failure;
+  try {
+    await runProject({
+      root,
+      input: "mutate content",
+      worktree: false,
+      providerFactories: {
+        fake: (name) => ({
+          name,
+          async invoke() {
+            await writeFile(promptPath, "Changed while running.\n");
+            return { text: "done" };
+          },
+        }),
+      },
+    });
+  } catch (error) {
+    failure = error;
+  }
+
+  assert.equal(failure?.code, "content-lock-mismatch");
+  assert.equal(failure.run.content.verifiedAfterRun, false);
+  assert.equal(failure.run.content.verificationError, "content-lock-mismatch");
+  const receipts = (await readFile(failure.run.receiptPath, "utf8")).trim().split("\n").map(JSON.parse);
+  assert.equal(receipts.at(-1).status, "failed");
+  assert.equal(receipts.at(-1).content.verificationError, "content-lock-mismatch");
 });

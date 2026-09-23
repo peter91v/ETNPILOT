@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import { loadConfig } from "../config/load.js";
 import { loadProject } from "../content/load-project.js";
+import { verifyProjectContent } from "../content/provenance.js";
 import { ApprovalPolicy } from "../core/approval-policy.js";
 import { Harness } from "../core/harness.js";
 import { JsonlReceiptStore } from "../core/receipt-store.js";
@@ -61,6 +62,7 @@ export async function runProject({
   let workspace;
   let codegraph;
   let codegraphBefore;
+  let contentEvidence;
   try {
     const bootstrapPlugins = (bootstrapConfig.plugins ?? []).filter(isBootstrapPlugin);
     await loadPlugins(bootstrapPlugins, harness, repositoryRoot, {
@@ -97,7 +99,7 @@ export async function runProject({
     receiptStore = new JsonlReceiptStore(receiptPath, { signer: receiptSigner });
     harness.telemetry = telemetry;
     harness.receiptStore = receiptStore;
-    ({ config } = await loadProject(harness, workspace.path, env, {
+    ({ config, content: contentEvidence } = await loadProject(harness, workspace.path, env, {
       signal,
       secretResolver: secrets,
       fetchImpl,
@@ -175,7 +177,19 @@ export async function runProject({
       }
       throw new Error(`Unsupported workflow step type: '${step.type}'.`);
     }, { signal, context: { runId, workspace } });
+    contentEvidence = await verifyContentAfterRun(workspace.path, config, contentEvidence);
   } catch (error) {
+    if (contentEvidence?.mode === "enforce" && contentEvidence.verifiedAfterRun !== true) {
+      try {
+        contentEvidence = await verifyContentAfterRun(workspace.path, config, contentEvidence);
+      } catch (verificationError) {
+        contentEvidence = {
+          ...contentEvidence,
+          verifiedAfterRun: false,
+          verificationError: verificationError.code ?? "content-verification-failed",
+        };
+      }
+    }
     summary = error.workflow ?? { status: "failed", error: error.message };
     const observability = await finishTelemetry({
       telemetry,
@@ -192,6 +206,7 @@ export async function runProject({
       status: "failed",
       durationMs: Date.now() - startedAt,
       workspace,
+      content: contentEvidence,
       observability,
       summary,
     });
@@ -207,6 +222,7 @@ export async function runProject({
         keyId: receiptSigner.keyId,
       } : undefined,
       observability,
+      content: contentEvidence,
       summary,
     };
     throw error;
@@ -248,6 +264,7 @@ export async function runProject({
     status: summary.status,
     durationMs: Date.now() - startedAt,
     workspace,
+    content: contentEvidence,
     git: gitEvidence,
     codegraph: codegraphEvidence,
     observability,
@@ -285,11 +302,18 @@ export async function runProject({
       keyId: receiptSigner.keyId,
     } : undefined,
     summary,
+    content: contentEvidence,
     git: gitEvidence,
     codegraph: codegraphEvidence,
     observability,
     mergeRequest,
   };
+}
+
+async function verifyContentAfterRun(root, config, initial) {
+  if (!initial || initial.mode === "off" || initial.verifyAfterRun === false) return initial;
+  const verified = await verifyProjectContent(root, config, initial);
+  return { ...verified, verifiedAfterRun: true };
 }
 
 async function runObservedCheck(step, { cwd, signal, env, telemetry, trace, workflowRunId }) {

@@ -25,6 +25,16 @@ export { CodeGraph, createCodeGraphMcpServer, isCodeGraphSourcePath } from "./co
 export { loadConfig } from "./config/load.js";
 export { initializeProject } from "./config/init.js";
 export { loadProject } from "./content/load-project.js";
+export {
+  captureProjectContent,
+  ContentProvenanceError,
+  CONTENT_DIGEST_ALGORITHM,
+  CONTENT_PROVENANCE_VERSION,
+  loadPinnedProjectContent,
+  normalizeContentProvenance,
+  verifyProjectContent,
+  writeContentLock,
+} from "./content/provenance.js";
 export { WorktreeManager } from "./git/worktrees.js";
 export { GitLabApiError, GitLabClient } from "./gitlab/client.js";
 export { GitLabPublisher } from "./gitlab/publisher.js";
