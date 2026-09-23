@@ -15,6 +15,8 @@ import { GitLabClient } from "../gitlab/client.js";
 import { latestPipeline } from "../gitlab/pipelines.js";
 import { createGitLabWebhookServer } from "../gitlab/webhook-server.js";
 import { createReviewServer } from "../ui/server.js";
+import { createTuiApp } from "../tui/app.js";
+import { openProjectState } from "../runtime/project-state.js";
 import { runProject } from "../runtime/project-runner.js";
 import { replayRun } from "../runtime/replay.js";
 import { WorkflowQueue } from "../workflow/queue.js";
@@ -83,6 +85,7 @@ Usage:
   etnpilot content verify [--root directory]
   etnpilot webhook serve [--root directory] [--host address] [--port number]
   etnpilot ui [--root directory] [--host address] [--port number]
+  etnpilot tui [--root directory]
   etnpilot approval list [--status pending|approved|rejected|expired|all] [--limit number]
   etnpilot approval show <id>
   etnpilot approval approve <id> [--actor name] [--reason text]
@@ -239,6 +242,19 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     console.log(`ETNPilot GitLab webhook receiver listening on http://${displayHost}:${displayPort}`);
     await waitForShutdown();
     await webhookServer.close();
+  } else if (command === "tui") {
+    const state = await openProjectState({ root: resolve(values.root) });
+    if (!process.stdin.isTTY) {
+      state.close();
+      throw new Error("The TUI needs an interactive terminal. Use 'etnpilot ui' or the plain commands instead.");
+    }
+    const app = createTuiApp({ state, actor: values.actor });
+    try {
+      await app.start();
+    } finally {
+      app.stop();
+      state.close();
+    }
   } else if (command === "ui") {
     const port = values.port === undefined ? undefined : Number.parseInt(values.port, 10);
     if (port !== undefined && (!Number.isInteger(port) || port < 0 || port > 65_535)) {

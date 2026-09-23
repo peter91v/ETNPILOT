@@ -428,6 +428,16 @@ checks:
   envAllow: [CI, NPM_CONFIG_REGISTRY]
 ```
 
+## Terminal interface
+
+```bash
+etnpilot tui --root .
+```
+
+Approvals, the queue, and runs in one full-screen view, with the whole command
+and the rule that stopped it. Decisions go to the same inbox the CLI and the
+page use. See [docs/tui.md](docs/tui.md).
+
 ## Local review UI
 
 ```bash

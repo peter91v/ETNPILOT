@@ -6,6 +6,18 @@ pre-1.0, so breaking changes may appear in any release.
 
 ## [Unreleased]
 
+### Added — terminal interface
+
+- `etnpilot tui` shows approvals, the queue, and runs in one full-screen view
+  and decides against the same inbox the CLI and the review page use. Its views
+  are pure functions of state and viewport, so frames are asserted in tests
+  without a terminal.
+- The policy decision that stopped an operation is recorded with the approval,
+  so every surface can say which rule is asking rather than only showing what
+  was asked.
+- `openProjectState` collects approvals, queue, and runs once for every
+  surface; the review server now reads through it.
+
 ### Added — roadmap M6
 
 - `etnpilot ui` serves a local review page for pending approvals, the workflow
