@@ -428,6 +428,17 @@ checks:
   envAllow: [CI, NPM_CONFIG_REGISTRY]
 ```
 
+## Local review UI
+
+```bash
+etnpilot ui --root .
+# ETNPilot review UI: http://127.0.0.1:8788/?token=…
+```
+
+Pending approvals with their full command, the workflow queue, and finished
+runs read from their receipts. It binds to localhost, requires the token it
+prints, and loads nothing from anywhere. See [docs/review-ui.md](docs/review-ui.md).
+
 ## Sandboxed execution
 
 Checks and approved commands can run in a disposable container that sees only

@@ -65,9 +65,12 @@
 - [x] Merge rehearsal against the target branch before publishing
 - [x] Organization-level project templates (`init --template`)
 
+## M6 — Review surface and multi-language support
+
+- [x] Local-first web UI for reviewing runs and approvals
+
 ## Brainstorming backlog
 
-- local-first web UI for reviewing runs and approvals;
 - merge-train awareness beyond the single-branch rehearsal;
 - richer devcontainer support, including building an image rather than reusing
   a prebuilt one;
