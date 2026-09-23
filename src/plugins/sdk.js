@@ -7,6 +7,9 @@ export const PLUGIN_CAPABILITIES = Object.freeze([
   "prompt.register",
   "instruction.add",
   "event.subscribe",
+  "secret.register",
+  "secret.read",
+  "network.fetch",
 ]);
 
 const KNOWN_CAPABILITIES = new Set(PLUGIN_CAPABILITIES);
@@ -26,6 +29,9 @@ export function definePlugin(definition) {
   }
   if (typeof definition.setup !== "function") {
     throw new TypeError(`Plugin '${definition.name}' requires setup(context, options).`);
+  }
+  if (definition.shutdown !== undefined && typeof definition.shutdown !== "function") {
+    throw new TypeError(`Plugin '${definition.name}' shutdown must be a function.`);
   }
   const manifest = validatePluginManifest(definition);
   const capabilities = manifest.capabilities;
@@ -107,6 +113,24 @@ export function createPluginContext(bridge, plugin) {
     subscribe(type, listener) {
       requireCapability("event.subscribe");
       return bridge.subscribe(type, listener);
+    },
+    registerSecretProvider(provider) {
+      requireCapability("secret.register");
+      return bridge.registerSecretProvider(provider);
+    },
+    resolveSecret(name) {
+      requireCapability("secret.read");
+      if (typeof name !== "string" || name.length === 0) {
+        throw new TypeError("A plugin secret input must be a non-empty logical name.");
+      }
+      return bridge.resolveSecret(name);
+    },
+    fetch(request) {
+      requireCapability("network.fetch");
+      if (!request || typeof request !== "object") {
+        throw new TypeError("A plugin network request must be an object.");
+      }
+      return bridge.fetch(request);
     },
   });
 }

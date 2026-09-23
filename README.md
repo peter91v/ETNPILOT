@@ -26,6 +26,7 @@ The repository is in early development. The first runnable vertical slice provid
 - deny-first policy-as-code for operation types, workspace paths, network hosts, and providers.
 - OTLP/HTTP traces with provider usage, configurable cost estimates, and workflow budgets.
 - one restricted worker process per plugin with bounded RPC, runtime, memory, and output.
+- an isolated OIDC/Vault secret-provider plugin with scoped secret and HTTPS grants.
 
 ## Quick start
 
@@ -145,7 +146,7 @@ etnpilot secret check gitlab.apiToken --root .
 
 Provider adapters can select another named reference with `tokenSecret` or `apiKeySecret`; receipt
 signing supports `privateKeySecret`. See [docs/secrets.md](docs/secrets.md) for the full contract,
-file-security rules, and extension example.
+file-security rules, isolated Vault configuration, and extension example.
 
 ## Policy as code
 
@@ -242,8 +243,10 @@ export default definePlugin({
 ```
 
 Available capabilities are `provider.register`, `agent.register`, `skill.register`,
-`prompt.register`, `instruction.add`, and `event.subscribe`. Optional `dependencies` are plugin
-names; ETNPilot loads them in dependency order and rejects missing or cyclic dependency graphs.
+`prompt.register`, `instruction.add`, `event.subscribe`, `secret.register`, `secret.read`, and
+`network.fetch`. Secret inputs and HTTPS URL prefixes require explicit per-plugin grants in
+addition to capability declarations. Optional `dependencies` are plugin names; ETNPilot loads them
+in dependency order and rejects missing or cyclic dependency graphs.
 
 Configure global worker limits and optional per-plugin overrides in `.etnpilot/etnpilot.yaml`:
 

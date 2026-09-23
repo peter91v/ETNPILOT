@@ -49,9 +49,30 @@ plugins:
       memoryMb: 96
 ```
 
-Global values become defaults. A plugin entry can provide `limits` and a `moduleRoot`. `moduleRoot`
-is resolved from the project root and should name the smallest directory containing that plugin's
-ESM dependency files. Options and all setup data must be JSON-serializable.
+Global values become defaults. A plugin entry can provide `limits`, a `moduleRoot`, scoped resource
+grants, and the restricted `bootstrap` flag. `moduleRoot` is resolved from the project root and
+should name the smallest directory containing that plugin's ESM dependency files. Options and all
+setup data must be JSON-serializable.
+
+Security-sensitive host services require grants in addition to manifest capabilities:
+
+```yaml
+plugins:
+  - path: etnpilot/plugins/vault
+    bootstrap: true
+    secretInputs: [vault.oidcToken]
+    networkAllow: [https://vault.example.com/v1/]
+```
+
+`secretInputs` contains exact logical secret names. `networkAllow` contains credential-free HTTPS
+URL prefixes. A plugin must also declare `secret.read` or `network.fetch`, and network calls must
+pass the normal operation policy. The host accepts only GET and POST, a small header allowlist,
+bounded string bodies, no redirects, and bounded responses. Direct worker networking remains
+disabled.
+
+`bootstrap: true` is reserved for secret providers needed before workspace creation. Bootstrap
+plugins may declare only `secret.register`, `secret.read`, and `network.fetch`, preventing early
+registration of agents, model providers, instructions, prompts, skills, or event listeners.
 
 | Setting | Purpose | Default |
 |---|---|---:|
@@ -78,6 +99,11 @@ result fails the active operation and forcefully terminates that worker. Event s
 always removed during termination. A failed worker is not restarted automatically because its
 provider or event side effects may be ambiguous.
 
+A plugin may define an optional asynchronous `shutdown()` hook. It runs only during graceful
+shutdown and remains subject to the configured shutdown deadline; forced termination still reaps
+the process and removes all host registrations.
+
 Stable error codes include `plugin_timeout`, `plugin_aborted`, `plugin_memory_limit`,
 `plugin_output_limit`, `plugin_rpc_limit`, `plugin_protocol_error`, `plugin_permission_denied`, and
-`plugin_process_exit`.
+`plugin_process_exit`. Secret-provider registrations are removed and active host-mediated network
+requests are aborted when their worker exits.

@@ -22,6 +22,12 @@ export class SecretResolver {
     return normalized;
   }
 
+  unregister(name, expected) {
+    const current = this.providers.get(name);
+    if (!current || (expected !== undefined && current !== expected)) return false;
+    return this.providers.delete(name);
+  }
+
   names() {
     return Object.keys(this.values).sort();
   }

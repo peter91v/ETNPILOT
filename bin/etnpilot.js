@@ -7,6 +7,8 @@ import { CodeGraph } from "../src/codegraph/codegraph.js";
 import { initializeProject } from "../src/config/init.js";
 import { loadConfig } from "../src/config/load.js";
 import { ApprovalInbox } from "../src/core/approval-inbox.js";
+import { ApprovalPolicy } from "../src/core/approval-policy.js";
+import { Harness } from "../src/core/harness.js";
 import { verifyReceiptFile } from "../src/core/receipt-store.js";
 import { generateReceiptKeyPair, loadReceiptVerifiers } from "../src/core/receipt-signing.js";
 import { createTerminalApprovalHandler } from "../src/core/terminal-approval.js";
@@ -16,6 +18,7 @@ import { runProject } from "../src/runtime/project-runner.js";
 import { WorkflowQueue } from "../src/workflow/queue.js";
 import { createSecretResolver } from "../src/secrets/resolver.js";
 import { PolicyEngine } from "../src/policy/engine.js";
+import { loadPlugins } from "../src/plugins/load-plugin.js";
 import { summarizeTelemetryFile } from "../src/observability/telemetry.js";
 
 const { positionals, values } = parseArgs({
@@ -264,9 +267,25 @@ if (command === "init") {
   const root = resolve(values.root);
   const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"));
   const resolver = createSecretResolver({ root, config });
-  const result = await resolver.check(rest[0]);
-  console.log(JSON.stringify(result, null, 2));
-  if (!result.available) process.exitCode = 1;
+  const policy = new PolicyEngine(config.policy);
+  const harness = new Harness({
+    approvalPolicy: new ApprovalPolicy(config.approval, { policy }),
+    approvalHandler: createTerminalApprovalHandler(),
+    policy,
+    secrets: resolver,
+  });
+  try {
+    await loadPlugins((config.plugins ?? []).filter(isBootstrapPlugin), harness, root, {
+      isolation: config.pluginIsolation,
+      secretResolver: resolver,
+      bootstrap: true,
+    });
+    const result = await resolver.check(rest[0]);
+    console.log(JSON.stringify(result, null, 2));
+    if (!result.available) process.exitCode = 1;
+  } finally {
+    await harness.close();
+  }
 } else if (command === "policy" && subcommand === "check") {
   if (Boolean(values.kind) === Boolean(values.provider)) {
     throw new Error("Specify either --kind or --provider.");
@@ -350,6 +369,10 @@ function waitForShutdown() {
     process.once("SIGINT", shutdown);
     process.once("SIGTERM", shutdown);
   });
+}
+
+function isBootstrapPlugin(entry) {
+  return entry && typeof entry === "object" && entry.bootstrap === true;
 }
 
 async function commandExists(commandName) {

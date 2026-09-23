@@ -4,7 +4,7 @@ import { Registry } from "./registry.js";
 import { telemetryProviderAttributes } from "../observability/telemetry.js";
 
 export class Harness {
-  constructor({ approvalPolicy, approvalHandler, receiptStore, policy, telemetry } = {}) {
+  constructor({ approvalPolicy, approvalHandler, receiptStore, policy, telemetry, secrets } = {}) {
     this.events = new EventBus();
     this.providers = new Registry("provider");
     this.plugins = new Registry("plugin");
@@ -17,6 +17,7 @@ export class Harness {
     this.receiptStore = receiptStore;
     this.policy = policy;
     this.telemetry = telemetry;
+    this.secrets = secrets;
     this.providerRouter = undefined;
     this.pluginRuntimes = new Set();
   }
@@ -57,6 +58,15 @@ export class Harness {
     const registered = Object.freeze({ capabilities: [], ...provider });
     this.providers.register(provider.name, registered);
     return registered;
+  }
+
+  registerSecretProvider(provider) {
+    if (!this.secrets) throw new Error("A secret resolver is required for plugin secret providers.");
+    return this.secrets.register(provider);
+  }
+
+  approveOperation(request, context = {}) {
+    return this.#approve(request, context);
   }
 
   registerAgent(agent) {

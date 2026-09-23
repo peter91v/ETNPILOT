@@ -26,11 +26,22 @@ export async function loadProject(harness, root = process.cwd(), env = process.e
       : manifest.prompt;
     harness.registerAgent({ ...manifest, prompt });
   }
-  await loadPlugins(config.plugins ?? [], harness, projectRoot, {
-    isolation: config.pluginIsolation,
-    signal: runtime.signal,
-  });
+  const pluginEntries = runtime.bootstrapPluginsLoaded
+    ? (config.plugins ?? []).filter((entry) => !isBootstrapPlugin(entry))
+    : (config.plugins ?? []);
+  if (pluginEntries.length > 0) {
+    await loadPlugins(pluginEntries, harness, projectRoot, {
+      isolation: config.pluginIsolation,
+      signal: runtime.signal,
+      secretResolver: runtime.secretResolver,
+      fetchImpl: runtime.fetchImpl,
+    });
+  }
   return { root: projectRoot, config };
+}
+
+function isBootstrapPlugin(entry) {
+  return entry && typeof entry === "object" && entry.bootstrap === true;
 }
 
 async function filesIn(directory, extension) {
