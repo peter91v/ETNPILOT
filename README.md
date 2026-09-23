@@ -37,7 +37,7 @@ the approval inbox.
 ```bash
 npm install
 npm install @github/copilot-sdk
-npm run etnpilot -- init .
+npm run etnpilot -- init .            # or: init . --template regulated
 npm run etnpilot -- doctor            # verify node, git, sqlite, and the SDK
 # Describe at least one agent under .etnpilot/agents/, then:
 git add .etnpilot && git commit -m "Add ETNPilot configuration"
@@ -427,6 +427,68 @@ reach. Add what a check genuinely needs:
 checks:
   envAllow: [CI, NPM_CONFIG_REGISTRY]
 ```
+
+## Sandboxed execution
+
+Checks and approved commands can run in a disposable container that sees only
+the workspace and, by default, no network:
+
+```yaml
+sandbox:
+  enabled: true
+  runtime: docker
+  image: node:24-bookworm-slim
+  network: none
+  useDevcontainerImage: false
+```
+
+If the runtime is missing the run fails rather than quietly executing on the
+host. See [docs/sandbox.md](docs/sandbox.md).
+
+## Dry runs, fixtures, and replay
+
+```bash
+etnpilot run "Upgrade the driver" --dry-run          # decide nothing, change nothing
+etnpilot run "Upgrade the driver" --record-fixtures fixtures.json
+etnpilot run "Upgrade the driver" --fixtures fixtures.json   # offline, deterministic
+etnpilot replay .etnpilot/state/runs/<run-id>.jsonl          # re-check the record
+```
+
+A dry run evaluates policy and records what it would have decided. Fixtures
+record redacted provider answers so a run can be repeated offline. Replay
+re-runs a receipt's checks and reports drift; it does not pretend to replay the
+model. See [docs/reproducibility.md](docs/reproducibility.md).
+
+## Reviewer quorum
+
+A `quorum` step requires independent reviewers, usually on different providers,
+to agree before a change counts as reviewed:
+
+```yaml
+workflow:
+  steps:
+    - id: review
+      type: quorum
+      agents: [reviewer-copilot, reviewer-backup]
+      required: 2
+      distinctProviders: true
+      needs: [build]
+```
+
+Each reviewer ends its answer with `VERDICT: approve` or `VERDICT: reject`;
+anything else is an abstention. Two reviewers on the same provider count once,
+because they are one opinion with two voices. One rejection blocks the step.
+
+## Supply-chain gates
+
+```bash
+etnpilot deps check      # licenses and denied packages
+etnpilot sbom            # CycloneDX inventory
+etnpilot scan secrets    # credentials in tracked files
+etnpilot attest <receipt-file>   # in-toto/SLSA provenance for a run
+```
+
+See [docs/supply-chain.md](docs/supply-chain.md).
 
 ## Security
 

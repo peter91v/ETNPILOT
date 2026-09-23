@@ -66,8 +66,19 @@ export async function loadReceiptSigner({ root, config = {}, env = process.env, 
     throw new Error("Receipt signing is enabled but no private key file is configured.");
   }
   const path = resolve(root, configuredPath);
-  await assertPrivateKeyPermissions(path);
-  return createReceiptSigner(await readFile(path, "utf8"));
+  try {
+    await assertPrivateKeyPermissions(path);
+    return createReceiptSigner(await readFile(path, "utf8"));
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    const missing = new Error(
+      `Receipt signing is enabled but its key is missing: ${path}.`
+      + " Create one with 'etnpilot receipt keygen', or set receipts.signing.enabled to false.",
+    );
+    missing.code = "receipt_signing_key_missing";
+    missing.cause = error;
+    throw missing;
+  }
 }
 
 export async function loadReceiptVerifiers(paths) {

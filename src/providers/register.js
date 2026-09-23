@@ -18,6 +18,8 @@ const BUILTIN_FACTORIES = {
   "openai-compatible": async (name, config, context) => createOpenAICompatibleProvider({
     ...config,
     name,
+    workingDirectory: config.workingDirectory ?? context.workingDirectory,
+    sandbox: context.sandbox,
     apiKey: config.apiKey ?? await resolveProviderSecret({
       resolver: context.secretResolver,
       name: config.apiKeySecret ?? "provider.apiKey",

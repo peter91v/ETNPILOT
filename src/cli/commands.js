@@ -11,13 +11,20 @@ import { verifyReceiptFile } from "../core/receipt-store.js";
 import { generateReceiptKeyPair, loadReceiptVerifiers } from "../core/receipt-signing.js";
 import { createTerminalApprovalHandler } from "../core/terminal-approval.js";
 import { WorktreeManager } from "../git/worktrees.js";
+import { GitLabClient } from "../gitlab/client.js";
+import { latestPipeline } from "../gitlab/pipelines.js";
 import { createGitLabWebhookServer } from "../gitlab/webhook-server.js";
 import { runProject } from "../runtime/project-runner.js";
+import { replayRun } from "../runtime/replay.js";
 import { WorkflowQueue } from "../workflow/queue.js";
 import { createSecretResolver } from "../secrets/resolver.js";
 import { PolicyEngine } from "../policy/engine.js";
 import { loadPlugins } from "../plugins/load-plugin.js";
 import { summarizeTelemetryFile } from "../observability/telemetry.js";
+import { checkDependencyPolicy, readInstalledPackages } from "../supply/dependencies.js";
+import { generateSbom } from "../supply/sbom.js";
+import { scanForSecrets } from "../supply/secret-scan.js";
+import { buildRunAttestation } from "../supply/attestation.js";
 
 export const CLI_OPTIONS = Object.freeze({
   help: { type: "boolean", short: "h" },
@@ -29,6 +36,7 @@ export const CLI_OPTIONS = Object.freeze({
   "no-worktree": { type: "boolean", default: false },
   "cleanup-worktree": { type: "boolean", default: false },
   publish: { type: "boolean", default: false },
+  "dry-run": { type: "boolean", default: false },
   host: { type: "string" },
   port: { type: "string" },
   status: { type: "string" },
@@ -46,14 +54,21 @@ export const CLI_OPTIONS = Object.freeze({
   path: { type: "string" },
   url: { type: "string" },
   provider: { type: "string" },
+  out: { type: "string", short: "o" },
+  template: { type: "string", short: "t" },
+  "record-fixtures": { type: "string" },
+  fixtures: { type: "string" },
 });
 
 export const USAGE = `ETNPilot
 
 Usage:
-  etnpilot init [directory]
+  etnpilot init [directory] [--template default|minimal|regulated]
   etnpilot run <task> [--agent name] [--root directory]
-    [--worktree | --no-worktree] [--cleanup-worktree] [--publish]
+    [--worktree | --no-worktree] [--cleanup-worktree] [--publish] [--dry-run]
+    [--record-fixtures file | --fixtures file]
+  etnpilot replay <receipt-file> [--root directory] [--public-key path]
+    [--require-signatures]
   etnpilot worktree list [--root directory]
   etnpilot worktree cleanup <name> [--root directory]
   etnpilot graph build [directory]
@@ -79,6 +94,11 @@ Usage:
   etnpilot secret check <name> [--root directory]
   etnpilot policy check (--kind kind [--path path | --url url] | --provider name)
     [--agent name] [--root directory]
+  etnpilot pipeline status [ref] [--root directory]
+  etnpilot deps check [--root directory]
+  etnpilot sbom [--out file] [--root directory]
+  etnpilot scan secrets [--root directory]
+  etnpilot attest <receipt-file> [--out file] [--root directory]
   etnpilot telemetry summary [workflow-run-id] [--root directory]
   etnpilot doctor [--root directory]
 
@@ -96,12 +116,15 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
   }
 
   if (command === "init") {
-    const result = await initializeProject(resolve(subcommand ?? "."));
-    console.log(`Initialized ETNPilot in ${result.root}`);
+    const result = await initializeProject(resolve(subcommand ?? "."), { template: values.template });
+    console.log(`Initialized ETNPilot in ${result.root} (template: ${result.template}).`);
     console.log("Next: review '.etnpilot/', commit it, then run 'etnpilot run \"<task>\"'.");
   } else if (command === "run") {
     if (values.worktree && (values["no-worktree"] || values["in-place"])) {
       throw new Error("Choose either --worktree or --no-worktree, not both.");
+    }
+    if (values["record-fixtures"] && values.fixtures) {
+      throw new Error("Choose either --record-fixtures or --fixtures, not both.");
     }
     const task = [subcommand, ...rest].filter(Boolean).join(" ");
     const worktree = values.worktree ? true : (values["no-worktree"] || values["in-place"]) ? false : undefined;
@@ -112,10 +135,24 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
       worktree,
       cleanupPolicy: values["cleanup-worktree"] ? "on-success" : undefined,
       publish: values.publish,
+      dryRun: values["dry-run"],
+      recordFixtures: values["record-fixtures"],
+      fixtures: values.fixtures,
       approvalHandler: createTerminalApprovalHandler(),
     });
     console.log(JSON.stringify(result, null, 2));
     return result.summary?.status === "succeeded" ? 0 : 1;
+  } else if (command === "replay") {
+    if (!subcommand) throw new Error("A receipt file is required.");
+    const root = resolve(values.root);
+    const publicKeyPaths = await resolveReceiptPublicKeys(root, values["public-key"] ?? []);
+    const report = await replayRun(resolve(subcommand), {
+      root,
+      verifiers: await loadReceiptVerifiers(publicKeyPaths),
+      requireSignatures: values["require-signatures"] || publicKeyPaths.length > 0,
+    });
+    console.log(JSON.stringify(report, null, 2));
+    return report.receiptValid && report.drifted.length === 0 ? 0 : 1;
   } else if (command === "worktree" && subcommand === "list") {
     const manager = new WorktreeManager(resolve(values.root));
     console.log(JSON.stringify(await manager.list(), null, 2));
@@ -319,6 +356,46 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     console.log(JSON.stringify(report, null, 2));
     const denied = values.provider ? result?.allowed === false : result?.kind === "reject";
     return denied || !result ? 1 : 0;
+  } else if (command === "deps" && subcommand === "check") {
+    const root = resolve(values.root);
+    const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml")).catch(ignoreMissing);
+    const packages = await readInstalledPackages(root);
+    const report = checkDependencyPolicy(packages, config?.supplyChain ?? {});
+    console.log(JSON.stringify(report, null, 2));
+    return report.ok ? 0 : 1;
+  } else if (command === "sbom") {
+    const root = resolve(values.root);
+    const document = await generateSbom(root);
+    await writeOrPrint(values.out ? resolve(root, values.out) : undefined, document);
+  } else if (command === "scan" && (subcommand === "secrets" || subcommand === undefined)) {
+    const root = resolve(values.root);
+    const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml")).catch(ignoreMissing);
+    const report = await scanForSecrets(root, { allow: config?.supplyChain?.secretScan?.allow ?? [] });
+    console.log(JSON.stringify(report, null, 2));
+    return report.ok ? 0 : 1;
+  } else if (command === "attest") {
+    if (!subcommand) throw new Error("A receipt file is required.");
+    const root = resolve(values.root);
+    const publicKeyPaths = await resolveReceiptPublicKeys(root, values["public-key"] ?? []);
+    const statement = await buildRunAttestation(resolve(subcommand), {
+      root,
+      verifiers: await loadReceiptVerifiers(publicKeyPaths),
+    });
+    await writeOrPrint(values.out ? resolve(root, values.out) : undefined, statement);
+  } else if (command === "pipeline" && subcommand === "status") {
+    const root = resolve(values.root);
+    const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"));
+    if (!config.git?.project) throw new Error("'git.project' is required to query pipelines.");
+    const resolver = createSecretResolver({ root, config });
+    const token = await resolver.get("gitlab.apiToken", {
+      fallback: { provider: "env", key: "ETNPILOT_GITLAB_TOKEN" },
+      required: true,
+    });
+    const client = new GitLabClient({ baseUrl: config.git.baseUrl, token });
+    const ref = rest[0] ?? config.git.targetBranch ?? "main";
+    const pipeline = latestPipeline(await client.pipelines(config.git.project, ref));
+    console.log(JSON.stringify(pipeline ?? { ref, status: "none" }, null, 2));
+    return pipeline === undefined || pipeline.status === "failed" ? 1 : 0;
   } else if (command === "telemetry" && subcommand === "summary") {
     const root = resolve(values.root);
     const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"));
@@ -332,6 +409,22 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     throw new Error(`Unknown command: ${positionals.join(" ")}`);
   }
   return 0;
+}
+
+async function writeOrPrint(path, document) {
+  const serialized = `${JSON.stringify(document, null, 2)}\n`;
+  if (!path) {
+    process.stdout.write(serialized);
+    return;
+  }
+  const { writeFile } = await import("node:fs/promises");
+  await writeFile(path, serialized, "utf8");
+  console.log(`Wrote ${path}`);
+}
+
+function ignoreMissing(error) {
+  if (error.code === "ENOENT") return undefined;
+  throw error;
 }
 
 async function diagnose(root) {

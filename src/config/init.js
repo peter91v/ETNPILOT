@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import YAML from "yaml";
 
 const DEFAULT_CONFIG = `version: 1
 defaultProvider: github-copilot
@@ -35,12 +36,23 @@ git:
     # Required once enabled: only these GitLab users may start a run.
     allowedUsers: []
     fetchBeforeRun: true
+    # Wait for the merge-request pipeline and report its verdict back.
+    awaitPipeline: false
+    pipelineTimeoutMs: 900000
+    approvals:
+      # 'inbox' decides through the CLI; 'gitlab' also accepts
+      # '/etnpilot approve <id>' comments from allowedApprovers.
+      source: inbox
+      allowedApprovers: []
+      pollIntervalMs: 5000
     allowConfidential: false
     publish: false
     syncStatus: true
     comment: false
 queue:
   database: .etnpilot/state/workflows.sqlite
+  # More workers let an issue proceed while another waits for approval.
+  workers: 1
   pollIntervalMs: 500
   leaseMs: 30000
   retryDelayMs: 5000
@@ -148,6 +160,27 @@ checks:
   # Checks run agent-authored code. They inherit only these variables, so
   # repository and provider credentials stay out of their environment.
   envAllow: []
+supplyChain:
+  # Optional gates. With no licenses configured nothing is enforced.
+  licenses:
+    allow: []
+    deny: []
+  packages:
+    deny: []
+  secretScan:
+    # Fingerprints of reviewed false positives, from 'etnpilot scan secrets'.
+    allow: []
+sandbox:
+  # Runs checks and approved commands in a disposable container. Requires a
+  # local container runtime; the run fails rather than silently using the host.
+  enabled: false
+  runtime: docker
+  image: node:24-bookworm-slim
+  network: none
+  readOnlyRoot: true
+  workdir: /workspace
+  # Reuse the image a .devcontainer/devcontainer.json already names.
+  useDevcontainerImage: false
 workspace:
   mode: worktree
   cleanup: never
@@ -195,7 +228,41 @@ by a human, so explain what you intend to do and why. Report what you verified
 and what remains uncertain; never claim a check passed that you did not run.
 `;
 
-export async function initializeProject(root) {
+// Templates are overrides on the documented default, applied through the YAML
+// document so the explanatory comments survive.
+export const PROJECT_TEMPLATES = Object.freeze({
+  default: {},
+  minimal: {
+    "codegraph.enabled": false,
+    "observability.enabled": false,
+    "content.provenance.mode": "off",
+  },
+  regulated: {
+    "receipts.signing.enabled": true,
+    "sandbox.enabled": true,
+    "workspace.cleanup": "after-publish",
+    "queue.workers": 2,
+    "git.issueTrigger.approvals.source": "gitlab",
+    "git.issueTrigger.awaitPipeline": true,
+    "supplyChain.licenses.allow": ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC"],
+  },
+});
+
+export function renderProjectConfig(template = "default") {
+  const overrides = PROJECT_TEMPLATES[template];
+  if (!overrides) {
+    throw new Error(`Unknown project template '${template}'. Available: ${Object.keys(PROJECT_TEMPLATES).join(", ")}.`);
+  }
+  if (Object.keys(overrides).length === 0) return DEFAULT_CONFIG;
+  const document = YAML.parseDocument(DEFAULT_CONFIG);
+  for (const [path, value] of Object.entries(overrides)) {
+    document.setIn(path.split("."), value);
+  }
+  return String(document);
+}
+
+export async function initializeProject(root, { template = "default" } = {}) {
+  const config = renderProjectConfig(template);
   const configDir = join(root, ".etnpilot");
   await Promise.all([
     mkdir(join(configDir, "agents"), { recursive: true }),
@@ -207,14 +274,14 @@ export async function initializeProject(root) {
     mkdir(join(configDir, "worktrees"), { recursive: true }),
   ]);
   await Promise.all([
-    writeIfAbsent(join(configDir, "etnpilot.yaml"), DEFAULT_CONFIG),
+    writeIfAbsent(join(configDir, "etnpilot.yaml"), config),
     writeIfAbsent(join(configDir, ".gitignore"), DEFAULT_IGNORE),
     // A runnable starting point: without an agent manifest the first run has
     // nothing to execute.
     writeIfAbsent(join(configDir, "agents", "orchestrator.yaml"), STARTER_AGENT),
     writeIfAbsent(join(configDir, "prompts", "orchestrator.md"), STARTER_PROMPT),
   ]);
-  return { root, configDir };
+  return { root, configDir, template };
 }
 
 async function writeIfAbsent(path, content) {

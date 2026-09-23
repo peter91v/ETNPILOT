@@ -1,5 +1,6 @@
 import { git } from "../git/command.js";
 import { runProject } from "../runtime/project-runner.js";
+import { waitForPipeline } from "./pipelines.js";
 
 export class GitLabIssueTrigger {
   constructor({
@@ -84,21 +85,25 @@ export class GitLabIssueTrigger {
         receiptHash: result.receiptHash,
         receiptProof: result.receiptProof,
       });
+      const pipeline = await this.#awaitPipeline(project, result, execution.signal);
       const resultUrl = result.mergeRequest?.web_url ?? targetUrl;
       await this.#syncStatus(project, baseSha, {
-        state: "success",
+        state: pipeline?.status === "failed" ? "failed" : "success",
         name: statusName,
-        description: `ETNPilot completed issue #${issue.iid}.`,
+        description: pipeline?.status === "failed"
+          ? `ETNPilot published issue #${issue.iid}, but its pipeline failed.`
+          : `ETNPilot completed issue #${issue.iid}.`,
         ref,
-        targetUrl: resultUrl,
+        targetUrl: pipeline?.webUrl ?? resultUrl,
       });
-      await this.#comment(project, issue.iid, completionNote(result, deliveryId));
+      await this.#comment(project, issue.iid, completionNote(result, deliveryId, pipeline));
       await execution.checkpoint?.({ phase: "gitlab-finalized" });
       return {
         runId: result.runId,
         receiptHash: result.receiptHash,
         receiptProof: result.receiptProof,
         mergeRequest: result.mergeRequest?.web_url,
+        ...(pipeline ? { pipeline } : {}),
         status: "succeeded",
       };
     } catch (error) {
@@ -130,6 +135,26 @@ export class GitLabIssueTrigger {
     }
   }
 
+  // The run reports its own result; this reads the project's verdict back so
+  // a published change is not called finished while its pipeline is red.
+  async #awaitPipeline(project, result, signal) {
+    const branch = result.mergeRequest ? result.workspace?.branch : undefined;
+    if (this.trigger.awaitPipeline !== true || !branch) return undefined;
+    try {
+      return await waitForPipeline({
+        client: this.client,
+        project,
+        ref: branch,
+        timeoutMs: this.trigger.pipelineTimeoutMs ?? 15 * 60_000,
+        pollIntervalMs: this.trigger.pipelinePollIntervalMs ?? 15_000,
+        signal,
+      });
+    } catch (error) {
+      this.onSyncError(error);
+      return undefined;
+    }
+  }
+
   async #syncStatus(project, sha, status) {
     if (this.trigger.syncStatus === false) return;
     await this.client.setCommitStatus(project, sha, status).catch((error) => this.onSyncError(error));
@@ -155,7 +180,7 @@ export function formatIssueTask(payload) {
   ].join("\n");
 }
 
-function completionNote(result, deliveryId) {
+function completionNote(result, deliveryId, pipeline) {
   const lines = [
     `ETNPilot completed delivery \`${deliveryId}\` as run \`${result.runId}\`.`,
     `Verification receipt: \`${result.receiptHash}\`.`,
@@ -165,5 +190,12 @@ function completionNote(result, deliveryId) {
   }
   if (result.mergeRequest?.web_url) lines.push(`Draft merge request: ${result.mergeRequest.web_url}`);
   else lines.push("Publishing was disabled; the run workspace was retained according to cleanup policy.");
+  if (pipeline?.status) {
+    lines.push(pipeline.settled
+      ? `Pipeline ${pipeline.status}: ${pipeline.webUrl ?? "no URL reported"}`
+      : `Pipeline still ${pipeline.status} when ETNPilot stopped waiting (${pipeline.reason}).`);
+  } else if (pipeline) {
+    lines.push(`No pipeline was observed for this branch (${pipeline.reason}).`);
+  }
   return lines.join("\n\n");
 }

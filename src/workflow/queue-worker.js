@@ -1,6 +1,49 @@
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 
+// One pending approval blocks only its own worker. Claims are atomic in the
+// queue, so workers never take the same job.
+export class WorkflowQueueWorkerPool {
+  constructor({ workers = 1, ...options } = {}) {
+    if (!Number.isInteger(workers) || workers < 1) throw new TypeError("workers must be a positive integer.");
+    this.workers = Array.from({ length: workers }, (_, index) => new WorkflowQueueWorker({
+      ...options,
+      workerId: options.workerId ? `${options.workerId}-${index + 1}` : undefined,
+    }));
+  }
+
+  start() {
+    for (const worker of this.workers) worker.start();
+    return this;
+  }
+
+  wake() {
+    for (const worker of this.workers) worker.wake();
+  }
+
+  async waitForIdle({ timeoutMs = 30_000 } = {}) {
+    const [first] = this.workers;
+    const startedAt = Date.now();
+    for (;;) {
+      const counts = first.queue.counts();
+      if (activeJobCount(counts) === 0) return counts;
+      if (Date.now() - startedAt >= timeoutMs) {
+        throw new Error("Timed out waiting for the workflow queue to become idle.");
+      }
+      this.wake();
+      await delay(Math.min(first.pollIntervalMs, 50));
+    }
+  }
+
+  async stop() {
+    await Promise.all(this.workers.map((worker) => worker.stop()));
+  }
+
+  get activeJobIds() {
+    return this.workers.map((worker) => worker.activeJobId).filter(Boolean);
+  }
+}
+
 export class WorkflowQueueWorker {
   constructor({
     queue,
@@ -44,9 +87,7 @@ export class WorkflowQueueWorker {
     const startedAt = Date.now();
     while (true) {
       const counts = this.queue.counts();
-      const active = (counts.queued ?? 0) + (counts.retry_scheduled ?? 0)
-        + (counts.running ?? 0) + (counts.cancel_requested ?? 0);
-      if (active === 0) return counts;
+      if (activeJobCount(counts) === 0) return counts;
       if (Date.now() - startedAt >= timeoutMs) throw new Error("Timed out waiting for the workflow queue to become idle.");
       this.wake();
       await delay(Math.min(this.pollIntervalMs, 50));
@@ -138,4 +179,9 @@ export class WorkflowQueueWorker {
       // Error observers must not terminate the durable worker loop.
     }
   }
+}
+
+function activeJobCount(counts) {
+  return (counts.queued ?? 0) + (counts.retry_scheduled ?? 0)
+    + (counts.running ?? 0) + (counts.cancel_requested ?? 0);
 }

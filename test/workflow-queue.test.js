@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { WorkflowQueue, WorkflowQueueStateError } from "../src/workflow/queue.js";
-import { WorkflowQueueWorker } from "../src/workflow/queue-worker.js";
+import { setTimeout as delay } from "node:timers/promises";
+import { WorkflowQueueWorker, WorkflowQueueWorkerPool } from "../src/workflow/queue-worker.js";
 
 test("workflow queue deduplicates deliveries and atomically leases one job", async () => {
   const root = await mkdtemp(join(tmpdir(), "etnpilot-queue-atomic-"));
@@ -159,6 +160,83 @@ test("cancel requests propagate to a running worker", async () => {
     assert.equal(queue.get(job.id).status, "canceled");
   } finally {
     await worker.stop();
+    queue.close();
+  }
+});
+
+test("a worker pool runs independent jobs while one waits for approval", async () => {
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-queue-pool-"));
+  const queue = new WorkflowQueue(join(root, "queue.sqlite"));
+  const started = [];
+  let releaseBlocked;
+  let blockedStarted;
+  const blocked = new Promise((release) => { releaseBlocked = release; });
+  const startedSignal = new Promise((signal) => { blockedStarted = signal; });
+  const pool = new WorkflowQueueWorkerPool({
+    queue,
+    workers: 2,
+    pollIntervalMs: 10,
+    leaseMs: 1000,
+    execute: async (job) => {
+      started.push(job.deliveryId);
+      if (job.deliveryId === "blocking") {
+        blockedStarted();
+        await blocked;
+      }
+      return { done: job.deliveryId };
+    },
+  }).start();
+
+  try {
+    queue.enqueue({ kind: "gitlab-issue", deliveryId: "blocking", payload: {} });
+    await startedSignal;
+    queue.enqueue({ kind: "gitlab-issue", deliveryId: "independent", payload: {} });
+    pool.wake();
+
+    // The second job finishes while the first is still waiting on its approval.
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      if (queue.getByDeliveryId("independent")?.status === "succeeded") break;
+      await delay(10);
+    }
+    assert.equal(queue.getByDeliveryId("independent").status, "succeeded");
+    assert.equal(queue.getByDeliveryId("blocking").status, "running");
+
+    releaseBlocked();
+    await pool.waitForIdle({ timeoutMs: 5000 });
+    assert.equal(queue.getByDeliveryId("blocking").status, "succeeded");
+    assert.deepEqual([...started].sort(), ["blocking", "independent"]);
+  } finally {
+    await pool.stop();
+    queue.close();
+  }
+});
+
+test("a single worker still serializes jobs", async () => {
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-queue-single-"));
+  const queue = new WorkflowQueue(join(root, "queue.sqlite"));
+  let concurrent = 0;
+  let peak = 0;
+  const pool = new WorkflowQueueWorkerPool({
+    queue,
+    pollIntervalMs: 10,
+    leaseMs: 1000,
+    execute: async () => {
+      concurrent += 1;
+      peak = Math.max(peak, concurrent);
+      await delay(20);
+      concurrent -= 1;
+      return {};
+    },
+  }).start();
+
+  try {
+    queue.enqueue({ kind: "gitlab-issue", deliveryId: "one", payload: {} });
+    queue.enqueue({ kind: "gitlab-issue", deliveryId: "two", payload: {} });
+    pool.wake();
+    await pool.waitForIdle({ timeoutMs: 5000 });
+    assert.equal(peak, 1);
+  } finally {
+    await pool.stop();
     queue.close();
   }
 });

@@ -1,4 +1,5 @@
-import { isAbsolute, relative, resolve } from "node:path";
+import { realpathSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 const OPERATION_EFFECTS = new Set(["allow", "human", "deny"]);
 const PROVIDER_EFFECTS = new Set(["allow", "deny"]);
@@ -10,8 +11,12 @@ const RULE_ID = /^[a-z0-9][a-z0-9._-]*$/i;
 const CASE_INSENSITIVE_FILESYSTEM = process.platform === "darwin" || process.platform === "win32";
 
 export class PolicyEngine {
-  constructor(config = {}, { caseInsensitivePaths = CASE_INSENSITIVE_FILESYSTEM } = {}) {
+  constructor(config = {}, {
+    caseInsensitivePaths = CASE_INSENSITIVE_FILESYSTEM,
+    resolveSymlinks = true,
+  } = {}) {
     this.caseInsensitivePaths = caseInsensitivePaths === true;
+    this.resolveSymlinks = resolveSymlinks !== false;
     if (!config || Array.isArray(config) || typeof config !== "object") {
       throw new TypeError("Policy configuration must be an object.");
     }
@@ -37,7 +42,9 @@ export class PolicyEngine {
 
   evaluateOperation(request = {}, context = {}) {
     if (!this.operations) return undefined;
-    const path = normalizeRequestPath(request.fileName ?? request.path, context.workspace);
+    const path = normalizeRequestPath(request.fileName ?? request.path, context.workspace, {
+      resolveSymlinks: this.resolveSymlinks,
+    });
     const host = request.url === undefined ? request.host : parseHost(request.url);
     const facts = {
       kinds: stringValue(request.kind),
@@ -141,12 +148,12 @@ function policyReason(subject, match) {
     : `${subject} is denied by policy rule '${match.id}'.`;
 }
 
-function normalizeRequestPath(value, workspace) {
+function normalizeRequestPath(value, workspace, { resolveSymlinks = true } = {}) {
   if (typeof value !== "string" || value.length === 0) return { value: undefined, outside: false };
   const root = workspace ? resolve(workspace) : undefined;
   if (isAbsolute(value)) {
     if (!root) return { value: undefined, outside: true };
-    return relativePath(root, value);
+    return relativePath(root, value, resolveSymlinks);
   }
   if (!root) {
     const normalized = value.replaceAll("\\", "/").replace(/^\.\//, "");
@@ -154,13 +161,36 @@ function normalizeRequestPath(value, workspace) {
       ? { value: undefined, outside: true }
       : { value: normalized, outside: false };
   }
-  return relativePath(root, resolve(root, value));
+  return relativePath(root, resolve(root, value), resolveSymlinks);
 }
 
-function relativePath(root, path) {
-  const candidate = relative(root, resolve(path)).replaceAll("\\", "/");
+function relativePath(root, path, resolveSymlinks = true) {
+  // A link inside the workspace can point anywhere, so rules are matched
+  // against the real target. A target outside the workspace matches no path
+  // rule and therefore falls through to the section default.
+  const realRoot = resolveSymlinks ? realPath(root) : root;
+  const realPathValue = resolveSymlinks ? realPath(path) : path;
+  const candidate = relative(realRoot, resolve(realPathValue)).replaceAll("\\", "/");
   const outside = candidate === ".." || candidate.startsWith("../") || isAbsolute(candidate);
   return { value: outside ? undefined : (candidate || "."), outside };
+}
+
+// Resolves the deepest existing ancestor, so a path that does not exist yet
+// (a file about to be written) is still checked through its real parents.
+function realPath(path) {
+  const segments = [];
+  let current = resolve(path);
+  for (;;) {
+    try {
+      return segments.length === 0 ? realpathSync(current) : join(realpathSync(current), ...segments);
+    } catch (error) {
+      if (error.code !== "ENOENT" && error.code !== "ENOTDIR") return path;
+      const parent = dirname(current);
+      if (parent === current) return path;
+      segments.unshift(basename(current));
+      current = parent;
+    }
+  }
 }
 
 function parseHost(value) {

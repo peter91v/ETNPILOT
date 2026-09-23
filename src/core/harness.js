@@ -3,8 +3,22 @@ import { EventBus } from "./events.js";
 import { Registry } from "./registry.js";
 import { telemetryProviderAttributes } from "../observability/telemetry.js";
 
+const DEFAULT_MAX_SUBAGENT_DEPTH = 4;
+
 export class Harness {
-  constructor({ approvalPolicy, approvalHandler, receiptStore, policy, telemetry, secrets } = {}) {
+  constructor({
+    approvalPolicy,
+    approvalHandler,
+    receiptStore,
+    policy,
+    telemetry,
+    secrets,
+    maxSubagentDepth = DEFAULT_MAX_SUBAGENT_DEPTH,
+  } = {}) {
+    if (!Number.isInteger(maxSubagentDepth) || maxSubagentDepth < 1) {
+      throw new TypeError("maxSubagentDepth must be a positive integer.");
+    }
+    this.maxSubagentDepth = maxSubagentDepth;
     this.events = new EventBus();
     this.providers = new Registry("provider");
     this.plugins = new Registry("plugin");
@@ -77,7 +91,7 @@ export class Harness {
     return agent;
   }
 
-  async run({ agent: agentName, input, parentRunId, metadata = {}, signal }) {
+  async run({ agent: agentName, input, parentRunId, metadata = {}, signal, ancestry = [] }) {
     signal?.throwIfAborted();
     const agent = this.agents.get(agentName);
     const runId = randomUUID();
@@ -112,10 +126,22 @@ export class Harness {
           if (!agent.subagents.includes(subagent)) {
             throw new Error(`Agent '${agentName}' may not spawn '${subagent}'.`);
           }
+          // Mutually referencing manifests would otherwise recurse until the
+          // process runs out of memory, spending provider budget on the way.
+          const chain = [...ancestry, agentName];
+          if (chain.includes(subagent)) {
+            throw new Error(`Subagent cycle detected: ${[...chain, subagent].join(" -> ")}.`);
+          }
+          if (chain.length >= this.maxSubagentDepth) {
+            throw new Error(
+              `Subagent depth limit of ${this.maxSubagentDepth} reached: ${[...chain, subagent].join(" -> ")}.`,
+            );
+          }
           return this.run({
             agent: subagent,
             input: subInput,
             parentRunId: runId,
+            ancestry: chain,
             metadata: {
               ...metadata,
               ...(runSpan ? { traceId: runSpan.traceId, parentSpanId: runSpan.spanId } : {}),

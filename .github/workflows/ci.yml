@@ -22,3 +22,5 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      - run: node bin/etnpilot.js scan secrets
+      - run: node bin/etnpilot.js deps check

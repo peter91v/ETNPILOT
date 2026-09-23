@@ -93,3 +93,48 @@ test("policy paths can be matched without case sensitivity", () => {
   assert.equal(insensitive.evaluateOperation(request).kind, "reject");
   assert.equal(insensitive.evaluateOperation({ kind: "read", fileName: "keys/signing.pem" }).kind, "reject");
 });
+
+test("policy follows symbolic links before matching paths", async (t) => {
+  const { mkdtemp, mkdir, writeFile, symlink } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+
+  const workspace = await mkdtemp(join(tmpdir(), "etnpilot-policy-links-"));
+  const outside = await mkdtemp(join(tmpdir(), "etnpilot-policy-outside-"));
+  await mkdir(join(workspace, "src"), { recursive: true });
+  await writeFile(join(workspace, "secret.pem"), "key\n");
+  await writeFile(join(outside, "elsewhere.txt"), "data\n");
+  await symlink(join(workspace, "secret.pem"), join(workspace, "src", "innocent.txt"));
+  await symlink(outside, join(workspace, "src", "escape"));
+
+  const policy = new PolicyEngine({
+    operations: {
+      default: "deny",
+      rules: [
+        { id: "protect-keys", effect: "deny", kinds: ["read", "write"], paths: ["**/*.pem"] },
+        { id: "read-src", effect: "allow", kinds: ["read"], paths: ["src/**"] },
+      ],
+    },
+  });
+  const decide = (fileName) => policy.evaluateOperation({ kind: "read", fileName }, { workspace });
+
+  // A link under src/ that resolves to the protected key is denied.
+  assert.equal(decide("src/innocent.txt").kind, "reject");
+  assert.equal(decide("src/innocent.txt").policy.rule, "protect-keys");
+  // A link that leaves the workspace matches no path rule, so the default applies.
+  assert.equal(decide("src/escape/elsewhere.txt").kind, "reject");
+  // A file that does not exist yet is still judged through its real parents.
+  assert.equal(decide("src/new-file.txt").kind, "approve-once");
+
+  const lexical = new PolicyEngine({
+    operations: {
+      default: "deny",
+      rules: [
+        { id: "protect-keys", effect: "deny", kinds: ["read", "write"], paths: ["**/*.pem"] },
+        { id: "read-src", effect: "allow", kinds: ["read"], paths: ["src/**"] },
+      ],
+    },
+  }, { resolveSymlinks: false });
+  assert.equal(lexical.evaluateOperation({ kind: "read", fileName: "src/innocent.txt" }, { workspace }).kind, "approve-once");
+  t.diagnostic("symlink resolution turns a bypass into a denial");
+});

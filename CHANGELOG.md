@@ -6,6 +6,50 @@ pre-1.0, so breaking changes may appear in any release.
 
 ## [Unreleased]
 
+### Added — roadmap M4 and M5
+
+- Policy resolves symbolic links before matching paths, so a link created
+  during a run cannot point an allowed path at a protected file.
+- The OpenAI-compatible adapter has a bounded tool loop with mediated
+  workspace tools (`read_file`, `list_files`, `write_file`, `run_command`),
+  so a second provider can edit code. `run_command` takes argv, never a shell
+  string.
+- The workflow queue runs a pool of workers, so one pending approval no longer
+  blocks every other issue (`queue.workers`).
+- A disposable container sandbox runs checks and approved commands with no
+  network and a read-only root, optionally reusing a devcontainer image. A
+  missing runtime fails the run rather than downgrading to host execution.
+- Approvals can be given as GitLab comments, with the identity GitLab reports
+  for the note author. Decisions still land in the durable inbox.
+- `--dry-run` evaluates policy and records what it would have decided without
+  changing anything; `--record-fixtures` and `--fixtures` record and replay
+  redacted provider answers, which also makes runs offline and deterministic;
+  `etnpilot replay` re-runs a receipt's checks and reports drift.
+- A `quorum` workflow step requires independent reviewers to agree, counting
+  at most one approval per provider.
+- Supply-chain gates: `etnpilot deps check` (licenses with SPDX OR/AND
+  semantics, denied packages), `etnpilot sbom` (CycloneDX), `etnpilot scan
+  secrets`, and `etnpilot attest` (in-toto/SLSA provenance from a receipt).
+  Both CI pipelines run the scan and the dependency gate.
+- Every worktree run rehearses the merge into its target branch with
+  `git merge-tree`; a conflicting branch is not published by default.
+- `etnpilot init --template minimal|regulated`, `etnpilot pipeline status`.
+
+### Fixed — first-run experience
+
+- Enabling receipt signing without a key reported a raw ENOENT. It now names
+  the missing file and the two ways out.
+
+### Fixed — audit of the completed milestones
+
+- Subagent spawning had no depth limit or cycle detection, so mutually
+  referencing manifests recursed until the process died.
+- The OpenAI-compatible adapter dropped agent skills from its system message.
+- `pipelines()` was dead code, so "pipeline status synchronization" only ever
+  pushed statuses to GitLab and never read its verdict back. The issue trigger
+  can now wait for the merge-request pipeline and turn its commit status red
+  when CI disagrees.
+
 ### Fixed
 
 - A workflow that ends in `failed` is no longer published as a merge request,
