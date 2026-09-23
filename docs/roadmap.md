@@ -81,9 +81,13 @@ Every surface should be able to do everything; none of them is the junior one.
 - [x] The policy reason recorded with each approval, not only in the receipt
 - [x] Local settings layer: a user's changes stay local, only defaults are committed
 - [x] Editing settings, policy included, from the TUI
-- [ ] Editing settings from the page and the app
 - [x] Starting a run from the TUI, deciding its approvals in the same window
+- [ ] Editing settings from the page and the app
 - [ ] Starting a run from the page and the app
+- [ ] The remaining CLI commands from every surface
+
+The surfaces have a roadmap of their own, with exact steps, file paths and
+acceptance criteria: [roadmap-ui.md](roadmap-ui.md).
 
 ## Brainstorming backlog
 
