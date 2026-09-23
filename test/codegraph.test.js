@@ -1,65 +1,74 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, unlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
-import { CodeGraph } from "../src/codegraph/codegraph.js";
+import {
+  CodeGraph,
+  createCodeGraphMcpServer,
+  isCodeGraphSourcePath,
+} from "../src/codegraph/codegraph.js";
 
-test("codegraph indexes symbols and resolves internal imports", async () => {
-  const root = await mkdtemp(join(tmpdir(), "etnpilot-graph-"));
-  await mkdir(join(root, "src"));
-  await writeFile(join(root, "src", "a.js"), "import { b } from './b.js';\nexport function a() { return b; }\n");
-  await writeFile(join(root, "src", "b.js"), "export const b = 42;\n");
-  const graph = new CodeGraph(join(root, ".etnpilot", "state", "graph.sqlite"));
+test("CodeGraph indexes multiple languages through the upstream engine", async () => {
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-codegraph-languages-"));
+  await Promise.all([
+    writeFile(join(root, "service.py"), "def python_service():\n    return 1\n"),
+    writeFile(join(root, "service.go"), "package sample\nfunc GoService() int { return 1 }\n"),
+    writeFile(join(root, "Service.java"), "final class Service { int javaService() { return 1; } }\n"),
+    writeFile(join(root, "Service.cs"), "class Service { int CSharpService() { return 1; } }\n"),
+  ]);
+
+  const graph = new CodeGraph(root);
   try {
-    const result = await graph.indexDirectory(root);
-    assert.equal(result.files, 2);
-    assert.equal(result.indexed, 2);
-    assert.equal(result.resolvedEdges, 1);
-    assert.deepEqual(graph.dependencies("src/a.js"), [{
-      target: "./b.js",
-      targetPath: "src/b.js",
-      kind: "imports",
-      dangling: false,
-    }]);
-    assert.deepEqual(graph.dependents("src/b.js"), [{
-      source: "src/a.js",
-      target: "./b.js",
-      kind: "imports",
-      dangling: false,
-    }]);
-    assert.equal(graph.symbols("src/a.js")[0].name, "a");
-    assert.equal(graph.stats().schemaVersion, 2);
+    const result = await graph.indexDirectory();
+    assert.equal(result.initialized, true);
+    assert.equal(result.files, 4);
+    assert.deepEqual(result.languages, ["csharp", "go", "java", "python"]);
+    assert.ok(graph.symbols("service.py").some((symbol) => symbol.name === "python_service"));
+    assert.ok(graph.symbols("service.go").some((symbol) => symbol.name === "GoService"));
+    assert.ok(graph.symbols("Service.java").some((symbol) => symbol.name === "Service"));
+    assert.ok(graph.symbols("Service.cs").some((symbol) => symbol.name === "CSharpService"));
+    assert.equal(graph.stats().engine, "@colbymchenry/codegraph");
   } finally {
     graph.close();
   }
 });
 
-test("codegraph updates only changed files and calculates transitive test impact", async () => {
-  const root = await mkdtemp(join(tmpdir(), "etnpilot-impact-"));
+test("CodeGraph syncs changes and calculates transitive test impact", async () => {
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-codegraph-impact-"));
   await Promise.all([
     mkdir(join(root, "src"), { recursive: true }),
     mkdir(join(root, "test"), { recursive: true }),
   ]);
   await writeFile(join(root, "src", "c.ts"), "export const c = 1;\n");
-  await writeFile(join(root, "src", "b.ts"), "import { c } from './c.js';\nexport const b = c;\n");
+  await writeFile(join(root, "src", "b.ts"), "import { c } from './c';\nexport const b = c;\n");
   await writeFile(join(root, "src", "a.ts"), "import { b } from './b';\nexport const a = b;\n");
   await writeFile(join(root, "test", "a.test.ts"), "import { a } from '../src/a';\nvoid a;\n");
-  const graph = new CodeGraph(join(root, ".etnpilot", "state", "graph.sqlite"));
-  try {
-    const first = await graph.indexDirectory(root);
-    assert.equal(first.indexed, 4);
-    assert.equal(first.resolvedEdges, 3);
 
-    const second = await graph.indexDirectory(root);
+  const graph = new CodeGraph(root);
+  try {
+    const first = await graph.indexDirectory();
+    assert.equal(first.indexed, 4);
+    assert.deepEqual(graph.dependencies("src/a.ts"), [{
+      target: "src/b.ts",
+      targetPath: "src/b.ts",
+      kind: "imports",
+      dangling: false,
+    }]);
+    assert.deepEqual(graph.dependents("src/b.ts"), [{
+      source: "src/a.ts",
+      target: "src/b.ts",
+      kind: "imports",
+      dangling: false,
+    }]);
+
+    const second = await graph.indexDirectory();
+    assert.equal(second.operation, "sync");
     assert.equal(second.indexed, 0);
-    assert.equal(second.unchanged, 4);
 
     await writeFile(join(root, "src", "c.ts"), "export const c = 1000;\n");
-    const third = await graph.indexDirectory(root);
+    const third = await graph.indexDirectory();
     assert.equal(third.indexed, 1);
-    assert.equal(third.unchanged, 3);
 
     const impact = graph.impact(["src/c.ts"]);
     assert.deepEqual(impact.files.map(({ path, depth }) => ({ path, depth })), [
@@ -73,52 +82,32 @@ test("codegraph updates only changed files and calculates transitive test impact
       graph.impact(["src/c.ts"], { maxDepth: 1 }).files.map((entry) => entry.path),
       ["src/c.ts", "src/b.ts"],
     );
-
-    await unlink(join(root, "src", "c.ts"));
-    const fourth = await graph.indexDirectory(root);
-    assert.equal(fourth.deleted, 1);
-    assert.equal(graph.dependencies("src/b.ts")[0].targetPath, "src/c.ts");
-    assert.equal(graph.stats().brokenEdges, 1);
-    assert.deepEqual(graph.impact(["src/c.ts"]).tests.map((entry) => entry.path), ["test/a.test.ts"]);
-
-    // The edge to a deleted file is retained so impact analysis still answers
-    // "who depended on this?", but every query must mark it as dangling.
-    assert.equal(graph.dependencies("src/b.ts")[0].dangling, true);
-    assert.equal(graph.dependents("src/c.ts")[0].dangling, true);
-    const afterDelete = graph.impact(["src/c.ts"]);
-    assert.deepEqual(
-      afterDelete.files.map(({ path, dangling }) => ({ path, dangling })),
-      [
-        { path: "src/c.ts", dangling: true },
-        { path: "src/b.ts", dangling: false },
-        { path: "src/a.ts", dangling: false },
-        { path: "test/a.test.ts", dangling: false },
-      ],
-    );
   } finally {
     graph.close();
   }
 });
 
-test("codegraph migrates the legacy edge schema", async () => {
-  const root = await mkdtemp(join(tmpdir(), "etnpilot-graph-migration-"));
-  const databasePath = join(root, "graph.sqlite");
-  const legacy = new DatabaseSync(databasePath);
-  legacy.exec(`
-    CREATE TABLE edges (
-      source_path TEXT NOT NULL,
-      target TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      UNIQUE(source_path, target, kind)
-    );
-  `);
-  legacy.close();
-  const graph = new CodeGraph(databasePath);
-  try {
-    const columns = graph.database.prepare("PRAGMA table_info(edges)").all().map((column) => column.name);
-    assert.ok(columns.includes("target_path"));
-    assert.equal(graph.stats().schemaVersion, 2);
-  } finally {
-    graph.close();
+test("CodeGraph MCP configuration is local, bounded, and read-only by default", () => {
+  const root = "/tmp/project";
+  const server = createCodeGraphMcpServer(root, { startupTimeoutMs: 1234 });
+  assert.equal(server.type, "local");
+  assert.equal(server.command, process.execPath);
+  assert.deepEqual(server.args.slice(-4), ["serve", "--mcp", "--path", root]);
+  assert.deepEqual(server.tools, ["codegraph_explore"]);
+  assert.equal(server.timeout, 1234);
+  assert.deepEqual(server.env, {
+    CODEGRAPH_TELEMETRY: "0",
+    CODEGRAPH_NO_UPDATE_CHECK: "1",
+  });
+  assert.throws(
+    () => createCodeGraphMcpServer(root, { tools: ["filesystem_read"] }),
+    /CodeGraph MCP tool names/,
+  );
+});
+
+test("CodeGraph source detection covers the supported workflow languages", () => {
+  for (const path of ["a.py", "a.go", "A.java", "A.cs", "a.rs", "a.php", "a.swift", "a.tsx"]) {
+    assert.equal(isCodeGraphSourcePath(path), true, path);
   }
+  assert.equal(isCodeGraphSourcePath("README.md"), false);
 });

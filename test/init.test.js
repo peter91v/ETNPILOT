@@ -20,7 +20,7 @@ test("init keeps run state and worktrees out of the repository", async () => {
   assert.match(ignore, /^secrets\/$/m);
 
   await writeFile(join(root, ".etnpilot", "state", "run.jsonl"), "{}\n");
-  await writeFile(join(root, ".etnpilot", "state", "codegraph.sqlite"), "");
+  await writeFile(join(root, ".etnpilot", "state", "cache.sqlite"), "");
   const status = await git(["status", "--porcelain"], { cwd: root });
   assert.equal(status.stdout.includes(".etnpilot/state"), false, status.stdout);
 
@@ -33,6 +33,8 @@ test("init keeps run state and worktrees out of the repository", async () => {
   assert.equal(config.observability.otlp.enabled, false);
   assert.equal(config.pluginIsolation.memoryMb, 128);
   assert.equal(config.pluginIsolation.callTimeoutMs, 30000);
+  assert.equal(config.codegraph.enabled, true);
+  assert.deepEqual(config.codegraph.tools, ["codegraph_explore"]);
 });
 
 test("init never overwrites an existing configuration", async () => {

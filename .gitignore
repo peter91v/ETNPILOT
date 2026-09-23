@@ -1,4 +1,5 @@
 node_modules/
+.codegraph/
 .etnpilot/state/
 .etnpilot/worktrees/
 *.sqlite

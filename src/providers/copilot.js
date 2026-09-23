@@ -33,8 +33,9 @@ export function createCopilotProvider(options = {}) {
           model: context.agent.model ?? options.model ?? "auto",
           workingDirectory: options.workingDirectory ?? process.cwd(),
           systemMessage: buildSystemMessage(context),
+          ...(options.mcpServers ? { mcpServers: options.mcpServers } : {}),
           onPermissionRequest: async (request) => {
-            const decision = await context.approve(request);
+            const decision = await context.approve(normalizePermissionRequest(request, options.readOnlyMcpTools));
             if (decision.kind === "approve-once") return decision;
             if (decision.kind === "human-required") return { kind: "no-result" };
             return { kind: "reject", feedback: decision.reason ?? "Denied by ETNPilot policy." };
@@ -76,6 +77,11 @@ export function createCopilotProvider(options = {}) {
       }
     },
   };
+}
+
+function normalizePermissionRequest(request, readOnlyTools = []) {
+  if (request?.kind !== "mcp" || !readOnlyTools.includes(request.toolName)) return request;
+  return { ...request, kind: "read", path: request.path ?? ".", sourceKind: "mcp" };
 }
 
 function number(value) {

@@ -1,6 +1,6 @@
 # ETNPilot
 
-ETNPilot is a GitLab-first, provider-neutral harness for auditable software-engineering agents. It combines isolated Git worktrees, explicit human approvals, content-addressed receipts, reusable agents, skills, prompts, plugins, and an embedded SQLite code graph.
+ETNPilot is a GitLab-first, provider-neutral harness for auditable software-engineering agents. It combines isolated Git worktrees, explicit human approvals, content-addressed receipts, reusable agents, skills, prompts, plugins, and local [CodeGraph](https://github.com/colbymchenry/codegraph) code intelligence.
 
 ## Status
 
@@ -12,7 +12,7 @@ The repository is in early development. The first runnable vertical slice provid
 - conservative approval policy hooks and proof-carrying JSONL receipts;
 - isolated Git worktrees without shell interpolation;
 - a client for self-hosted GitLab projects, branches, merge requests, notes, and pipelines;
-- an embedded SQLite code graph for JavaScript and TypeScript;
+- local CodeGraph indexing and MCP access across its supported languages;
 - `.etnpilot/` project initialization and GitHub/GitLab CI.
 - a dependency-aware workflow scheduler with retries, timeouts, concurrency limits, and fail-fast handling;
 - `etnpilot run` for isolated agent/check workflows with chained receipts;
@@ -51,7 +51,14 @@ fingerprint is written into signed receipts and GitLab evidence notes. See
 
 ## Code intelligence
 
-The embedded code graph incrementally indexes JavaScript and TypeScript files, resolves relative imports to project paths, and traverses reverse dependencies to estimate change impact:
+ETNPilot installs the existing `@colbymchenry/codegraph` package and initializes its local
+`.codegraph/` index. The same upstream engine supplies CLI evidence and the `codegraph_explore`
+tool exposed to GitHub Copilot over a local stdio MCP process. The default allow-list contains only
+that read-only exploration tool; the index and source stay on the machine.
+
+CodeGraph detects supported languages automatically, including TypeScript, JavaScript, Python, Go,
+Rust, Java, C#, PHP, Ruby, C/C++, Swift, Kotlin, Scala, Dart, Svelte, Vue, Astro, Lua, Terraform,
+and others. No language-specific ETNPilot parser configuration is required.
 
 ```bash
 etnpilot graph build .
@@ -62,11 +69,27 @@ etnpilot graph impact src/core/harness.js --depth 10
 etnpilot graph stats
 ```
 
-Dependency, dependent, and impact results carry a `dangling` flag. Edges to a deleted file are
-deliberately retained so impact analysis can still answer "what depended on this?", but the flag
-marks the target as no longer present in the index.
+`graph build` initializes the project on its first run and performs an incremental sync afterward.
+Every normal workflow builds or refreshes the index before the planning step, makes the local MCP
+tool available to agent sessions, and syncs again after execution. Changed source files, transitive
+consumers, and affected tests are written into the workflow receipt. Static analysis is evidence
+for review and test selection, not proof that unaffected files are safe.
 
-Every normal workflow updates the graph before and after execution. Changed source files, transitive consumers, and affected tests are written into the workflow receipt. Static analysis is evidence for review and test selection, not proof that unaffected files are safe.
+The generated configuration keeps upstream telemetry disabled by default and pins the MCP tool
+allow-list explicitly:
+
+```yaml
+codegraph:
+  enabled: true
+  autoIndex: true
+  maxImpactDepth: 20
+  startupTimeoutMs: 30000
+  tools: [codegraph_explore]
+```
+
+Set `enabled: false` when a project must run without code intelligence. ETNPilot uses the pinned
+platform bundle installed with its npm dependency, so repository configuration cannot replace the
+MCP executable. CodeGraph telemetry and update checks stay disabled in the managed MCP process.
 
 Run the configured workflow in an isolated worktree:
 
