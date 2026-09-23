@@ -35,6 +35,11 @@ pre-1.0, so breaking changes may appear in any release.
   `git merge-tree`; a conflicting branch is not published by default.
 - `etnpilot init --template minimal|regulated`, `etnpilot pipeline status`.
 
+### Fixed — first-run experience
+
+- Enabling receipt signing without a key reported a raw ENOENT. It now names
+  the missing file and the two ways out.
+
 ### Fixed — audit of the completed milestones
 
 - Subagent spawning had no depth limit or cycle detection, so mutually
