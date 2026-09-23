@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { loadConfig } from "../config/load.js";
 import { ApprovalInbox, createInboxApprovalHandler } from "../core/approval-inbox.js";
 import { WorkflowQueue } from "../workflow/queue.js";
-import { WorkflowQueueWorker } from "../workflow/queue-worker.js";
+import { WorkflowQueueWorkerPool } from "../workflow/queue-worker.js";
 import { createSecretResolver } from "../secrets/resolver.js";
 import { GitLabClient } from "./client.js";
 import { GitLabIssueTrigger } from "./issue-trigger.js";
@@ -74,8 +74,9 @@ export async function createGitLabWebhookServer({
     secretResolver: secrets,
     onSyncError: onError,
   });
-  const queueWorker = new WorkflowQueueWorker({
+  const queueWorker = new WorkflowQueueWorkerPool({
     queue: workflowQueue,
+    workers: queueConfig.workers ?? 1,
     pollIntervalMs: queueConfig.pollIntervalMs ?? 500,
     leaseMs: queueConfig.leaseMs ?? 30_000,
     retryDelayMs: queueConfig.retryDelayMs ?? 5_000,

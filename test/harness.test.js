@@ -89,3 +89,45 @@ test("a failing event listener neither fails the run nor adds a second receipt",
   assert.deepEqual(receipts.map((entry) => entry.status), ["succeeded"]);
   assert.deepEqual(listenerErrors, ["observer failed"]);
 });
+
+test("subagent recursion is bounded by cycle detection and a depth limit", async () => {
+  const harness = new Harness({ approvalPolicy: new ApprovalPolicy(), maxSubagentDepth: 3 });
+  harness.registerProvider({
+    name: "fake",
+    async invoke(context) {
+      const next = context.agent.subagents[0];
+      if (!next) return { text: "leaf" };
+      return { text: (await context.spawn(next, context.input)).result.text };
+    },
+  });
+  // A cycle: ping -> pong -> ping.
+  harness.registerAgent({ name: "ping", provider: "fake", prompt: "p", subagents: ["pong"] });
+  harness.registerAgent({ name: "pong", provider: "fake", prompt: "p", subagents: ["ping"] });
+  await assert.rejects(
+    () => harness.run({ agent: "ping", input: "go" }),
+    /Subagent cycle detected: ping -> pong -> ping\./,
+  );
+
+  // A chain longer than the configured depth, without any cycle.
+  for (const [name, child] of [["a", "b"], ["b", "c"], ["c", "d"], ["d", undefined]]) {
+    harness.registerAgent({ name, provider: "fake", prompt: "p", subagents: child ? [child] : [] });
+  }
+  await assert.rejects(
+    () => harness.run({ agent: "a", input: "go" }),
+    /Subagent depth limit of 3 reached: a -> b -> c -> d\./,
+  );
+
+  const shallow = new Harness({ approvalPolicy: new ApprovalPolicy(), maxSubagentDepth: 4 });
+  shallow.registerProvider({
+    name: "fake",
+    async invoke(context) {
+      const next = context.agent.subagents[0];
+      if (!next) return { text: "leaf" };
+      return { text: (await context.spawn(next, context.input)).result.text };
+    },
+  });
+  for (const [name, child] of [["a", "b"], ["b", "c"], ["c", "d"], ["d", undefined]]) {
+    shallow.registerAgent({ name, provider: "fake", prompt: "p", subagents: child ? [child] : [] });
+  }
+  assert.equal((await shallow.run({ agent: "a", input: "go" })).result.text, "leaf");
+});

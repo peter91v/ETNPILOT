@@ -27,6 +27,7 @@ export async function runProject({
   worktree,
   inPlace = false,
   baseRef,
+  dryRun = false,
   cleanupPolicy,
   publish = false,
   env = process.env,
@@ -49,8 +50,9 @@ export async function runProject({
   const worktreeManager = new WorktreeManager(repositoryRoot);
   const receiptPath = join(repositoryRoot, ".etnpilot", "state", "runs", `${runId}.jsonl`);
   const policy = new PolicyEngine(bootstrapConfig.policy);
+  if (dryRun && publish) throw new Error("A dry run cannot publish.");
   const harness = new Harness({
-    approvalPolicy: new ApprovalPolicy(bootstrapConfig.approval, { policy }),
+    approvalPolicy: new ApprovalPolicy(bootstrapConfig.approval, { policy, dryRun }),
     approvalHandler,
     policy,
     secrets,
@@ -173,6 +175,8 @@ export async function runProject({
         });
       }
       if (step.type === "check") {
+        // Checks execute commands, so a dry run records them instead.
+        if (dryRun) return { name: step.name ?? step.id, command: step.command, skipped: true, reason: "dry-run" };
         return runObservedCheck(step, {
           cwd: workspace.path,
           signal: execution.signal,
@@ -210,6 +214,7 @@ export async function runProject({
       type: "workflow",
       terminal: true,
       runId,
+      mode: dryRun ? "dry-run" : "execute",
       status: "failed",
       durationMs: Date.now() - startedAt,
       workspace,
@@ -268,6 +273,7 @@ export async function runProject({
     type: "workflow",
     terminal: true,
     runId,
+    mode: dryRun ? "dry-run" : "execute",
     status: summary.status,
     durationMs: Date.now() - startedAt,
     workspace,
@@ -307,6 +313,7 @@ export async function runProject({
   return {
     runId,
     status: summary.status,
+    ...(dryRun ? { mode: "dry-run" } : {}),
     workspace,
     cleanup,
     receiptPath,

@@ -13,6 +13,7 @@ import { createTerminalApprovalHandler } from "../core/terminal-approval.js";
 import { WorktreeManager } from "../git/worktrees.js";
 import { createGitLabWebhookServer } from "../gitlab/webhook-server.js";
 import { runProject } from "../runtime/project-runner.js";
+import { replayRun } from "../runtime/replay.js";
 import { WorkflowQueue } from "../workflow/queue.js";
 import { createSecretResolver } from "../secrets/resolver.js";
 import { PolicyEngine } from "../policy/engine.js";
@@ -29,6 +30,7 @@ export const CLI_OPTIONS = Object.freeze({
   "no-worktree": { type: "boolean", default: false },
   "cleanup-worktree": { type: "boolean", default: false },
   publish: { type: "boolean", default: false },
+  "dry-run": { type: "boolean", default: false },
   host: { type: "string" },
   port: { type: "string" },
   status: { type: "string" },
@@ -53,7 +55,9 @@ export const USAGE = `ETNPilot
 Usage:
   etnpilot init [directory]
   etnpilot run <task> [--agent name] [--root directory]
-    [--worktree | --no-worktree] [--cleanup-worktree] [--publish]
+    [--worktree | --no-worktree] [--cleanup-worktree] [--publish] [--dry-run]
+  etnpilot replay <receipt-file> [--root directory] [--public-key path]
+    [--require-signatures]
   etnpilot worktree list [--root directory]
   etnpilot worktree cleanup <name> [--root directory]
   etnpilot graph build [directory]
@@ -112,10 +116,22 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
       worktree,
       cleanupPolicy: values["cleanup-worktree"] ? "on-success" : undefined,
       publish: values.publish,
+      dryRun: values["dry-run"],
       approvalHandler: createTerminalApprovalHandler(),
     });
     console.log(JSON.stringify(result, null, 2));
     return result.summary?.status === "succeeded" ? 0 : 1;
+  } else if (command === "replay") {
+    if (!subcommand) throw new Error("A receipt file is required.");
+    const root = resolve(values.root);
+    const publicKeyPaths = await resolveReceiptPublicKeys(root, values["public-key"] ?? []);
+    const report = await replayRun(resolve(subcommand), {
+      root,
+      verifiers: await loadReceiptVerifiers(publicKeyPaths),
+      requireSignatures: values["require-signatures"] || publicKeyPaths.length > 0,
+    });
+    console.log(JSON.stringify(report, null, 2));
+    return report.receiptValid && report.drifted.length === 0 ? 0 : 1;
   } else if (command === "worktree" && subcommand === "list") {
     const manager = new WorktreeManager(resolve(values.root));
     console.log(JSON.stringify(await manager.list(), null, 2));
