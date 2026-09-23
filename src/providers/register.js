@@ -6,6 +6,8 @@ const BUILTIN_FACTORIES = {
     ...config,
     name,
     workingDirectory: context.workingDirectory,
+    mcpServers: context.mcpServers,
+    readOnlyMcpTools: context.readOnlyMcpTools,
     gitHubToken: config.gitHubToken ?? await resolveProviderSecret({
       resolver: context.secretResolver,
       name: config.tokenSecret ?? "github.token",

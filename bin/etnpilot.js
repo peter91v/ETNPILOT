@@ -25,7 +25,6 @@ const { positionals, values } = parseArgs({
   allowPositionals: true,
   options: {
     help: { type: "boolean", short: "h" },
-    database: { type: "string", short: "d" },
     depth: { type: "string" },
     root: { type: "string", short: "r", default: "." },
     agent: { type: "string", short: "a" },
@@ -65,12 +64,12 @@ Usage:
     [--worktree | --no-worktree] [--cleanup-worktree] [--publish]
   etnpilot worktree list [--root directory]
   etnpilot worktree cleanup <name> [--root directory]
-  etnpilot graph build [directory] [--database path]
-  etnpilot graph dependencies <file> [--database path]
-  etnpilot graph dependents <file> [--database path]
-  etnpilot graph symbols <file> [--database path]
-  etnpilot graph impact <file...> [--depth number] [--database path]
-  etnpilot graph stats [--database path]
+  etnpilot graph build [directory]
+  etnpilot graph dependencies <file> [--root directory]
+  etnpilot graph dependents <file> [--root directory]
+  etnpilot graph symbols <file> [--root directory]
+  etnpilot graph impact <file...> [--depth number] [--root directory]
+  etnpilot graph stats [--root directory]
   etnpilot webhook serve [--root directory] [--host address] [--port number]
   etnpilot approval list [--status pending|approved|rejected|expired|all] [--limit number]
   etnpilot approval show <id>
@@ -120,8 +119,7 @@ if (command === "init") {
   console.log(JSON.stringify(await manager.removeIfClean(rest[0]), null, 2));
 } else if (command === "graph" && subcommand === "build") {
   const root = resolve(rest[0] ?? ".");
-  const database = resolve(values.database ?? ".etnpilot/state/codegraph.sqlite");
-  const graph = new CodeGraph(database);
+  const graph = new CodeGraph(root);
   try {
     const result = await graph.indexDirectory(root);
     console.log(JSON.stringify(result, null, 2));
@@ -130,27 +128,27 @@ if (command === "init") {
   }
 } else if (command === "graph" && subcommand === "dependencies") {
   if (!rest[0]) throw new Error("A file path is required.");
-  const database = resolve(values.database ?? ".etnpilot/state/codegraph.sqlite");
-  const graph = new CodeGraph(database);
+  const graph = new CodeGraph(resolve(values.root));
   try {
+    await graph.open();
     console.log(JSON.stringify(graph.dependencies(rest[0]), null, 2));
   } finally {
     graph.close();
   }
 } else if (command === "graph" && subcommand === "dependents") {
   if (!rest[0]) throw new Error("A file path is required.");
-  const database = resolve(values.database ?? ".etnpilot/state/codegraph.sqlite");
-  const graph = new CodeGraph(database);
+  const graph = new CodeGraph(resolve(values.root));
   try {
+    await graph.open();
     console.log(JSON.stringify(graph.dependents(rest[0]), null, 2));
   } finally {
     graph.close();
   }
 } else if (command === "graph" && subcommand === "symbols") {
   if (!rest[0]) throw new Error("A file path is required.");
-  const database = resolve(values.database ?? ".etnpilot/state/codegraph.sqlite");
-  const graph = new CodeGraph(database);
+  const graph = new CodeGraph(resolve(values.root));
   try {
+    await graph.open();
     console.log(JSON.stringify(graph.symbols(rest[0]), null, 2));
   } finally {
     graph.close();
@@ -158,17 +156,17 @@ if (command === "init") {
 } else if (command === "graph" && subcommand === "impact") {
   if (rest.length === 0) throw new Error("At least one changed file is required.");
   const maxDepth = values.depth === undefined ? 20 : Number.parseInt(values.depth, 10);
-  const database = resolve(values.database ?? ".etnpilot/state/codegraph.sqlite");
-  const graph = new CodeGraph(database);
+  const graph = new CodeGraph(resolve(values.root));
   try {
+    await graph.open();
     console.log(JSON.stringify(graph.impact(rest, { maxDepth }), null, 2));
   } finally {
     graph.close();
   }
 } else if (command === "graph" && subcommand === "stats") {
-  const database = resolve(values.database ?? ".etnpilot/state/codegraph.sqlite");
-  const graph = new CodeGraph(database);
+  const graph = new CodeGraph(resolve(values.root));
   try {
+    await graph.open();
     console.log(JSON.stringify(graph.stats(), null, 2));
   } finally {
     graph.close();

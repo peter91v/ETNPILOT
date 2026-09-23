@@ -80,6 +80,51 @@ test("Copilot provider marks post-delivery failures unsafe to replay", async () 
   );
 });
 
+test("Copilot provider attaches local CodeGraph MCP and classifies its allow-listed tool as read-only", async () => {
+  const server = {
+    type: "local",
+    command: process.execPath,
+    args: ["codegraph", "serve", "--mcp"],
+    tools: ["codegraph_explore"],
+  };
+  let sessionOptions;
+  let approvalRequest;
+  class CopilotClient {
+    async start() {}
+    async createSession(options) {
+      sessionOptions = options;
+      const decision = await options.onPermissionRequest({ kind: "mcp", toolName: "codegraph_explore" });
+      assert.deepEqual(decision, { kind: "approve-once" });
+      return {
+        sessionId: "with-codegraph",
+        sendAndWait: async () => ({ data: { content: "ok" } }),
+        disconnect: async () => {},
+      };
+    }
+    async stop() {}
+  }
+  const provider = createCopilotProvider({
+    importer: async () => ({ CopilotClient }),
+    mcpServers: { codegraph: server },
+    readOnlyMcpTools: ["codegraph_explore"],
+  });
+  await provider.invoke({
+    agent: { prompt: "System" },
+    input: "inspect",
+    instructions: [],
+    skills: [],
+    approve: async (request) => {
+      approvalRequest = request;
+      return { kind: "approve-once" };
+    },
+  });
+  assert.deepEqual(sessionOptions.mcpServers, { codegraph: server });
+  assert.equal(approvalRequest.kind, "read");
+  assert.equal(approvalRequest.path, ".");
+  assert.equal(approvalRequest.sourceKind, "mcp");
+  assert.equal(approvalRequest.toolName, "codegraph_explore");
+});
+
 test("OpenAI-compatible provider exposes retry-safe transient failures", async () => {
   const provider = createOpenAICompatibleProvider({
     baseUrl: "https://models.example.invalid/v1",

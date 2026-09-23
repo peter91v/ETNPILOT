@@ -7,7 +7,7 @@
 - [x] Plugin loader
 - [x] GitHub Copilot SDK adapter
 - [x] OpenAI-compatible adapter
-- [x] Embedded SQLite code graph
+- [x] Local CodeGraph integration through MCP and its published API
 - [x] Safe Git worktree manager
 - [x] Self-hosted GitLab API client
 - [x] GitHub Actions and GitLab CI
@@ -19,8 +19,8 @@
 - [x] Optional run worktrees, safe cleanup policies, and reproducible check execution
 - [x] Hash-chained receipts
 - [x] Explicit GitLab draft-merge-request publishing
-- [x] Incremental code indexing and schema migration
-- [x] Resolved JavaScript/TypeScript dependency edges
+- [x] Incremental CodeGraph indexing and refresh
+- [x] Cross-language symbol and dependency analysis
 - [x] Transitive impact analysis and affected-test discovery
 - [x] Workflow-integrated codegraph evidence
 - [x] Versioned plugin SDK with capability declarations and dependency ordering
@@ -30,7 +30,7 @@
 - [x] Durable workflow queue with leases, checkpoints, cancellation, and conservative recovery
 - [x] Cryptographically signed receipt chains
 - [x] Versioned secret-provider API with restricted environment and confined file backends
-- [ ] Codegraph parsers for Python, Go, Java, and C#
+- [x] Python, Go, Java, and C# code intelligence through CodeGraph
 
 ## M2 — Production controls
 
@@ -43,7 +43,6 @@
 ## Brainstorming backlog
 
 - disposable devcontainers per run;
-- semantic codegraph enrichment without a server database;
 - reviewer quorum across different providers;
 - prompt/skill version pinning and provenance;
 - replayable runs with redacted fixtures;

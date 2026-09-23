@@ -8,7 +8,7 @@ test:
   variables:
     npm_config_cache: $CI_PROJECT_DIR/.npm
   script:
-    - npm ci --omit=optional
+    - npm ci
     - npm run check
   cache:
     key:

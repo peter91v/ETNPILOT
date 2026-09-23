@@ -7,7 +7,7 @@ import { Harness } from "../core/harness.js";
 import { JsonlReceiptStore } from "../core/receipt-store.js";
 import { loadReceiptSigner } from "../core/receipt-signing.js";
 import { runCheck } from "../checks/runner.js";
-import { CodeGraph } from "../codegraph/codegraph.js";
+import { CodeGraph, createCodeGraphMcpServer, isCodeGraphSourcePath } from "../codegraph/codegraph.js";
 import { git } from "../git/command.js";
 import { WorktreeManager } from "../git/worktrees.js";
 import { GitLabPublisher } from "../gitlab/publisher.js";
@@ -59,6 +59,8 @@ export async function runProject({
   let receiptStore;
   let telemetry;
   let workspace;
+  let codegraph;
+  let codegraphBefore;
   try {
     const bootstrapPlugins = (bootstrapConfig.plugins ?? []).filter(isBootstrapPlugin);
     await loadPlugins(bootstrapPlugins, harness, repositoryRoot, {
@@ -101,14 +103,27 @@ export async function runProject({
       fetchImpl,
       bootstrapPluginsLoaded: true,
     }));
+    codegraph = createCodegraph(workspace.path, config);
+    if (codegraph) {
+      codegraphBefore = await codegraph.graph.indexDirectory(workspace.path, { signal });
+      harness.instructions.push([
+        "CodeGraph is available through the local codegraph_explore MCP tool.",
+        "Query it before planning broad edits and use its refreshed index when reviewing changes.",
+      ].join("\n"));
+    }
     await registerConfiguredProviders(harness, config.providers, {
       workingDirectory: workspace.path,
       env,
       secretResolver: secrets,
       factories: providerFactories,
+      ...(codegraph ? {
+        mcpServers: { codegraph: codegraph.mcp },
+        readOnlyMcpTools: codegraph.mcp.tools,
+      } : {}),
     });
     harness.setProviderRouter(new ProviderRouter(harness.providers, config.routing, { policy }));
   } catch (error) {
+    codegraph?.graph.close();
     await harness.close();
     throw error;
   }
@@ -121,22 +136,6 @@ export async function runProject({
     events: harness.events,
   });
   const publisher = publish ? createPublisher(config, gitLabToken, fetchImpl) : undefined;
-  const codegraph = createCodegraph(repositoryRoot, config);
-  let codegraphBefore;
-  if (codegraph) {
-    try {
-      codegraphBefore = await codegraph.graph.indexDirectory(workspace.path);
-      harness.instructions.push([
-        "ETNPilot code intelligence is available through the embedded code graph.",
-        `Database: ${codegraph.database}`,
-        "Use dependency, dependent, symbol, and impact queries before broad edits.",
-      ].join("\n"));
-    } catch (error) {
-      codegraph.graph.close();
-      await harness.close();
-      throw error;
-    }
-  }
   const startedAt = Date.now();
   const workflowSpan = telemetry?.startSpan("etnpilot.workflow", {
     attributes: {
@@ -222,7 +221,8 @@ export async function runProject({
       const update = await codegraph.graph.indexDirectory(workspace.path);
       const sourceChanges = gitEvidence.changedPaths.filter(isSourcePath);
       codegraphEvidence = {
-        database: codegraph.database,
+        engine: "@colbymchenry/codegraph",
+        indexPath: join(workspace.path, ".codegraph"),
         before: codegraphBefore,
         after: update,
         impact: sourceChanges.length > 0
@@ -401,10 +401,12 @@ function createPublisher(config, token, fetchImpl) {
   });
 }
 
-function createCodegraph(repositoryRoot, config) {
+function createCodegraph(workspaceRoot, config) {
   if (config.codegraph?.enabled === false || config.codegraph?.autoIndex === false) return null;
-  const database = resolve(repositoryRoot, config.codegraph?.database ?? ".etnpilot/state/codegraph.sqlite");
-  return { database, graph: new CodeGraph(database) };
+  return {
+    graph: new CodeGraph(workspaceRoot),
+    mcp: createCodeGraphMcpServer(workspaceRoot, config.codegraph),
+  };
 }
 
 function isBootstrapPlugin(entry) {
@@ -412,7 +414,7 @@ function isBootstrapPlugin(entry) {
 }
 
 function isSourcePath(path) {
-  return /\.(cjs|js|jsx|mjs|ts|tsx)$/i.test(path);
+  return isCodeGraphSourcePath(path);
 }
 
 function assertCleanupPolicy(policy) {

@@ -1,214 +1,120 @@
-import { createHash } from "node:crypto";
-import { mkdirSync } from "node:fs";
-import { readFile, readdir, stat } from "node:fs/promises";
-import { dirname, extname, posix, relative, resolve } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { createRequire } from "node:module";
+import { dirname, resolve } from "node:path";
 
-const SOURCE_EXTENSIONS = [".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx"];
-const SOURCE_EXTENSION_SET = new Set(SOURCE_EXTENSIONS);
-const IGNORED = new Set([".git", ".etnpilot", "node_modules", "dist", "coverage"]);
+const require = createRequire(import.meta.url);
+const DEFAULT_TOOLS = Object.freeze(["codegraph_explore"]);
+const MCP_TOOLS = new Set([
+  "codegraph_explore",
+  "codegraph_node",
+  "codegraph_search",
+  "codegraph_callers",
+  "codegraph_callees",
+  "codegraph_impact",
+  "codegraph_files",
+  "codegraph_status",
+]);
 
 export class CodeGraph {
-  constructor(databasePath) {
-    mkdirSync(dirname(resolve(databasePath)), { recursive: true });
-    this.database = new DatabaseSync(databasePath);
-    this.#initialize();
+  constructor(projectRoot = process.cwd(), { importer = importCodeGraph } = {}) {
+    this.projectRoot = resolve(projectRoot);
+    this.importer = importer;
+    this.graph = undefined;
+    this.api = undefined;
   }
 
-  #initialize() {
-    this.database.exec(`
-      PRAGMA journal_mode = WAL;
-      PRAGMA foreign_keys = ON;
-      CREATE TABLE IF NOT EXISTS graph_meta (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS files (
-        path TEXT PRIMARY KEY,
-        hash TEXT NOT NULL,
-        size INTEGER NOT NULL,
-        mtime_ms REAL NOT NULL,
-        indexed_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS nodes (
-        id INTEGER PRIMARY KEY,
-        path TEXT NOT NULL,
-        kind TEXT NOT NULL,
-        name TEXT NOT NULL,
-        line INTEGER,
-        hash TEXT,
-        UNIQUE(path, kind, name, line)
-      );
-      CREATE TABLE IF NOT EXISTS edges (
-        source_path TEXT NOT NULL,
-        target TEXT NOT NULL,
-        target_path TEXT,
-        kind TEXT NOT NULL,
-        UNIQUE(source_path, target, kind)
-      );
-      CREATE INDEX IF NOT EXISTS nodes_path ON nodes(path);
-      CREATE INDEX IF NOT EXISTS edges_source ON edges(source_path);
-      CREATE INDEX IF NOT EXISTS edges_target ON edges(target);
-      INSERT OR REPLACE INTO graph_meta(key, value) VALUES ('schema_version', '2');
-    `);
-    this.#migrateLegacyEdges();
-    this.database.exec("CREATE INDEX IF NOT EXISTS edges_target_path ON edges(target_path)");
+  async open() {
+    if (this.graph) return this;
+    const api = await this.#loadApi();
+    if (!api.CodeGraph.isInitialized(this.projectRoot)) {
+      throw new Error(`CodeGraph is not initialized in ${this.projectRoot}. Run 'etnpilot graph build' first.`);
+    }
+    this.graph = await api.CodeGraph.open(this.projectRoot, { sync: false });
+    return this;
   }
 
-  #migrateLegacyEdges() {
-    const columns = this.database.prepare("PRAGMA table_info(edges)").all();
-    if (!columns.some((column) => column.name === "target_path")) {
-      this.database.exec("ALTER TABLE edges ADD COLUMN target_path TEXT");
+  async indexDirectory(root = this.projectRoot, { signal } = {}) {
+    const projectRoot = resolve(root);
+    if (projectRoot !== this.projectRoot) {
+      this.close();
+      this.projectRoot = projectRoot;
     }
-  }
+    const api = await this.#loadApi();
+    const initialized = api.CodeGraph.isInitialized(this.projectRoot);
+    this.graph ??= initialized
+      ? await api.CodeGraph.open(this.projectRoot, { sync: false })
+      : await api.CodeGraph.init(this.projectRoot, { index: false });
 
-  async indexDirectory(root) {
-    const absoluteRoot = resolve(root);
-    const discovered = await walk(absoluteRoot);
-    const existing = new Map(this.database.prepare(
-      "SELECT path, hash, size, mtime_ms FROM files",
-    ).all().map((row) => [row.path, row]));
-    const seen = new Set();
-    const changed = [];
-    let unchanged = 0;
-
-    for (const absolutePath of discovered) {
-      const path = normalizePath(relative(absoluteRoot, absolutePath));
-      const metadata = await stat(absolutePath);
-      const previous = existing.get(path);
-      seen.add(path);
-      if (previous && Number(previous.size) === metadata.size && Number(previous.mtime_ms) === metadata.mtimeMs) {
-        unchanged += 1;
-        continue;
-      }
-      const content = await readFile(absolutePath, "utf8");
-      const hash = createHash("sha256").update(content).digest("hex");
-      if (previous?.hash === hash) {
-        this.database.prepare(
-          "UPDATE files SET size = ?, mtime_ms = ?, indexed_at = ? WHERE path = ?",
-        ).run(metadata.size, metadata.mtimeMs, new Date().toISOString(), path);
-        unchanged += 1;
-        continue;
-      }
-      changed.push({ path, content, hash, size: metadata.size, mtimeMs: metadata.mtimeMs });
+    const operation = initialized
+      ? await this.graph.sync({ signal })
+      : await this.graph.indexAll({ signal });
+    const stats = this.graph.getStats();
+    const indexState = this.graph.getIndexState();
+    if (operation.success === false || ["failed", "partial"].includes(indexState)) {
+      throw new Error(`CodeGraph produced an incomplete index (state: ${indexState ?? "unknown"}).`);
     }
-
-    const deleted = [...existing.keys()].filter((path) => !seen.has(path));
-    const insertFile = this.database.prepare(`
-      INSERT OR REPLACE INTO files(path, hash, size, mtime_ms, indexed_at)
-      VALUES (?, ?, ?, ?, ?)
-    `);
-    const deleteFile = this.database.prepare("DELETE FROM files WHERE path = ?");
-    const deleteNodes = this.database.prepare("DELETE FROM nodes WHERE path = ?");
-    const deleteEdges = this.database.prepare("DELETE FROM edges WHERE source_path = ?");
-    const insertNode = this.database.prepare(
-      "INSERT OR REPLACE INTO nodes(path, kind, name, line, hash) VALUES (?, ?, ?, ?, ?)",
-    );
-    const insertEdge = this.database.prepare(
-      "INSERT OR REPLACE INTO edges(source_path, target, target_path, kind) VALUES (?, ?, NULL, ?)",
-    );
-
-    this.database.exec("BEGIN IMMEDIATE");
-    try {
-      for (const path of deleted) {
-        deleteFile.run(path);
-        deleteNodes.run(path);
-        deleteEdges.run(path);
-      }
-      for (const file of changed) {
-        deleteNodes.run(file.path);
-        deleteEdges.run(file.path);
-        insertFile.run(file.path, file.hash, file.size, file.mtimeMs, new Date().toISOString());
-        insertNode.run(file.path, "file", file.path, 1, file.hash);
-        for (const symbol of symbols(file.content)) {
-          insertNode.run(file.path, symbol.kind, symbol.name, symbol.line, file.hash);
-        }
-        for (const dependency of dependencies(file.content)) {
-          insertEdge.run(file.path, dependency, "imports");
-        }
-      }
-      this.#resolveEdges();
-      this.database.exec("COMMIT");
-    } catch (error) {
-      this.database.exec("ROLLBACK");
-      throw error;
-    }
-
-    return {
-      root: absoluteRoot,
-      files: discovered.length,
-      indexed: changed.length,
-      unchanged,
-      deleted: deleted.length,
-      nodes: this.#count("nodes"),
-      edges: this.#count("edges"),
-      resolvedEdges: Number(this.database.prepare(
-        "SELECT COUNT(*) count FROM edges WHERE target_path IS NOT NULL",
-      ).get().count),
-      brokenEdges: this.#brokenEdgeCount(),
-    };
-  }
-
-  #resolveEdges() {
-    const files = new Set(this.database.prepare("SELECT path FROM files").all().map((row) => row.path));
-    const unresolved = this.database.prepare("SELECT rowid, source_path, target, target_path FROM edges").all();
-    const update = this.database.prepare("UPDATE edges SET target_path = ? WHERE rowid = ?");
-    for (const edge of unresolved) {
-      const resolved = resolveDependency(edge.source_path, edge.target, files);
-      update.run(resolved ?? edge.target_path, edge.rowid);
-    }
+    return normalizeIndexResult(this.projectRoot, initialized, operation, stats);
   }
 
   dependencies(path) {
-    return this.database.prepare(`
-      SELECT edges.target, edges.target_path AS targetPath, edges.kind,
-        CASE WHEN edges.target_path IS NOT NULL AND files.path IS NULL THEN 1 ELSE 0 END AS dangling
-      FROM edges LEFT JOIN files ON files.path = edges.target_path
-      WHERE edges.source_path = ? ORDER BY edges.target
-    `).all(normalizePath(path)).map(markDangling);
+    const graph = this.#requireGraph();
+    return graph.getFileDependencies(normalizePath(path)).map((targetPath) => ({
+      target: targetPath,
+      targetPath,
+      kind: "imports",
+      dangling: graph.getFile(targetPath) === null,
+    }));
   }
 
   dependents(path) {
-    return this.database.prepare(`
-      SELECT edges.source_path AS source, edges.target, edges.kind,
-        CASE WHEN files.path IS NULL THEN 1 ELSE 0 END AS dangling
-      FROM edges LEFT JOIN files ON files.path = edges.target_path
-      WHERE edges.target_path = ? ORDER BY edges.source_path
-    `).all(normalizePath(path)).map(markDangling);
+    const graph = this.#requireGraph();
+    const targetPath = normalizePath(path);
+    return graph.getFileDependents(targetPath).map((source) => ({
+      source,
+      target: targetPath,
+      kind: "imports",
+      dangling: graph.getFile(source) === null,
+    }));
   }
 
   symbols(path) {
-    return this.database.prepare(`
-      SELECT kind, name, line, hash
-      FROM nodes WHERE path = ? AND kind != 'file' ORDER BY line, name
-    `).all(normalizePath(path)).map((row) => ({ ...row }));
+    const graph = this.#requireGraph();
+    const normalized = normalizePath(path);
+    const hash = graph.getFile(normalized)?.contentHash;
+    return graph.getNodesInFile(normalized)
+      .filter((node) => !["file", "import", "export"].includes(node.kind))
+      .sort((left, right) => left.startLine - right.startLine || left.name.localeCompare(right.name))
+      .map((node) => ({
+        kind: node.kind,
+        name: node.name,
+        line: node.startLine,
+        ...(hash ? { hash } : {}),
+      }));
   }
 
   impact(paths, { maxDepth = 20 } = {}) {
     if (!Array.isArray(paths) || paths.length === 0) throw new TypeError("At least one changed path is required.");
     if (!Number.isInteger(maxDepth) || maxDepth < 0) throw new TypeError("maxDepth must be a non-negative integer.");
-    const queue = paths.map((path) => ({ path: normalizePath(path), depth: 0, via: null }));
+    const graph = this.#requireGraph();
+    const changed = paths.map(normalizePath);
+    const queue = changed.map((path) => ({ path, depth: 0, via: null }));
     const impacted = new Map(queue.map((entry) => [entry.path, entry]));
-    const findDependents = this.database.prepare(`
-      SELECT source_path AS path, kind FROM edges
-      WHERE target_path = ? ORDER BY source_path
-    `);
+
     while (queue.length > 0) {
       const current = queue.shift();
       if (current.depth >= maxDepth) continue;
-      for (const row of findDependents.all(current.path)) {
-        if (impacted.has(row.path)) continue;
-        const next = { path: row.path, depth: current.depth + 1, via: current.path, kind: row.kind };
-        impacted.set(row.path, next);
+      for (const path of graph.getFileDependents(current.path).sort()) {
+        if (impacted.has(path)) continue;
+        const next = { path, depth: current.depth + 1, via: current.path, kind: "imports" };
+        impacted.set(path, next);
         queue.push(next);
       }
     }
-    const isKnownFile = this.database.prepare("SELECT 1 FROM files WHERE path = ?");
+
     const files = [...impacted.values()]
-      .sort((a, b) => a.depth - b.depth || a.path.localeCompare(b.path))
-      .map((entry) => ({ ...entry, dangling: isKnownFile.get(entry.path) === undefined }));
+      .sort((left, right) => left.depth - right.depth || left.path.localeCompare(right.path))
+      .map((entry) => ({ ...entry, dangling: graph.getFile(entry.path) === null }));
     return {
-      changed: paths.map(normalizePath),
+      changed,
       files,
       tests: files.filter((entry) => isTestPath(entry.path)),
       maxDepth,
@@ -216,93 +122,117 @@ export class CodeGraph {
   }
 
   stats() {
+    const graph = this.#requireGraph();
+    const stats = graph.getStats();
+    const build = graph.getIndexBuildInfo();
+    const lastIndexed = graph.getLastIndexedAt();
     return {
-      files: this.#count("files"),
-      nodes: this.#count("nodes"),
-      edges: this.#count("edges"),
-      resolvedEdges: Number(this.database.prepare(
-        "SELECT COUNT(*) count FROM edges WHERE target_path IS NOT NULL",
-      ).get().count),
-      brokenEdges: this.#brokenEdgeCount(),
-      schemaVersion: Number(this.database.prepare(
-        "SELECT value FROM graph_meta WHERE key = 'schema_version'",
-      ).get().value),
+      engine: "@colbymchenry/codegraph",
+      version: build.version,
+      extractionVersion: build.extractionVersion,
+      files: stats.fileCount,
+      nodes: stats.nodeCount,
+      edges: stats.edgeCount,
+      nodesByKind: stats.nodesByKind,
+      edgesByKind: stats.edgesByKind,
+      filesByLanguage: stats.filesByLanguage,
+      databaseBytes: stats.dbSizeBytes,
+      walBytes: stats.walSizeBytes,
+      lastIndexedAt: lastIndexed === null ? null : new Date(lastIndexed).toISOString(),
+      indexState: graph.getIndexState(),
     };
   }
 
-  #count(table) {
-    return Number(this.database.prepare(`SELECT COUNT(*) count FROM ${table}`).get().count);
-  }
-
-  #brokenEdgeCount() {
-    return Number(this.database.prepare(`
-      SELECT COUNT(*) count FROM edges
-      WHERE target_path IS NOT NULL
-        AND target_path NOT IN (SELECT path FROM files)
-    `).get().count);
-  }
-
   close() {
-    this.database.close();
+    this.graph?.close();
+    this.graph = undefined;
+  }
+
+  async #loadApi() {
+    if (this.api) return this.api;
+    const imported = await this.importer();
+    const api = imported?.CodeGraph ? imported : imported?.default;
+    if (!api?.CodeGraph) {
+      throw new Error("The installed @colbymchenry/codegraph package does not expose its CodeGraph API.");
+    }
+    this.api = api;
+    return api;
+  }
+
+  #requireGraph() {
+    if (!this.graph) throw new Error("CodeGraph is not open. Call open() or indexDirectory() first.");
+    return this.graph;
   }
 }
 
-async function walk(root) {
-  const result = [];
-  for (const entry of await readdir(root, { withFileTypes: true })) {
-    if (IGNORED.has(entry.name)) continue;
-    const path = resolve(root, entry.name);
-    if (entry.isDirectory()) result.push(...await walk(path));
-    else if (entry.isFile() && SOURCE_EXTENSION_SET.has(extname(entry.name))) result.push(path);
-  }
-  return result.sort();
+export function createCodeGraphMcpServer(projectRoot, config = {}) {
+  const tools = normalizeTools(config.tools);
+  const launcher = bundledLauncher();
+  return {
+    type: "local",
+    command: launcher.command,
+    args: [...launcher.args, "serve", "--mcp", "--path", resolve(projectRoot)],
+    cwd: resolve(projectRoot),
+    tools,
+    timeout: positiveInteger(config.startupTimeoutMs, 30_000, "codegraph.startupTimeoutMs"),
+    env: {
+      CODEGRAPH_TELEMETRY: "0",
+      CODEGRAPH_NO_UPDATE_CHECK: "1",
+    },
+  };
 }
 
-function dependencies(content) {
-  const result = new Set();
-  const patterns = [
-    /\b(?:import|export)\s+(?:[^"']+?\s+from\s+)?["']([^"']+)["']/g,
-    /\brequire\(\s*["']([^"']+)["']\s*\)/g,
-    /\bimport\(\s*["']([^"']+)["']\s*\)/g,
-  ];
-  for (const pattern of patterns) {
-    for (const match of content.matchAll(pattern)) result.add(match[1]);
-  }
-  return [...result].sort();
+export function isCodeGraphSourcePath(path) {
+  return /\.(?:app|app\.src|astro|c|cbl|cob|cc|cfc|cfm|cfs|cjs|cpp|cpy|cs|cu|cuh|dart|dpk|dpr|erl|escript|ets|go|h|hh|hpp|hrl|hxx|java|js|jsx|kt|kts|liquid|lpr|lua|luau|m|metal|mjs|mm|nix|pas|php|properties|py|r|razor|rb|rs|scala|sc|sol|svelte|swift|tf|tfvars|tofu|ts|tsx|vb|vue|twig|xml|yaml|yml)$/i.test(String(path));
 }
 
-function symbols(content) {
-  const result = [];
-  const pattern = /\b(?:export\s+)?(?:async\s+)?(class|function)\s+([A-Za-z_$][\w$]*)|\b(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=/g;
-  for (const match of content.matchAll(pattern)) {
-    const index = match.index ?? 0;
-    result.push({
-      kind: match[1] === "class" ? "class" : match[1] === "function" ? "function" : "constant",
-      name: match[2] ?? match[3],
-      line: content.slice(0, index).split("\n").length,
-    });
-  }
-  return result;
+async function importCodeGraph() {
+  return import("@colbymchenry/codegraph");
 }
 
-function resolveDependency(sourcePath, target, files) {
-  if (!target.startsWith(".")) return null;
-  const joined = posix.normalize(posix.join(posix.dirname(sourcePath), target));
-  const extension = posix.extname(joined);
-  const withoutExtension = extension ? joined.slice(0, -extension.length) : joined;
-  const candidates = new Set([
-    joined,
-    ...SOURCE_EXTENSIONS.map((item) => `${withoutExtension}${item}`),
-    ...SOURCE_EXTENSIONS.map((item) => posix.join(joined, `index${item}`)),
-  ]);
-  for (const candidate of candidates) {
-    if (files.has(candidate)) return candidate;
-  }
-  return null;
+function bundledLauncher() {
+  const packageJson = require.resolve("@colbymchenry/codegraph/package.json");
+  return {
+    command: process.execPath,
+    args: [resolve(dirname(packageJson), "npm-shim.js")],
+  };
 }
 
-function markDangling(row) {
-  return { ...row, dangling: row.dangling === 1 };
+function normalizeTools(value) {
+  if (value === undefined) return [...DEFAULT_TOOLS];
+  if (!Array.isArray(value) || value.length === 0 || value.some((tool) => !MCP_TOOLS.has(tool))) {
+    throw new TypeError("codegraph.tools must be a non-empty array of CodeGraph MCP tool names.");
+  }
+  return [...new Set(value)];
+}
+
+function positiveInteger(value, fallback, field) {
+  if (value === undefined) return fallback;
+  if (!Number.isInteger(value) || value <= 0) throw new TypeError(`${field} must be a positive integer.`);
+  return value;
+}
+
+function normalizeIndexResult(root, wasInitialized, operation, stats) {
+  const sync = Object.hasOwn(operation, "filesChecked");
+  return {
+    root,
+    operation: sync ? "sync" : "index",
+    initialized: !wasInitialized,
+    files: stats.fileCount,
+    indexed: sync ? operation.filesAdded + operation.filesModified : operation.filesIndexed,
+    unchanged: sync
+      ? Math.max(0, operation.filesChecked - operation.filesAdded - operation.filesModified - operation.filesRemoved)
+      : operation.filesSkipped,
+    deleted: sync ? operation.filesRemoved : 0,
+    errors: sync ? 0 : operation.filesErrored,
+    nodes: stats.nodeCount,
+    edges: stats.edgeCount,
+    languages: Object.entries(stats.filesByLanguage)
+      .filter(([, count]) => count > 0)
+      .map(([language]) => language)
+      .sort(),
+    durationMs: operation.durationMs,
+  };
 }
 
 function normalizePath(path) {
@@ -310,5 +240,5 @@ function normalizePath(path) {
 }
 
 function isTestPath(path) {
-  return /(^|\/)(test|tests|__tests__)(\/|$)|\.(test|spec)\.[^.]+$/i.test(path);
+  return /(^|\/)(test|tests|__tests__|spec)(\/|$)|\.(test|spec)\.[^.]+$|(?:^|\/)test_[^/]+\.py$|_test\.go$|(?:^|\/)[^/]+Tests?\.(?:java|kt|cs)$/i.test(path);
 }

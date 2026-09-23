@@ -66,9 +66,11 @@ receipts:
     privateKeyFile: .etnpilot/keys/receipt-signing-private.pem
     publicKeyFile: .etnpilot/receipt-signing-public.pem
 codegraph:
-  database: .etnpilot/state/codegraph.sqlite
+  enabled: true
   autoIndex: true
   maxImpactDepth: 20
+  startupTimeoutMs: 30000
+  tools: [codegraph_explore]
 observability:
   enabled: true
   file: .etnpilot/state/telemetry.jsonl

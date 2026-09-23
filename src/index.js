@@ -21,7 +21,7 @@ export {
 } from "./core/receipt-signing.js";
 export { createTerminalApprovalHandler } from "./core/terminal-approval.js";
 export { runCheck } from "./checks/runner.js";
-export { CodeGraph } from "./codegraph/codegraph.js";
+export { CodeGraph, createCodeGraphMcpServer, isCodeGraphSourcePath } from "./codegraph/codegraph.js";
 export { loadConfig } from "./config/load.js";
 export { initializeProject } from "./config/init.js";
 export { loadProject } from "./content/load-project.js";

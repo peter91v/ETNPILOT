@@ -1,7 +1,7 @@
 {
   "name": "etnpilot",
   "version": "0.1.0",
-  "description": "A provider-neutral, GitLab-first agent harness with proof-carrying execution and an embedded code graph.",
+  "description": "A provider-neutral, GitLab-first agent harness with proof-carrying execution and local CodeGraph integration.",
   "type": "module",
   "private": true,
   "exports": {
@@ -21,6 +21,7 @@
     "node": ">=22.12"
   },
   "dependencies": {
+    "@colbymchenry/codegraph": "1.6.0",
     "yaml": "^2.8.1"
   },
   "peerDependencies": {
