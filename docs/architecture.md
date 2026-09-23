@@ -153,3 +153,21 @@ completed provider call and before another workflow step can consume budget.
 - telemetry excludes prompts, generated content, tool arguments, credentials, and upstream error
   bodies;
 - OTLP exporter credentials resolve through the secret-provider boundary.
+
+## Configuration sources during a run
+
+A worktree run resolves configuration from two states, and the split is intentional:
+
+- The **main checkout** supplies governance that must not be changeable by the run itself: policy,
+  approval settings, secrets, receipt signing, observability, plugin isolation, and the queue.
+- The **run worktree**, created from the committed base ref, supplies what the run executes: agents,
+  prompts, skills, instructions, providers, routing, and workflow steps.
+
+Uncommitted changes to agents or workflow steps therefore do not affect a worktree run. `--no-worktree`
+resolves everything from the working tree.
+
+## Run outcome and publishing
+
+The workflow engine returns a summary rather than throwing when `failFast` is disabled. Publishing,
+the CLI exit code, and the GitLab commit status all key off `summary.status`, so unreviewed work from
+a failed workflow is never pushed.

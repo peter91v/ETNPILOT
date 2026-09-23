@@ -116,3 +116,22 @@ shutdown rejects active waits. A running job with an expired worker lease become
 requires an inspected, explicit `etnpilot queue resume <job-id> --force`; queued jobs resume
 automatically. Provider sessions themselves are not serialized. See
 [workflow-queue.md](workflow-queue.md).
+
+## Required user allow-list
+
+While `git.issueTrigger.enabled` is `true`, `git.issueTrigger.allowedUsers` must name at least one
+GitLab user; the receiver refuses to start otherwise. Issue text becomes agent input, so anyone able
+to apply the trigger label would otherwise be able to start a run.
+
+## Base ref freshness
+
+With `fetchBeforeRun: true` (the default in generated configuration) the receiver fetches the target
+branch before each run and bases the run worktree and its commit status on that commit. Without it, a
+long-running receiver keeps building on the checkout it started with. A failed fetch falls back to
+the local `HEAD` and is reported through `onError`.
+
+## Health probe
+
+`GET /healthz` (configurable via `git.webhook.healthPath`) returns readiness and queue counts. It
+reports no event or payload data. It is served on the same local listener, so expose it no more
+widely than the webhook path itself.

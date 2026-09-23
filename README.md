@@ -31,14 +31,43 @@ The repository is in early development. The first runnable vertical slice provid
 
 ## Quick start
 
+Node.js 22.13 or newer is required; `node:sqlite` backs the durable queue and
+the approval inbox.
+
 ```bash
 npm install
 npm install @github/copilot-sdk
 npm run etnpilot -- init .
+npm run etnpilot -- doctor            # verify node, git, sqlite, and the SDK
+# Describe at least one agent under .etnpilot/agents/, then:
+git add .etnpilot && git commit -m "Add ETNPilot configuration"
 npm run etnpilot -- content lock --root .
 npm run etnpilot -- graph build .
 npm test
 ```
+
+`init` writes the configuration plus a starter `orchestrator` agent and prompt,
+and never overwrites files that already exist. A run needs an agent manifest
+under `.etnpilot/agents/` whose name matches `defaultAgent` or the workflow
+steps; otherwise the run stops before it starts and reports which agents are
+configured.
+
+Commit `.etnpilot/` before the first run. Worktree runs check out the committed
+base ref, so an uncommitted configuration is not visible inside the run
+workspace.
+
+### Where configuration is read from
+
+A worktree run reads its configuration from two places, which matters while you
+are editing it:
+
+| Read from the main checkout | Read from the run worktree (committed state) |
+| --- | --- |
+| policy, approval, secrets, receipt signing, observability, plugin isolation, queue | agents, prompts, skills, instructions, providers, routing, workflow steps |
+
+Governance settings therefore take effect immediately, while agent and workflow
+changes take effect once committed. Use `--no-worktree` to run everything from
+the working tree.
 
 Optionally create a receipt-signing key and enable `receipts.signing` in the generated configuration:
 
@@ -132,7 +161,10 @@ The default comes from `workspace.mode` in `.etnpilot/etnpilot.yaml`. Cleanup de
 
 `--in-place` remains available as a compatibility alias for `--no-worktree`.
 
-Operations such as writes, shell commands, and network access require confirmation in an interactive terminal and are rejected when no terminal is available. Publishing is never implicit. Once the GitLab remote and the `gitlab.apiToken` secret are configured, `--publish` commits the reviewed work, pushes its run branch, and opens a draft merge request. Setting `workspace.cleanup` to `after-publish` removes the clean linked worktree after a successful publication while retaining its branch.
+`etnpilot run` exits with status 0 only when the workflow succeeded. A failed
+workflow exits 1, is never published, and is reported as failed to GitLab.
+
+Operations such as writes, shell commands, and network access require confirmation in an interactive terminal and are rejected when no terminal is available. The prompt shows the full command, file, tool arguments, and URL with control characters escaped, so what you read is what you approve. Publishing is never implicit. Once the GitLab remote and the `gitlab.apiToken` secret are configured, `--publish` commits the reviewed work, pushes its run branch, and opens a draft merge request. Setting `workspace.cleanup` to `after-publish` removes the clean linked worktree after a successful publication while retaining its branch.
 
 For GitHub Copilot, authenticate with the Copilot CLI/SDK-supported GitHub login. ETNPilot never auto-approves writes, shell commands, or network access by default.
 
@@ -327,12 +359,19 @@ git:
     enabled: true
     labels: [etnpilot]
     actions: [open, reopen]
-    allowedUsers: [your-gitlab-username]
+    allowedUsers: [your-gitlab-username]   # required while enabled
+    fetchBeforeRun: true
     allowConfidential: false
     publish: false
     syncStatus: true
     comment: false
 ```
+
+`allowedUsers` must name at least one user while the trigger is enabled;
+otherwise the receiver refuses to start. With `fetchBeforeRun` the receiver
+fetches the target branch before each run, so queued work starts from its
+current tip instead of a stale local `HEAD`. A local `GET /healthz` reports
+readiness and queue counts.
 
 ```bash
 export ETNPILOT_GITLAB_WEBHOOK_SIGNING_SECRET='whsec_...'
@@ -376,6 +415,25 @@ The waiting provider receives a one-time decision and the redacted decision evid
 the run receipt. Approval rows include their durable queue job ID. See
 [docs/approval-inbox.md](docs/approval-inbox.md) for lifecycle and recovery limits.
 See [docs/gitlab-webhooks.md](docs/gitlab-webhooks.md) for setup and operational details.
+
+## Checks
+
+Workflow checks execute code the agent just wrote. They run with an
+allow-listed environment — `PATH`, `HOME`, `LANG`, `LC_ALL`, `TZ`, `TMPDIR`,
+plus `ETNPILOT_CHECK=1` — so repository and provider credentials stay out of
+reach. Add what a check genuinely needs:
+
+```yaml
+checks:
+  envAllow: [CI, NPM_CONFIG_REGISTRY]
+```
+
+## Security
+
+Read [SECURITY.md](SECURITY.md) for the security model and reporting process,
+and [docs/threat-model.md](docs/threat-model.md) for the adversaries each
+control assumes, together with the accepted risks — the widest of which is that
+an approved shell command runs unconstrained.
 
 ## Repository strategy
 

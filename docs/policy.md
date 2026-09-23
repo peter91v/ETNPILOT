@@ -99,6 +99,17 @@ The command returns the decision plus rule ID or default marker. It exits with s
 denial or an unconfigured section. It deliberately does not echo the path, URL, or secret-bearing
 request data.
 
+## Matching limits
+
+Path patterns are compared textually against the path relative to the workspace. Symbolic links are
+not resolved, so a link created during a run can point an allowed path at a protected file. On
+macOS and Windows, where the filesystem ignores case, path rules are matched case-insensitively so
+that `secret.PEM` cannot step around a rule written for `*.pem`.
+
+Path rules constrain operations ETNPilot mediates. They do not constrain what an approved shell
+command does once it runs. Keep `shell` on `human` review, and read
+[threat-model.md](threat-model.md) before widening it.
+
 Policy files should be reviewed like source code. Prefer narrow allow rules, keep credential denials
 separate and explicit, and require human review for shell, write, and network operations unless a
 smaller capability can safely express the task.

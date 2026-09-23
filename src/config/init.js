@@ -15,9 +15,13 @@ routing:
   rules: []
 git:
   host: gitlab
-  baseUrl: https://gitlab.metropol-it.at
+  # Replace with your GitLab instance and project before publishing.
+  baseUrl: https://gitlab.example.com
   remote: gitlab
   targetBranch: main
+  committer:
+    name: ETNPilot
+    email: etnpilot@localhost
   webhook:
     path: /webhooks/gitlab
     host: 127.0.0.1
@@ -28,6 +32,9 @@ git:
     enabled: false
     labels: [etnpilot]
     actions: [open, reopen]
+    # Required once enabled: only these GitLab users may start a run.
+    allowedUsers: []
+    fetchBeforeRun: true
     allowConfidential: false
     publish: false
     syncStatus: true
@@ -101,6 +108,9 @@ approval:
     database: .etnpilot/state/approvals.sqlite
     timeoutMs: 86400000
     pollIntervalMs: 500
+    # Reviewers see the full command by default. Enable to mask
+    # credential-looking text at the cost of showing less than was requested.
+    redactSecrets: false
 policy:
   operations:
     default: deny
@@ -109,6 +119,10 @@ policy:
         effect: deny
         kinds: [read, write]
         paths: [.env, .env.*, "**/.env", "**/.env.*", .npmrc, "**/.npmrc", .netrc, "**/.netrc", "**/*.pem", "**/*.key", "**/*.p12", "**/*.pfx", "**/id_rsa", "**/id_ed25519", .git, .git/**, .etnpilot/keys, .etnpilot/keys/**, .etnpilot/secrets, .etnpilot/secrets/**]
+      - id: protect-etnpilot-governance
+        effect: deny
+        kinds: [write]
+        paths: [.etnpilot, .etnpilot/**, .gitlab-ci.yml, .github/workflows/**, .git/hooks/**]
       - id: read-project
         effect: allow
         kinds: [read]
@@ -123,13 +137,17 @@ policy:
       - id: approved-network-targets
         effect: human
         kinds: [network]
-        hosts: [gitlab.metropol-it.at, github.com, api.github.com]
+        hosts: [gitlab.example.com, github.com, api.github.com]
   providers:
     default: deny
     rules:
       - id: configured-copilot
         effect: allow
         providers: [github-copilot]
+checks:
+  # Checks run agent-authored code. They inherit only these variables, so
+  # repository and provider credentials stay out of their environment.
+  envAllow: []
 workspace:
   mode: worktree
   cleanup: never
@@ -160,6 +178,23 @@ secrets/
 *.sqlite-wal
 `;
 
+const STARTER_AGENT = `name: orchestrator
+provider: github-copilot
+model: auto
+promptRef: orchestrator
+skills: []
+requires: [chat]
+subagents: []
+`;
+
+const STARTER_PROMPT = `You implement one requested change at a time in the current repository.
+
+Read before you write, keep the change minimal and reviewable, and run the
+project's own checks. Every write, shell command, and network call is reviewed
+by a human, so explain what you intend to do and why. Report what you verified
+and what remains uncertain; never claim a check passed that you did not run.
+`;
+
 export async function initializeProject(root) {
   const configDir = join(root, ".etnpilot");
   await Promise.all([
@@ -174,6 +209,10 @@ export async function initializeProject(root) {
   await Promise.all([
     writeIfAbsent(join(configDir, "etnpilot.yaml"), DEFAULT_CONFIG),
     writeIfAbsent(join(configDir, ".gitignore"), DEFAULT_IGNORE),
+    // A runnable starting point: without an agent manifest the first run has
+    // nothing to execute.
+    writeIfAbsent(join(configDir, "agents", "orchestrator.yaml"), STARTER_AGENT),
+    writeIfAbsent(join(configDir, "prompts", "orchestrator.md"), STARTER_PROMPT),
   ]);
   return { root, configDir };
 }

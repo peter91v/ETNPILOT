@@ -77,3 +77,19 @@ test("policy configuration rejects ambiguous or unsupported rules", () => {
     /unknown field 'commands'/,
   );
 });
+
+test("policy paths can be matched without case sensitivity", () => {
+  const config = {
+    operations: {
+      default: "allow",
+      rules: [{ id: "protect-keys", effect: "deny", kinds: ["read"], paths: ["**/*.pem"] }],
+    },
+  };
+  const sensitive = new PolicyEngine(config, { caseInsensitivePaths: false });
+  const insensitive = new PolicyEngine(config, { caseInsensitivePaths: true });
+  const request = { kind: "read", fileName: "keys/Signing.PEM" };
+
+  assert.equal(sensitive.evaluateOperation(request).kind, "approve-once");
+  assert.equal(insensitive.evaluateOperation(request).kind, "reject");
+  assert.equal(insensitive.evaluateOperation({ kind: "read", fileName: "keys/signing.pem" }).kind, "reject");
+});

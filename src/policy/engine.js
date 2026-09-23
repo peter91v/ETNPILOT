@@ -5,8 +5,13 @@ const PROVIDER_EFFECTS = new Set(["allow", "deny"]);
 const EFFECT_PRIORITY = Object.freeze({ allow: 1, human: 2, deny: 3 });
 const RULE_ID = /^[a-z0-9][a-z0-9._-]*$/i;
 
+// macOS and Windows resolve 'secret.PEM' and 'secret.pem' to the same file, so
+// a case-sensitive deny rule would be trivial to step around there.
+const CASE_INSENSITIVE_FILESYSTEM = process.platform === "darwin" || process.platform === "win32";
+
 export class PolicyEngine {
-  constructor(config = {}) {
+  constructor(config = {}, { caseInsensitivePaths = CASE_INSENSITIVE_FILESYSTEM } = {}) {
+    this.caseInsensitivePaths = caseInsensitivePaths === true;
     if (!config || Array.isArray(config) || typeof config !== "object") {
       throw new TypeError("Policy configuration must be an object.");
     }
@@ -40,7 +45,10 @@ export class PolicyEngine {
       paths: path.value,
       hosts: stringValue(host)?.toLowerCase(),
     };
-    const match = selectDecision(this.operations, facts, { pathOutsideWorkspace: path.outside });
+    const match = selectDecision(this.operations, facts, {
+      pathOutsideWorkspace: path.outside,
+      caseInsensitivePaths: this.caseInsensitivePaths,
+    });
     return operationDecision(match);
   }
 
@@ -98,12 +106,13 @@ function normalizeSection(section, { name, effects, defaultEffect, matchers }) {
   return Object.freeze({ default: effect, rules: Object.freeze(rules), matchers: Object.freeze(matchers) });
 }
 
-function selectDecision(section, facts, { pathOutsideWorkspace = false } = {}) {
+function selectDecision(section, facts, { pathOutsideWorkspace = false, caseInsensitivePaths = false } = {}) {
   const matches = section.rules.filter((rule) => section.matchers.every((matcher) => {
     if (rule[matcher] === undefined) return true;
     if (facts[matcher] === undefined) return false;
     if (matcher === "paths" && pathOutsideWorkspace) return false;
-    return rule[matcher].some((pattern) => globMatch(pattern, facts[matcher], matcher === "hosts"));
+    const ignoreCase = matcher === "hosts" || (matcher === "paths" && caseInsensitivePaths);
+    return rule[matcher].some((pattern) => globMatch(pattern, facts[matcher], ignoreCase));
   }));
   if (matches.length === 0) return { effect: section.default, default: true };
   return matches.reduce((selected, candidate) => (

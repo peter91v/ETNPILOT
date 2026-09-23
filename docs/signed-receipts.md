@@ -85,6 +85,14 @@ etnpilot receipt verify run.jsonl --public-key trusted.pem \
 An incomplete file can still have a valid signed prefix after a hard crash. `--allow-incomplete`
 reports that prefix without claiming the workflow reached its terminal receipt.
 
+## Canonical encoding
+
+Entries are hashed over canonical JSON: object keys sorted, `undefined` values omitted, no
+insignificant whitespace. An independent verifier can therefore rebuild exactly the bytes that were
+hashed and signed without depending on JavaScript key order. Receipts written before this encoding
+was introduced remain verifiable; `etnpilot receipt verify` reports `encoding: "mixed"` and counts
+them as `legacyEntries`.
+
 ## Rotation and trust
 
 Generate a new pair instead of overwriting a key. Each entry carries the fingerprint of the key that

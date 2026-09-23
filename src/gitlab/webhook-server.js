@@ -36,6 +36,13 @@ export async function createGitLabWebhookServer({
     throw new Error("A GitLab webhook signing secret or webhook token is required.");
   }
   const issueTriggerConfig = config.git?.issueTrigger ?? {};
+  // Anyone able to apply the trigger label could otherwise start a run, and
+  // the issue text becomes agent input.
+  if (issueTriggerConfig.enabled === true && !(issueTriggerConfig.allowedUsers?.length > 0)) {
+    throw new Error(
+      "git.issueTrigger.allowedUsers must name at least one GitLab user while the issue trigger is enabled.",
+    );
+  }
   const requiresApiToken = issueTriggerConfig.enabled === true && (
     issueTriggerConfig.syncStatus !== false
     || issueTriggerConfig.comment === true
@@ -56,6 +63,7 @@ export async function createGitLabWebhookServer({
   const inboxConfig = config.approval?.inbox ?? {};
   const approvalInbox = inboxConfig.enabled === false ? undefined : new ApprovalInbox(
     resolve(projectRoot, inboxConfig.database ?? ".etnpilot/state/approvals.sqlite"),
+    { redact: inboxConfig.redactSecrets === true },
   );
   const issueTrigger = new GitLabIssueTrigger({
     root: projectRoot,
@@ -98,6 +106,14 @@ export async function createGitLabWebhookServer({
 
   const server = createServer(async (request, response) => {
     try {
+      // Local readiness probe: queue state only, no payload or event data.
+      if (request.method === "GET" && request.url === (webhook.healthPath ?? "/healthz")) {
+        return json(response, 200, {
+          status: "ok",
+          issueTrigger: issueTriggerConfig.enabled === true,
+          queue: workflowQueue.counts(),
+        });
+      }
       if (request.method !== "POST" || request.url !== (webhook.path ?? "/webhooks/gitlab")) {
         return json(response, 404, { error: "not-found" });
       }

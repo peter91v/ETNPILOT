@@ -7,6 +7,7 @@ export function createCopilotProvider(options = {}) {
     name: options.name ?? "github-copilot",
     capabilities: ["chat", "tools", "permissions", "skills"],
     async invoke(context) {
+      context.signal?.throwIfAborted();
       let CopilotClient;
       try {
         ({ CopilotClient } = await importer());
@@ -18,6 +19,7 @@ export function createCopilotProvider(options = {}) {
       }
       let client;
       let session;
+      let stopOnAbort;
       let promptSent = false;
       const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, providerUnits: 0 };
       let usageModel;
@@ -52,8 +54,13 @@ export function createCopilotProvider(options = {}) {
             usageModel = data.model ?? usageModel;
           });
         }
+        // A timed-out or cancelled step must stop the session, otherwise the
+        // agent keeps acting on the workspace after the step was abandoned.
+        stopOnAbort = () => { void cancelSession(session); };
+        context.signal?.addEventListener("abort", stopOnAbort, { once: true });
         promptSent = true;
         const message = await session.sendAndWait({ prompt: String(context.input) });
+        context.signal?.throwIfAborted();
         return {
           text: message?.data?.content ?? "",
           sessionId: session.sessionId,
@@ -61,6 +68,7 @@ export function createCopilotProvider(options = {}) {
           usage,
         };
       } catch (error) {
+        if (context.signal?.aborted) throw context.signal.reason ?? error;
         if (error instanceof ProviderError) throw error;
         throw new ProviderError(
           promptSent ? "GitHub Copilot failed after prompt delivery." : "GitHub Copilot session setup failed.",
@@ -72,11 +80,24 @@ export function createCopilotProvider(options = {}) {
           },
         );
       } finally {
+        if (stopOnAbort) context.signal?.removeEventListener("abort", stopOnAbort);
         await session?.disconnect();
         await client?.stop();
       }
     },
   };
+}
+
+async function cancelSession(session) {
+  for (const method of ["abort", "cancel", "interrupt", "disconnect"]) {
+    if (typeof session?.[method] !== "function") continue;
+    try {
+      await session[method]();
+      return;
+    } catch {
+      // Try the next supported cancellation entry point.
+    }
+  }
 }
 
 function normalizePermissionRequest(request, readOnlyTools = []) {
