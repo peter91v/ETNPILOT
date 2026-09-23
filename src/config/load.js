@@ -1,11 +1,31 @@
-import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import YAML from "yaml";
+import { mergeLayers, readLayers, SETTINGS, SettingsError } from "./layers.js";
 
-export async function loadConfig(path = ".etnpilot/etnpilot.yaml", env = process.env) {
-  const config = YAML.parse(await readFile(resolve(path), "utf8"));
+// The committed default, then whatever this user has set on this machine.
+// Local layers are never committed, so a checkout behaves the same for
+// everyone until someone changes something for themselves.
+export async function loadConfig(path = ".etnpilot/etnpilot.yaml", env = process.env, {
+  layerRoot,
+  userLayers = env.ETNPILOT_IGNORE_USER_CONFIG !== "1",
+} = {}) {
+  const projectFile = resolve(path);
+  const layers = await readLayers(projectFile, { env, layerRoot, userLayers });
+  const merged = mergeLayers(layers);
+  // A refused setting is reported, never quietly dropped: a user who thinks
+  // they tightened something must not be told nothing at all.
+  if (merged.refusals.length > 0) throw new SettingsError(merged.refusals);
+  const config = interpolate(merged.config, env);
   if (config?.version !== 1) throw new Error(`Unsupported ETNPilot config version: ${config?.version}.`);
-  return interpolate(config, env);
+  Object.defineProperty(config, SETTINGS, {
+    value: Object.freeze({
+      projectFile,
+      layers: layers.map(({ source, path: file, sha256 }) => Object.freeze({ source, path: file, sha256 })),
+      overrides: Object.freeze(merged.overrides),
+      modes: Object.freeze(merged.modes),
+    }),
+    enumerable: false,
+  });
+  return config;
 }
 
 function interpolate(value, env) {

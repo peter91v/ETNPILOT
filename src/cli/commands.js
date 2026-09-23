@@ -3,6 +3,13 @@ import { join, resolve } from "node:path";
 import { CodeGraph } from "../codegraph/codegraph.js";
 import { initializeProject } from "../config/init.js";
 import { loadConfig } from "../config/load.js";
+import {
+  describeSettings,
+  diffSettings,
+  parseSettingValue,
+  setSetting,
+  unsetSetting,
+} from "../config/settings.js";
 import { verifyProjectContent, writeContentLock } from "../content/provenance.js";
 import { ApprovalInbox } from "../core/approval-inbox.js";
 import { ApprovalPolicy } from "../core/approval-policy.js";
@@ -60,6 +67,8 @@ export const CLI_OPTIONS = Object.freeze({
   provider: { type: "string" },
   out: { type: "string", short: "o" },
   template: { type: "string", short: "t" },
+  global: { type: "boolean", default: false },
+  changed: { type: "boolean", default: false },
   "record-fixtures": { type: "string" },
   fixtures: { type: "string" },
 });
@@ -81,6 +90,10 @@ Usage:
   etnpilot graph symbols <file> [--root directory]
   etnpilot graph impact <file...> [--depth number] [--root directory]
   etnpilot graph stats [--root directory]
+  etnpilot config list [--path prefix] [--changed] [--root directory]
+  etnpilot config set <path> <value> [--global] [--root directory]
+  etnpilot config unset <path> [--global] [--root directory]
+  etnpilot config diff [--root directory]
   etnpilot content lock [--root directory]
   etnpilot content verify [--root directory]
   etnpilot webhook serve [--root directory] [--host address] [--port number]
@@ -220,6 +233,31 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     } finally {
       graph.close();
     }
+  } else if (command === "config" && (subcommand === "list" || subcommand === undefined)) {
+    const root = resolve(values.root);
+    const { entries, layers, overrides } = await describeSettings({ root });
+    const shown = entries
+      .filter((entry) => (values.path ? entry.path === values.path || entry.path.startsWith(`${values.path}.`) : true))
+      .filter((entry) => (values.changed ? overrides.includes(entry.path) : true));
+    console.log(JSON.stringify({ layers, overrides, settings: shown }, null, 2));
+  } else if (command === "config" && subcommand === "set") {
+    const [path, ...valueParts] = rest;
+    if (!path || valueParts.length === 0) throw new Error("Usage: etnpilot config set <path> <value>");
+    const scope = values.global ? "global" : "local";
+    const result = await setSetting(path, parseSettingValue(valueParts.join(" ")), { root: resolve(values.root), scope });
+    console.log(`${result.path} = ${briefValue(result.effective)} (${scope}, ${result.mode})`);
+    console.log(`Written to ${result.file}. This file is yours and is never committed.`);
+  } else if (command === "config" && subcommand === "unset") {
+    const [path] = rest;
+    if (!path) throw new Error("Usage: etnpilot config unset <path>");
+    const scope = values.global ? "global" : "local";
+    const result = await unsetSetting(path, { root: resolve(values.root), scope });
+    console.log(`${result.path} = ${briefValue(result.effective)} (back to the project default)`);
+    console.log(`Written to ${result.file}.`);
+  } else if (command === "config" && subcommand === "diff") {
+    const changes = await diffSettings({ root: resolve(values.root) });
+    if (changes.length === 0) console.log("No local settings. This project behaves as it was committed.");
+    else console.log(JSON.stringify(changes, null, 2));
   } else if (command === "content" && subcommand === "lock") {
     const root = resolve(values.root);
     const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"));
@@ -439,6 +477,16 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     throw new Error(`Unknown command: ${positionals.join(" ")}`);
   }
   return 0;
+}
+
+// A list of policy rules is unreadable on one line; the point of the echo is
+// to confirm what took effect, not to reprint the configuration.
+function briefValue(value) {
+  if (Array.isArray(value) && value.some((entry) => entry && typeof entry === "object")) {
+    return `${value.length} entries`;
+  }
+  const text = JSON.stringify(value);
+  return text !== undefined && text.length > 120 ? `${text.slice(0, 117)}...` : String(text);
 }
 
 async function writeOrPrint(path, document) {

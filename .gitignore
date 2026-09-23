@@ -7,3 +7,4 @@ node_modules/
 *.sqlite-wal
 coverage/
 .DS_Store
+.etnpilot/etnpilot.local.yaml

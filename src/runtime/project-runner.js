@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import { loadConfig } from "../config/load.js";
+import { settingsEvidence } from "../config/layers.js";
 import { loadProject } from "../content/load-project.js";
 import { verifyProjectContent } from "../content/provenance.js";
 import { ApprovalPolicy } from "../core/approval-policy.js";
@@ -119,6 +120,7 @@ export async function runProject({
       secretResolver: secrets,
       fetchImpl,
       bootstrapPluginsLoaded: true,
+      layerRoot: repositoryRoot,
     }).catch((error) => { throw describeProjectLoadError(error, useWorktree); }));
     codegraph = createCodegraph(workspace.path, config);
     if (codegraph) {
@@ -339,6 +341,7 @@ export async function runProject({
     status: summary.status,
     durationMs: Date.now() - startedAt,
     workspace: { ...workspace, ...(sandbox ? { sandbox: sandbox.describe() } : {}) },
+    settings: settingsEvidence(bootstrapConfig),
     content: contentEvidence,
     git: {
       ...gitEvidence,

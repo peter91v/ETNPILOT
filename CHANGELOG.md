@@ -6,6 +6,23 @@ pre-1.0, so breaking changes may appear in any release.
 
 ## [Unreleased]
 
+### Added — local settings
+
+- Configuration now loads in layers: the committed default, then
+  `~/.config/etnpilot/config.yaml`, then `.etnpilot/etnpilot.local.yaml`.
+  A user's changes stay on their machine and are never committed; with no local
+  file a checkout behaves exactly as it was committed.
+- The committed default declares what a user may change, per setting: `open`,
+  `stricter-only` (narrow it, never widen it — policy effects may only be
+  raised, policy rules are added rather than replaced, allow-lists may only
+  shrink, `sandbox.enabled` may only be switched on), or `locked`. A locked or
+  widening change is refused with a reason, never silently ignored.
+- `etnpilot config list|set|unset|diff`, writing the local file by default and
+  `~/.config` with `--global`. The same module backs every surface, so the TUI
+  and the page will refuse a change for exactly the reason the terminal gives.
+- A run's terminal receipt records which layers were in effect, by hash, and
+  which settings they changed — never the values, which can carry local paths.
+
 ### Added — terminal interface
 
 - `etnpilot tui` shows approvals, the queue, and runs in one full-screen view

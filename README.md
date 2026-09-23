@@ -428,6 +428,22 @@ checks:
   envAllow: [CI, NPM_CONFIG_REGISTRY]
 ```
 
+## Settings
+
+```bash
+etnpilot config list --changed
+etnpilot config set queue.workers 4          # stays on this machine
+etnpilot config set sandbox.enabled true     # stricter than the default: allowed
+etnpilot config set approval.allow '[read, write]'
+# etnpilot: Cannot change 'approval.allow': entries may only be removed; 'write' would be added.
+```
+
+Only the default is committed. Everything a person changes lands in
+`.etnpilot/etnpilot.local.yaml` or `~/.config/etnpilot/config.yaml`, neither of
+which is ever checked in. The committed default declares, per setting, whether a
+user may change it freely, only narrow it, or not at all — and a run's receipt
+names which layers were in effect. See [docs/settings.md](docs/settings.md).
+
 ## Terminal interface
 
 ```bash
