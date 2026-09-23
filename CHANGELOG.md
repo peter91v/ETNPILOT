@@ -6,6 +6,58 @@ pre-1.0, so breaking changes may appear in any release.
 
 ## [Unreleased]
 
+### Added — local settings
+
+- Configuration now loads in layers: the committed default, then
+  `~/.config/etnpilot/config.yaml`, then `.etnpilot/etnpilot.local.yaml`.
+  A user's changes stay on their machine and are never committed; with no local
+  file a checkout behaves exactly as it was committed.
+- The committed default declares what a user may change, per setting: `open`,
+  `stricter-only` (narrow it, never widen it — policy effects may only be
+  raised, policy rules are added rather than replaced, allow-lists may only
+  shrink, `sandbox.enabled` may only be switched on), or `locked`. A locked or
+  widening change is refused with a reason, never silently ignored.
+- `etnpilot config list|set|unset|diff`, writing the local file by default and
+  `~/.config` with `--global`. The same module backs every surface, so the TUI
+  and the page will refuse a change for exactly the reason the terminal gives.
+- A run's terminal receipt records which layers were in effect, by hash, and
+  which settings they changed — never the values, which can carry local paths.
+
+### Added — terminal interface
+
+- `n` starts a run from the TUI. It works in its own worktree and does not
+  block the screen; everything it needs approved appears under approvals in the
+  same window, recorded as `tui:<you>`. Quitting aborts any run started there
+  rather than stranding it. An empty agent field names the workflow steps that
+  would run instead of showing a blank.
+- `enter` on a run opens what its receipt sealed: branch and sandbox, the merge
+  rehearsal and its conflicts, the approvals with who decided them, and which
+  settings layers were in effect.
+- `R` resumes a queue job; `?` shows every key on one screen, in two columns
+  where one will not fit and scrolling where neither does.
+
+- The TUI has a settings view: every effective setting with the layer it came
+  from and whether it may be changed, an editor for the one under the cursor,
+  `d` to put it back to the committed default, `s` to choose between the local
+  and the global file, and `/` to filter. Refusals appear in the editor, which
+  stays open so the change can be corrected; a locked setting does not open.
+- A local settings file the loader would refuse is reported above the settings
+  list, rather than leaving the next run to be the first to mention it.
+  `etnpilot config list` and `config diff` fail for the same reason.
+- `queue.database` and `approval.inbox.database` name files an open surface
+  already holds. Changing one is written but reported as needing a restart,
+  instead of showing a setting that has visibly changed and quietly has not.
+
+- `etnpilot tui` shows approvals, the queue, and runs in one full-screen view
+  and decides against the same inbox the CLI and the review page use. Its views
+  are pure functions of state and viewport, so frames are asserted in tests
+  without a terminal.
+- The policy decision that stopped an operation is recorded with the approval,
+  so every surface can say which rule is asking rather than only showing what
+  was asked.
+- `openProjectState` collects approvals, queue, and runs once for every
+  surface; the review server now reads through it.
+
 ### Added — roadmap M6
 
 - `etnpilot ui` serves a local review page for pending approvals, the workflow
@@ -50,6 +102,69 @@ pre-1.0, so breaking changes may appear in any release.
 - Every worktree run rehearses the merge into its target branch with
   `git merge-tree`; a conflicting branch is not published by default.
 - `etnpilot init --template minimal|regulated`, `etnpilot pipeline status`.
+
+### Changed — typing happens on the bottom line
+
+- Starting a run, editing a setting and filtering all used to take over the
+  screen with a form. They now use a single prompt on the bottom line, the way
+  a terminal tool has always done it, so the list you are filtering or the
+  approval you are about to answer stays visible while you type. The line above
+  carries the context — the agent that would run, a setting's mode and
+  committed default, the scope being written — and a refusal replaces it in
+  place, directly above the line it was typed on.
+- A value longer than the line is cut at the front, so the caret stays visible
+  at phone and tablet widths. The filter caret no longer appears twice.
+
+### Added — trying it out without a provider account
+
+- A `scripted` provider type performs exactly the workspace tool calls the
+  configuration lists, through the same mediated tools and the same approval
+  path every other provider uses. It asks no model and needs no SDK, endpoint
+  or key, so the harness — policy, approvals, worktree, checks, receipts,
+  merge rehearsal — can be exercised on a machine that has none of those.
+  Every test in this repository injected a provider; that seam lived only in
+  the test code, so nobody using ETNPilot could do what its tests do.
+  See `docs/trying-it-out.md`.
+- `etnpilot run --approvals inbox` puts a run's requests in the durable inbox
+  instead of the terminal that started it, so they can be answered from the
+  TUI, the page or another window. Without it a run with no interactive
+  terminal rejects every request, which is safe but unusable unattended.
+- A refused or failed scripted step fails the run and names the step, rather
+  than reporting `succeeded` over a receipt full of denials.
+- When every candidate provider is passed over, the error names why for each
+  one. It used to blame capabilities and send people to the agent manifest
+  when the cause was a denial in `policy.providers`.
+
+### Fixed — advice that cannot be followed
+
+- `etnpilot doctor` and the Copilot provider both said "Install
+  '@github/copilot-sdk'" on every platform. The SDK keeps its runtime in
+  per-platform packages that GitHub publishes for linux, macOS and Windows
+  only; elsewhere — Android, for instance — that install reports success and
+  installs nothing, so the advice sent people in a circle. Both now name the
+  platform and point at the `openai-compatible` provider instead. `doctor`
+  reports `copilotSdkAvailableForPlatform`.
+
+### Fixed — an absent code index no longer costs the run
+
+- CodeGraph ships its compiled library in per-platform bundles and publishes
+  none for some platforms. Where the bundle is missing, indexing threw and
+  **every run died** — a run that would otherwise have finished, lost to an
+  optional enrichment. The run now continues and the receipt records
+  `codegraph: { available: false, reason }`, so no later reader assumes an
+  index was consulted. Any other indexing failure still stops the run, and
+  `etnpilot graph build` still fails loudly, because that command is a request
+  for CodeGraph itself.
+- Tests that need the compiled engine are skipped where no bundle exists for
+  the platform, naming it. Only that one failure is skippable: a package that
+  is missing outright stays red.
+
+### Fixed — asking for an agent by name
+
+- Naming an agent was silently ignored wherever a project defined
+  `workflow.steps`: `etnpilot run --agent`, `git.issueTrigger.agent`, and any
+  caller of `runProject({ agent })` ran the configured steps instead. A named
+  agent now runs that agent. Projects that never named one are unaffected.
 
 ### Fixed — first-run experience
 

@@ -40,6 +40,8 @@ identity asserted by someone else, use the GitLab comment flow in
 
 ## Limits
 
-The UI is read-mostly: it decides approvals and cancels queue jobs. It does not
-start runs, edit configuration, or change policy — those belong in the CLI,
-where they are reviewable as commands.
+The UI decides approvals and cancels queue jobs. It does not yet start runs or
+change settings — not because a page is the wrong place for it, but because
+that work is not built yet (roadmap M7). Every surface is meant to do
+everything; the safeguard is the settings layer described in
+[settings.md](settings.md), not which window you happen to be looking at.

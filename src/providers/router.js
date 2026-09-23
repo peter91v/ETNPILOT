@@ -121,8 +121,12 @@ export class ProviderRouter {
       return { provider: name, result, attempts, accounting };
     }
 
+    // The reason each candidate was passed over is already recorded; saying
+    // "no provider can satisfy these capabilities" while the real cause was a
+    // policy denial sends people to look at the wrong file.
     const error = new ProviderError(
-      `No provider can satisfy agent '${context.agent.name}' with capabilities: ${route.requires.join(", ") || "none"}.`,
+      `No provider can satisfy agent '${context.agent.name}' with capabilities: ${route.requires.join(", ") || "none"}.`
+      + explainSkips(attempts),
       { code: "no_eligible_provider" },
     );
     throw annotateError(error, undefined, attempts);
@@ -206,4 +210,20 @@ function annotateError(error, provider, attempts) {
   value.provider = provider;
   value.providerAttempts = [...attempts];
   return value;
+}
+
+const SKIP_REASONS = Object.freeze({
+  "policy-denied": "denied by policy.providers",
+  "not-registered": "not configured under 'providers'",
+  "capability-mismatch": "does not declare a required capability",
+  unavailable: "reported itself unavailable",
+});
+
+function explainSkips(attempts) {
+  const skipped = attempts.filter((attempt) => attempt.status === "skipped");
+  if (skipped.length === 0) return "";
+  const reasons = skipped
+    .map((attempt) => `'${attempt.provider}' ${SKIP_REASONS[attempt.reason] ?? attempt.reason}`)
+    .join("; ");
+  return ` Every candidate was passed over: ${reasons}.`;
 }

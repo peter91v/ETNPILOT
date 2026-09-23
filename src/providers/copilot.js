@@ -1,5 +1,23 @@
 import { ProviderError } from "./router.js";
 
+// The SDK keeps its runtime in per-platform packages and GitHub publishes them
+// only for these. Anywhere else 'npm install @github/copilot-sdk' reports
+// success and installs nothing, so telling someone to install it would send
+// them in a circle. Being conservative here costs a slightly cautious message;
+// being wrong costs an hour.
+const COPILOT_PLATFORMS = new Set(["linux", "darwin", "win32"]);
+
+export function copilotSdkPlatformSupported(platform = process.platform) {
+  return COPILOT_PLATFORMS.has(platform);
+}
+
+export function copilotSdkAdvice(platform = process.platform, arch = process.arch) {
+  return copilotSdkPlatformSupported(platform)
+    ? "Install '@github/copilot-sdk' to use the GitHub Copilot provider."
+    : `GitHub publishes no Copilot SDK build for ${platform}-${arch}, so it cannot be installed here. `
+      + "Configure an 'openai-compatible' provider instead, or run ETNPilot on a supported machine.";
+}
+
 export function createCopilotProvider(options = {}) {
   const importer = options.importer ?? (() => import("@github/copilot-sdk"));
 
@@ -13,7 +31,7 @@ export function createCopilotProvider(options = {}) {
         ({ CopilotClient } = await importer());
       } catch (error) {
         throw new ProviderError(
-          "GitHub Copilot provider requires '@github/copilot-sdk'. Install it in the ETNPilot project.",
+          `GitHub Copilot provider requires '@github/copilot-sdk'. ${copilotSdkAdvice()}`,
           { code: "sdk_unavailable", cause: error },
         );
       }

@@ -231,7 +231,12 @@ export class Harness {
     if (!this.approvalHandler) {
       return { kind: "reject", reason: "Human approval is required, but no approval handler is available." };
     }
-    const handled = await this.approvalHandler(request, context);
+    // The handler is told why it is being asked, so a reviewer sees the rule
+    // that stopped the operation rather than only the operation.
+    const handled = await this.approvalHandler(request, {
+      ...context,
+      ...(decision.policy ? { policy: decision.policy } : {}),
+    });
     return decision.policy ? { ...handled, policy: decision.policy } : handled;
   }
 

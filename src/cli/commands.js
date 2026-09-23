@@ -3,18 +3,28 @@ import { join, resolve } from "node:path";
 import { CodeGraph } from "../codegraph/codegraph.js";
 import { initializeProject } from "../config/init.js";
 import { loadConfig } from "../config/load.js";
+import {
+  describeSettings,
+  diffSettings,
+  parseSettingValue,
+  setSetting,
+  unsetSetting,
+} from "../config/settings.js";
 import { verifyProjectContent, writeContentLock } from "../content/provenance.js";
-import { ApprovalInbox } from "../core/approval-inbox.js";
+import { ApprovalInbox, createInboxApprovalHandler } from "../core/approval-inbox.js";
 import { ApprovalPolicy } from "../core/approval-policy.js";
 import { Harness } from "../core/harness.js";
 import { verifyReceiptFile } from "../core/receipt-store.js";
 import { generateReceiptKeyPair, loadReceiptVerifiers } from "../core/receipt-signing.js";
 import { createTerminalApprovalHandler } from "../core/terminal-approval.js";
+import { copilotSdkAdvice, copilotSdkPlatformSupported } from "../providers/copilot.js";
 import { WorktreeManager } from "../git/worktrees.js";
 import { GitLabClient } from "../gitlab/client.js";
 import { latestPipeline } from "../gitlab/pipelines.js";
 import { createGitLabWebhookServer } from "../gitlab/webhook-server.js";
 import { createReviewServer } from "../ui/server.js";
+import { createTuiApp } from "../tui/app.js";
+import { openProjectState } from "../runtime/project-state.js";
 import { runProject } from "../runtime/project-runner.js";
 import { replayRun } from "../runtime/replay.js";
 import { WorkflowQueue } from "../workflow/queue.js";
@@ -44,6 +54,7 @@ export const CLI_OPTIONS = Object.freeze({
   status: { type: "string" },
   limit: { type: "string" },
   actor: { type: "string" },
+  approvals: { type: "string" },
   reason: { type: "string" },
   force: { type: "boolean", default: false },
   "private-key": { type: "string" },
@@ -58,6 +69,8 @@ export const CLI_OPTIONS = Object.freeze({
   provider: { type: "string" },
   out: { type: "string", short: "o" },
   template: { type: "string", short: "t" },
+  global: { type: "boolean", default: false },
+  changed: { type: "boolean", default: false },
   "record-fixtures": { type: "string" },
   fixtures: { type: "string" },
 });
@@ -66,7 +79,7 @@ export const USAGE = `ETNPilot
 
 Usage:
   etnpilot init [directory] [--template default|minimal|regulated]
-  etnpilot run <task> [--agent name] [--root directory]
+  etnpilot run <task> [--agent name] [--root directory] [--approvals terminal|inbox]
     [--worktree | --no-worktree] [--cleanup-worktree] [--publish] [--dry-run]
     [--record-fixtures file | --fixtures file]
   etnpilot replay <receipt-file> [--root directory] [--public-key path]
@@ -79,10 +92,15 @@ Usage:
   etnpilot graph symbols <file> [--root directory]
   etnpilot graph impact <file...> [--depth number] [--root directory]
   etnpilot graph stats [--root directory]
+  etnpilot config list [--path prefix] [--changed] [--root directory]
+  etnpilot config set <path> <value> [--global] [--root directory]
+  etnpilot config unset <path> [--global] [--root directory]
+  etnpilot config diff [--root directory]
   etnpilot content lock [--root directory]
   etnpilot content verify [--root directory]
   etnpilot webhook serve [--root directory] [--host address] [--port number]
   etnpilot ui [--root directory] [--host address] [--port number]
+  etnpilot tui [--root directory]
   etnpilot approval list [--status pending|approved|rejected|expired|all] [--limit number]
   etnpilot approval show <id>
   etnpilot approval approve <id> [--actor name] [--reason text]
@@ -141,7 +159,7 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
       dryRun: values["dry-run"],
       recordFixtures: values["record-fixtures"],
       fixtures: values.fixtures,
-      approvalHandler: createTerminalApprovalHandler(),
+      approvalHandler: await createRunApprovalHandler(resolve(values.root), values.approvals),
     });
     console.log(JSON.stringify(result, null, 2));
     return result.summary?.status === "succeeded" ? 0 : 1;
@@ -217,6 +235,33 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     } finally {
       graph.close();
     }
+  } else if (command === "config" && (subcommand === "list" || subcommand === undefined)) {
+    const root = resolve(values.root);
+    const { entries, layers, overrides, refusals } = await describeSettings({ root });
+    const shown = entries
+      .filter((entry) => (values.path ? entry.path === values.path || entry.path.startsWith(`${values.path}.`) : true))
+      .filter((entry) => (values.changed ? overrides.includes(entry.path) : true));
+    console.log(JSON.stringify({ layers, overrides, refusals, settings: shown }, null, 2));
+    // A refused setting stops the next run, so listing must not report success.
+    if (refusals.length > 0) return 1;
+  } else if (command === "config" && subcommand === "set") {
+    const [path, ...valueParts] = rest;
+    if (!path || valueParts.length === 0) throw new Error("Usage: etnpilot config set <path> <value>");
+    const scope = values.global ? "global" : "local";
+    const result = await setSetting(path, parseSettingValue(valueParts.join(" ")), { root: resolve(values.root), scope });
+    console.log(`${result.path} = ${briefValue(result.effective)} (${scope}, ${result.mode})`);
+    console.log(`Written to ${result.file}. This file is yours and is never committed.`);
+  } else if (command === "config" && subcommand === "unset") {
+    const [path] = rest;
+    if (!path) throw new Error("Usage: etnpilot config unset <path>");
+    const scope = values.global ? "global" : "local";
+    const result = await unsetSetting(path, { root: resolve(values.root), scope });
+    console.log(`${result.path} = ${briefValue(result.effective)} (back to the project default)`);
+    console.log(`Written to ${result.file}.`);
+  } else if (command === "config" && subcommand === "diff") {
+    const changes = await diffSettings({ root: resolve(values.root) });
+    if (changes.length === 0) console.log("No local settings. This project behaves as it was committed.");
+    else console.log(JSON.stringify(changes, null, 2));
   } else if (command === "content" && subcommand === "lock") {
     const root = resolve(values.root);
     const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"));
@@ -239,6 +284,19 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     console.log(`ETNPilot GitLab webhook receiver listening on http://${displayHost}:${displayPort}`);
     await waitForShutdown();
     await webhookServer.close();
+  } else if (command === "tui") {
+    const state = await openProjectState({ root: resolve(values.root) });
+    if (!process.stdin.isTTY) {
+      state.close();
+      throw new Error("The TUI needs an interactive terminal. Use 'etnpilot ui' or the plain commands instead.");
+    }
+    const app = createTuiApp({ state, actor: values.actor });
+    try {
+      await app.start();
+    } finally {
+      app.stop();
+      state.close();
+    }
   } else if (command === "ui") {
     const port = values.port === undefined ? undefined : Number.parseInt(values.port, 10);
     if (port !== undefined && (!Number.isInteger(port) || port < 0 || port > 65_535)) {
@@ -425,6 +483,40 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
   return 0;
 }
 
+// A list of policy rules is unreadable on one line; the point of the echo is
+// to confirm what took effect, not to reprint the configuration.
+function briefValue(value) {
+  if (Array.isArray(value) && value.some((entry) => entry && typeof entry === "object")) {
+    return `${value.length} entries`;
+  }
+  const text = JSON.stringify(value);
+  return text !== undefined && text.length > 120 ? `${text.slice(0, 117)}...` : String(text);
+}
+
+// Who answers a run's approval requests. The terminal asks the person who
+// started the run, which needs that terminal to stay in front of them. The
+// inbox lets anyone decide from anywhere — the TUI, the page, another window —
+// which is also the only way to answer a run that nobody is sitting in front of.
+async function createRunApprovalHandler(root, source = "terminal") {
+  if (source === "terminal") return createTerminalApprovalHandler();
+  if (source !== "inbox") throw new Error(`Unknown approval source '${source}'. Use 'terminal' or 'inbox'.`);
+  const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml")).catch(ignoreMissing);
+  const inboxConfig = config?.approval?.inbox ?? {};
+  const inbox = new ApprovalInbox(
+    resolve(root, inboxConfig.database ?? ".etnpilot/state/approvals.sqlite"),
+    { redact: inboxConfig.redactSecrets === true },
+  );
+  const handler = createInboxApprovalHandler({
+    inbox,
+    timeoutMs: inboxConfig.timeoutMs ?? 24 * 60 * 60_000,
+    pollIntervalMs: inboxConfig.pollIntervalMs ?? 500,
+    onPending: (record) => {
+      console.error(`Waiting for a decision on ${record.operationKind} ${record.id} — 'etnpilot tui' or 'etnpilot approval approve'.`);
+    },
+  });
+  return handler;
+}
+
 async function writeOrPrint(path, document) {
   const serialized = `${JSON.stringify(document, null, 2)}\n`;
   if (!path) {
@@ -450,6 +542,7 @@ async function diagnose(root) {
     git: await commandExists("git"),
     sqlite: await import("node:sqlite").then(() => true, () => false),
     copilotSdk: await import("@github/copilot-sdk").then(() => true, () => false),
+    copilotSdkAvailableForPlatform: copilotSdkPlatformSupported(),
     project: await access(join(root, ".etnpilot", "etnpilot.yaml")).then(() => true, () => false),
   };
   return {
@@ -458,7 +551,7 @@ async function diagnose(root) {
     hints: [
       checks.nodeSupported ? undefined : "Node.js 22.13 or newer is required for node:sqlite.",
       checks.git ? undefined : "Install git; ETNPilot runs every repository operation through it.",
-      checks.copilotSdk ? undefined : "Install '@github/copilot-sdk' to use the GitHub Copilot provider.",
+      checks.copilotSdk ? undefined : copilotSdkAdvice(),
       checks.project ? undefined : "No '.etnpilot/etnpilot.yaml' found. Run 'etnpilot init' first.",
     ].filter(Boolean),
   };

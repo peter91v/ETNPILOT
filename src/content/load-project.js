@@ -7,7 +7,10 @@ import { loadPinnedProjectContent } from "./provenance.js";
 export async function loadProject(harness, root = process.cwd(), env = process.env, runtime = {}) {
   const projectRoot = resolve(root);
   const etnRoot = join(projectRoot, ".etnpilot");
-  const config = await loadConfig(join(etnRoot, "etnpilot.yaml"), env);
+  // A run works inside a worktree, where the user's local settings file is
+  // not checked out. layerRoot points layer discovery back at the repository
+  // so a run obeys the same settings as every other surface.
+  const config = await loadConfig(join(etnRoot, "etnpilot.yaml"), env, { layerRoot: runtime.layerRoot });
   const { snapshot, evidence } = await loadPinnedProjectContent(projectRoot, config);
 
   for (const item of snapshot.items.filter(({ type }) => type === "instruction")) {

@@ -40,6 +40,7 @@ export class ApprovalInbox {
       CREATE INDEX IF NOT EXISTS approvals_run ON approvals(run_id, created_at);
     `);
     ensureColumn(this.database, "approvals", "workflow_job_id", "TEXT");
+    ensureColumn(this.database, "approvals", "policy_json", "TEXT");
     this.database.exec("CREATE INDEX IF NOT EXISTS approvals_workflow_job ON approvals(workflow_job_id, created_at);");
   }
 
@@ -53,6 +54,7 @@ export class ApprovalInbox {
       workflowJobId: context.queueJobId,
       agent: context.agent,
       operationKind: request?.kind ?? "unknown",
+      policy: context.policy,
       details: summarizeApprovalRequest(request, {
         redact: this.redact,
         maxLength: this.maxDetailLength,
@@ -64,8 +66,8 @@ export class ApprovalInbox {
     this.database.prepare(`
       INSERT INTO approvals(
         id, status, run_id, workflow_job_id, agent, operation_kind, details_json,
-        created_at, expires_at, service_instance_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        policy_json, created_at, expires_at, service_instance_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       record.id,
       record.status,
@@ -74,6 +76,7 @@ export class ApprovalInbox {
       record.agent ?? null,
       record.operationKind,
       JSON.stringify(record.details),
+      record.policy ? JSON.stringify(record.policy) : null,
       record.createdAt,
       record.expiresAt,
       record.serviceInstanceId ?? null,
@@ -245,6 +248,7 @@ function fromRow(row) {
     agent: row.agent ?? undefined,
     operationKind: row.operation_kind,
     details: JSON.parse(row.details_json),
+    policy: row.policy_json ? JSON.parse(row.policy_json) : undefined,
     createdAt: Number(row.created_at),
     expiresAt: Number(row.expires_at),
     decidedAt: row.decided_at === null ? undefined : Number(row.decided_at),
@@ -267,6 +271,7 @@ function approvalEvidence(record) {
   return {
     operationKind: record.operationKind,
     details: record.details,
+    ...(record.policy ? { policy: record.policy } : {}),
     status: record.status,
     decidedBy: record.decidedBy,
     decidedAt: record.decidedAt,

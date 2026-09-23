@@ -1,4 +1,19 @@
 version: 1
+settings:
+  # What a user may change on their own machine. Local changes land in
+  # .etnpilot/etnpilot.local.yaml or ~/.config/etnpilot/config.yaml and are
+  # never committed. See docs/settings.md.
+  modes:
+    "settings.**": locked
+    "secrets.**": locked
+    "content.provenance.**": locked
+    "receipts.signing.**": locked
+    "supplyChain.**": locked
+    "policy.**": stricter-only
+    "approval.allow": stricter-only
+    "approval.requireHuman": stricter-only
+    "checks.envAllow": stricter-only
+    "sandbox.enabled": stricter-only
 defaultProvider: github-copilot
 defaultAgent: orchestrator
 

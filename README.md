@@ -428,6 +428,35 @@ checks:
   envAllow: [CI, NPM_CONFIG_REGISTRY]
 ```
 
+## Settings
+
+```bash
+etnpilot config list --changed
+etnpilot config set queue.workers 4          # stays on this machine
+etnpilot config set sandbox.enabled true     # stricter than the default: allowed
+etnpilot config set approval.allow '[read, write]'
+# etnpilot: Cannot change 'approval.allow': entries may only be removed; 'write' would be added.
+```
+
+Only the default is committed. Everything a person changes lands in
+`.etnpilot/etnpilot.local.yaml` or `~/.config/etnpilot/config.yaml`, neither of
+which is ever checked in. The committed default declares, per setting, whether a
+user may change it freely, only narrow it, or not at all — and a run's receipt
+names which layers were in effect. See [docs/settings.md](docs/settings.md).
+
+## Terminal interface
+
+```bash
+etnpilot tui --root .
+```
+
+Approvals, the queue, runs, and settings in one full-screen view, with the whole
+command and the rule that stopped it. Decisions go to the same inbox the CLI and
+the page use; settings are edited against the same layers and refused for the
+same reasons. `n` starts a run whose approvals come back to this same window,
+which is the one thing `etnpilot run` cannot do — it holds the terminal it is
+asking from. See [docs/tui.md](docs/tui.md).
+
 ## Local review UI
 
 ```bash

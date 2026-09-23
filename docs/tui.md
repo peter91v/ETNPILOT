@@ -1,0 +1,166 @@
+# The terminal interface
+
+```bash
+etnpilot tui --root .
+```
+
+A full-screen view of the same things every surface shows: approvals waiting
+for a decision, the workflow queue, finished runs read from their receipts, and
+the settings in effect. It reads and writes the same files and databases the
+CLI uses, so a decision made here is the same decision made there, and a
+setting changed here is refused for the same reasons.
+
+## Keys
+
+| Key | Does |
+| --- | --- |
+| `tab`, `1`–`4` | Switch between approvals, runs, queue, and settings |
+| `↑` `↓`, `k` `j` | Move the cursor |
+| `enter` | Open the approval under the cursor |
+| `a` / `r` | Approve once / reject |
+| `c` / `R` | Request cancellation of / resume the queue job under the cursor |
+| `n` | Start a run |
+| `esc` | Leave the detail view |
+| `g` | Refresh now, rather than waiting for the next poll |
+| `?` | Every key, on one screen |
+| `q`, `ctrl-c` | Quit |
+
+In the settings view:
+
+| Key | Does |
+| --- | --- |
+| `enter` | Edit the setting under the cursor |
+| `d` | Put it back to the committed default |
+| `s` | Switch between writing locally and writing to `~/.config` |
+| `/` | Filter by path; `enter` keeps the filter, `esc` clears it |
+
+While a filter or a value is being typed, every printable key is text. `q` does
+not quit and `d` does not reset — the caret on screen says which mode you are
+in.
+
+## Starting a run
+
+`n` puts a prompt on the bottom line, the way a terminal tool has always done
+it. Whatever you were looking at stays on screen while you type:
+
+```
+›   SHELL builder · 4f2a9c1b                                              4m
+    npm run migrate -- --database production --apply
+
+agent: the project's workflow: build → verify · tab to name one · enter starts
+run> Add a health check endpoint█
+```
+
+The line above the input says what an empty agent field would run, so it is
+never just a blank; `tab` moves to the agent and back. Naming an agent runs
+that agent instead of the configured steps.
+
+The run works in its own worktree, exactly as `etnpilot run` does, and it does
+not block the screen. Everything it needs approved appears under approvals in
+this same window, where you can read the whole command and answer it — the
+decision is recorded as `tui:<you>`. That is the one thing the terminal command
+cannot do: `etnpilot run` holds the terminal it is asking from.
+
+Quitting stops any run started here rather than stranding it: each is asked to
+abort, its waiting request is closed, and its receipt records why.
+
+## What a run's receipt shows
+
+`enter` on a run opens what was sealed: the branch and sandbox, the merge
+rehearsal and any conflicts, the approvals with who decided them, and which
+settings layers were in effect:
+
+```
+Settings in effect
+  project → user-local
+  2 changed locally  queue.workers, sandbox.enabled
+```
+
+That last part matters for review: it says whether a run used the committed
+configuration or something a person changed for themselves.
+
+## What the detail view shows
+
+The whole command, file, tool arguments, or URL — never an abbreviation,
+because a reviewer can only approve what they can read. Underneath it, the
+rule that stopped the operation:
+
+```
+Why you are being asked
+  human ← rule 'shell-with-review'
+```
+
+That trace is recorded with the approval itself, so it is available to every
+surface and survives in the receipt.
+
+## Deciding from two places at once
+
+The same request can be open in the TUI, in `etnpilot approval`, on the web
+page, and as a GitLab comment. Whichever answers first wins. The others report
+what happened rather than overwriting it:
+
+```
+Approval '6f1c…' is already rejected.
+```
+
+## How it is built
+
+The views are pure functions: state and viewport in, lines out
+(`src/tui/render.js`). The runtime around them only paints what they return and
+routes keys (`src/tui/app.js`). That split is why the interface has tests at
+all — a frame can be rendered and asserted without a terminal.
+
+Colour is 256-colour ANSI, matching the palette the web surface uses, and is
+dropped when the output is not a TTY or `NO_COLOR` is set. Every frame is
+measured in visible columns, so styled text is cut without a colour bleeding
+into the rest of the line.
+
+## Changing settings
+
+The settings view lists every effective setting with the layer it came from —
+`committed`, `local`, or `global` — and what you are allowed to do with it:
+`open`, `stricter-only`, or `locked`. `enter` opens an editor prefilled with the
+current value; the value is YAML, so `4`, `true`, and `["read"]` all mean what
+they look like.
+
+Nothing you change here is ever committed. `s` decides whether the change lands
+in `.etnpilot/etnpilot.local.yaml` (this project) or `~/.config/etnpilot/config.yaml`
+(every project). See [settings.md](settings.md) for the layers and the modes.
+
+Editing works the same way: the list stays on screen with the cursor on the row
+you are changing, and the value is typed on the bottom line.
+
+```
+› approval.allow           ["read"]        committed    stricter-only
+
+stricter-only · default ["read"] · writing this project, locally · enter saves
+set approval.allow> ["read","write"]█
+```
+
+A refusal replaces the hint, directly above the line it was typed on, and the
+input stays open so the change can be corrected:
+
+```
+Cannot change 'approval.allow': entries may only be removed; 'write' would be added.
+set approval.allow> ["read","write"]█
+```
+
+A `locked` setting does not open at all, and says why.
+
+A value longer than the line is cut at the **front**, so the caret is always
+visible — which matters at phone and tablet widths.
+
+Two things the view is deliberately honest about. A local settings file that
+the loader would refuse is reported above the list, because otherwise the next
+run would be the first to mention it:
+
+```
+1 local setting is refused; a run will not start until it is gone:
+  secrets.values — the project default locks this setting, so it can only change
+  in the committed file
+```
+
+And `queue.database` and `approval.inbox.database` name files this session
+already opened. Changing one is allowed and is written, but the open handles
+cannot follow it, so the TUI says `restart to use it` rather than showing a
+setting that has visibly changed and quietly has not.

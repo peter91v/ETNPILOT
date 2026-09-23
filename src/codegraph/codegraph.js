@@ -190,6 +190,14 @@ async function importCodeGraph() {
   return import("@colbymchenry/codegraph");
 }
 
+// The upstream package keeps its compiled library in per-platform optional
+// dependencies and throws this when none matches the host — on Android, for
+// instance, where no bundle is published. It is a statement about the machine,
+// not about the project, so callers may treat it differently from a real fault.
+export function isCodeGraphUnavailable(error) {
+  return /programmatic API is unavailable because the platform bundle/i.test(String(error?.message ?? ""));
+}
+
 function bundledLauncher() {
   const packageJson = require.resolve("@colbymchenry/codegraph/package.json");
   return {
