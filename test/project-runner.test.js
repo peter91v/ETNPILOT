@@ -8,6 +8,7 @@ import { runProject } from "../src/runtime/project-runner.js";
 import { verifyReceiptFile } from "../src/core/receipt-store.js";
 import { createReceiptVerifier, generateReceiptKeyPair } from "../src/core/receipt-signing.js";
 import { writeContentLock } from "../src/content/provenance.js";
+import { needsCodeGraphEngine } from "./helpers/codegraph-engine.js";
 
 test("project runner executes an agent and check in an isolated worktree", async () => {
   const root = await mkdtemp(join(tmpdir(), "etnpilot-run-"));
@@ -99,8 +100,16 @@ test("project runner executes an agent and check in an isolated worktree", async
   assert.deepEqual(result.cleanup, { requested: false, removed: false, reason: "retained-by-policy" });
   assert.match(result.workspace.branch, /^etnpilot\/run-/);
   assert.match(result.git.status, /result\.txt/);
-  assert.deepEqual(result.codegraph.impact.changed, ["src/generated.js"]);
-  assert.deepEqual(result.codegraph.impact.files.map((entry) => entry.path), ["src/generated.js"]);
+  // Everything above holds on every platform. The impact analysis needs the
+  // compiled engine, which some platforms have none of; there the run must
+  // still succeed and the receipt must say the index was absent.
+  if (needsCodeGraphEngine.skip) {
+    assert.equal(result.codegraph.available, false);
+    assert.match(result.codegraph.reason, /platform bundle/);
+  } else {
+    assert.deepEqual(result.codegraph.impact.changed, ["src/generated.js"]);
+    assert.deepEqual(result.codegraph.impact.files.map((entry) => entry.path), ["src/generated.js"]);
+  }
   assert.match(await readFile(join(result.workspace.path, "result.txt"), "utf8"), /create result/);
   const receipts = (await readFile(result.receiptPath, "utf8")).trim().split("\n");
   assert.equal(receipts.length, 2);

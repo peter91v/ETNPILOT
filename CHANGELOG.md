@@ -103,6 +103,20 @@ pre-1.0, so breaking changes may appear in any release.
   `git merge-tree`; a conflicting branch is not published by default.
 - `etnpilot init --template minimal|regulated`, `etnpilot pipeline status`.
 
+### Fixed — an absent code index no longer costs the run
+
+- CodeGraph ships its compiled library in per-platform bundles and publishes
+  none for some platforms. Where the bundle is missing, indexing threw and
+  **every run died** — a run that would otherwise have finished, lost to an
+  optional enrichment. The run now continues and the receipt records
+  `codegraph: { available: false, reason }`, so no later reader assumes an
+  index was consulted. Any other indexing failure still stops the run, and
+  `etnpilot graph build` still fails loudly, because that command is a request
+  for CodeGraph itself.
+- Tests that need the compiled engine are skipped where no bundle exists for
+  the platform, naming it. Only that one failure is skippable: a package that
+  is missing outright stays red.
+
 ### Fixed — asking for an agent by name
 
 - Naming an agent was silently ignored wherever a project defined

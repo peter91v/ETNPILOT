@@ -142,6 +142,14 @@ lokal" falsch. Ersetzen durch die Schicht-Ansicht mit `open` /
 `stricter-only` / `locked`.
 
 ### UI-4.2 Ein echter Durchlauf
+
+**Belegt am 2026-09-23, Termux auf Android/arm64, Node 26.3.1:** 196 von 201
+Tests grün, `doctor` meldet `ready: true`, `node:sqlite` vorhanden,
+`content verify` grün. Alle fünf Fehlschläge hatten eine Ursache — kein
+CodeGraph-Bundle für Android — und zwei davon waren Kern-Run-Tests, weil ein
+optionaler Index den ganzen Run mitriss. Das ist behoben. Node 26 und
+Android/arm64 gelten damit als geprüft; ein Provider- und GitLab-Durchlauf
+steht weiterhin aus:
 **Der größte offene Punkt im ganzen Projekt.** Es gibt keinen End-to-End-Lauf
 gegen einen echten Provider und eine echte GitLab-Instanz. Alle Run-Tests
 laufen gegen eingesetzte Stub-Provider. Nötig: eine dokumentierte Anleitung

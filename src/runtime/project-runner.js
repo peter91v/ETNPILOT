@@ -9,7 +9,12 @@ import { Harness } from "../core/harness.js";
 import { JsonlReceiptStore } from "../core/receipt-store.js";
 import { loadReceiptSigner } from "../core/receipt-signing.js";
 import { runCheck } from "../checks/runner.js";
-import { CodeGraph, createCodeGraphMcpServer, isCodeGraphSourcePath } from "../codegraph/codegraph.js";
+import {
+  CodeGraph,
+  createCodeGraphMcpServer,
+  isCodeGraphSourcePath,
+  isCodeGraphUnavailable,
+} from "../codegraph/codegraph.js";
 import { git } from "../git/command.js";
 import { rehearseMerge } from "../git/merge-rehearsal.js";
 import { WorktreeManager } from "../git/worktrees.js";
@@ -42,6 +47,7 @@ export async function runProject({
   env = process.env,
   providerFactories,
   fetchImpl,
+  codegraphImporter,
   approvalHandler,
   signal,
   metadata = {},
@@ -74,6 +80,7 @@ export async function runProject({
   let workspace;
   let codegraph;
   let codegraphBefore;
+  let codegraphUnavailable;
   let contentEvidence;
   let workflow;
   let sandbox;
@@ -122,13 +129,25 @@ export async function runProject({
       bootstrapPluginsLoaded: true,
       layerRoot: repositoryRoot,
     }).catch((error) => { throw describeProjectLoadError(error, useWorktree); }));
-    codegraph = createCodegraph(workspace.path, config);
+    codegraph = createCodegraph(workspace.path, config, { importer: codegraphImporter });
     if (codegraph) {
-      codegraphBefore = await codegraph.graph.indexDirectory(workspace.path, { signal });
-      harness.instructions.push([
-        "CodeGraph is available through the local codegraph_explore MCP tool.",
-        "Query it before planning broad edits and use its refreshed index when reviewing changes.",
-      ].join("\n"));
+      try {
+        codegraphBefore = await codegraph.graph.indexDirectory(workspace.path, { signal });
+        harness.instructions.push([
+          "CodeGraph is available through the local codegraph_explore MCP tool.",
+          "Query it before planning broad edits and use its refreshed index when reviewing changes.",
+        ].join("\n"));
+      } catch (error) {
+        // CodeGraph enriches a run; it does not guard it. Losing an entire run
+        // because this machine has no compiled index is the wrong trade — the
+        // sandbox fails a run because it is a safeguard, an index is not. The
+        // receipt says the index was absent, so no later reader assumes it was
+        // consulted. Any other indexing failure still stops the run.
+        if (!isCodeGraphUnavailable(error)) throw error;
+        codegraphUnavailable = error.message;
+        codegraph.graph.close();
+        codegraph = undefined;
+      }
     }
     sandbox = createSandbox(await resolveSandboxConfig(config.sandbox ?? {}, workspace.path), {
       workspace: workspace.path,
@@ -311,7 +330,13 @@ export async function runProject({
     : undefined;
 
   let codegraphEvidence;
-  if (codegraph) {
+  if (codegraphUnavailable) {
+    codegraphEvidence = {
+      engine: "@colbymchenry/codegraph",
+      available: false,
+      reason: codegraphUnavailable,
+    };
+  } else if (codegraph) {
     try {
       const update = await codegraph.graph.indexDirectory(workspace.path);
       const sourceChanges = gitEvidence.changedPaths.filter(isSourcePath);
@@ -688,10 +713,10 @@ function createPublisher(config, token, fetchImpl) {
   });
 }
 
-function createCodegraph(workspaceRoot, config) {
+function createCodegraph(workspaceRoot, config, { importer } = {}) {
   if (config.codegraph?.enabled === false || config.codegraph?.autoIndex === false) return null;
   return {
-    graph: new CodeGraph(workspaceRoot),
+    graph: new CodeGraph(workspaceRoot, importer ? { importer } : undefined),
     mcp: createCodeGraphMcpServer(workspaceRoot, config.codegraph),
   };
 }

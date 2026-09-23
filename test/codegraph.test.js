@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -7,9 +7,14 @@ import {
   CodeGraph,
   createCodeGraphMcpServer,
   isCodeGraphSourcePath,
+  isCodeGraphUnavailable,
 } from "../src/codegraph/codegraph.js";
+import { git } from "../src/git/command.js";
+import { needsCodeGraphEngine } from "./helpers/codegraph-engine.js";
+import { runProject } from "../src/runtime/project-runner.js";
 
-test("CodeGraph indexes multiple languages through the upstream engine", async () => {
+
+test("CodeGraph indexes multiple languages through the upstream engine", needsCodeGraphEngine, async () => {
   const root = await mkdtemp(join(tmpdir(), "etnpilot-codegraph-languages-"));
   await Promise.all([
     writeFile(join(root, "service.py"), "def python_service():\n    return 1\n"),
@@ -34,7 +39,7 @@ test("CodeGraph indexes multiple languages through the upstream engine", async (
   }
 });
 
-test("CodeGraph syncs changes and calculates transitive test impact", async () => {
+test("CodeGraph syncs changes and calculates transitive test impact", needsCodeGraphEngine, async () => {
   const root = await mkdtemp(join(tmpdir(), "etnpilot-codegraph-impact-"));
   await Promise.all([
     mkdir(join(root, "src"), { recursive: true }),
@@ -110,4 +115,100 @@ test("CodeGraph source detection covers the supported workflow languages", () =>
     assert.equal(isCodeGraphSourcePath(path), true, path);
   }
   assert.equal(isCodeGraphSourcePath("README.md"), false);
+});
+
+test("a machine with no CodeGraph bundle loses the index, not the run", async () => {
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-codegraph-absent-"));
+  await mkdir(join(root, ".etnpilot", "agents"), { recursive: true });
+  await writeFile(join(root, ".gitignore"), ".etnpilot/state/\n.etnpilot/worktrees/\n.codegraph/\n");
+  await writeFile(join(root, ".etnpilot", "agents", "worker.yaml"), "name: worker\nprovider: fake\nprompt: Do it.\n");
+  await writeFile(join(root, ".etnpilot", "etnpilot.yaml"), [
+    "version: 1",
+    "defaultAgent: worker",
+    "providers:",
+    "  fake:",
+    "    type: fake",
+    "content:",
+    "  provenance:",
+    "    mode: off",
+    "observability:",
+    "  enabled: false",
+    // Left at the committed default, which enables CodeGraph.
+    "",
+  ].join("\n"));
+  for (const args of [
+    ["init", "-b", "main"],
+    ["config", "user.email", "test@example.invalid"],
+    ["config", "user.name", "ETNPilot Test"],
+    ["add", "."],
+    ["commit", "-m", "initial"],
+  ]) await git(args, { cwd: root });
+
+  const absent = () => {
+    throw new Error(
+      "codegraph: the programmatic API is unavailable because the platform bundle\n"
+      + "(@colbymchenry/codegraph-android-arm64) is not installed.",
+    );
+  };
+  const result = await runProject({
+    root,
+    input: "do the work",
+    codegraphImporter: absent,
+    providerFactories: { fake: (name) => ({ name, invoke: () => ({ text: "done" }) }) },
+  });
+
+  assert.equal(result.summary.status, "succeeded", "an absent index must not cost the run");
+  // But the receipt says so, or a later reader would assume the index was used.
+  assert.equal(result.codegraph.available, false);
+  assert.match(result.codegraph.reason, /platform bundle/);
+  assert.equal(result.codegraph.after, undefined);
+
+  const receipt = await readFile(result.receiptPath, "utf8");
+  assert.match(receipt, /"available":false/);
+});
+
+test("an indexing failure that is not about the platform still stops the run", async () => {
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-codegraph-broken-"));
+  await mkdir(join(root, ".etnpilot", "agents"), { recursive: true });
+  await writeFile(join(root, ".gitignore"), ".etnpilot/state/\n.etnpilot/worktrees/\n.codegraph/\n");
+  await writeFile(join(root, ".etnpilot", "agents", "worker.yaml"), "name: worker\nprovider: fake\nprompt: Do it.\n");
+  await writeFile(join(root, ".etnpilot", "etnpilot.yaml"), [
+    "version: 1",
+    "defaultAgent: worker",
+    "providers:",
+    "  fake:",
+    "    type: fake",
+    "content:",
+    "  provenance:",
+    "    mode: off",
+    "observability:",
+    "  enabled: false",
+    "",
+  ].join("\n"));
+  for (const args of [
+    ["init", "-b", "main"],
+    ["config", "user.email", "test@example.invalid"],
+    ["config", "user.name", "ETNPilot Test"],
+    ["add", "."],
+    ["commit", "-m", "initial"],
+  ]) await git(args, { cwd: root });
+
+  await assert.rejects(
+    runProject({
+      root,
+      input: "do the work",
+      codegraphImporter: () => { throw new Error("the index database is corrupt"); },
+      providerFactories: { fake: (name) => ({ name, invoke: () => ({ text: "done" }) }) },
+    }),
+    /the index database is corrupt/,
+  );
+});
+
+test("the platform-bundle failure is told apart from every other one", () => {
+  assert.equal(isCodeGraphUnavailable(new Error(
+    "codegraph: the programmatic API is unavailable because the platform bundle (x) is not installed.",
+  )), true);
+  assert.equal(isCodeGraphUnavailable(new Error("CodeGraph produced an incomplete index (state: failed).")), false);
+  assert.equal(isCodeGraphUnavailable(new Error("Cannot find module '@colbymchenry/codegraph'")), false);
+  assert.equal(isCodeGraphUnavailable(undefined), false);
 });
