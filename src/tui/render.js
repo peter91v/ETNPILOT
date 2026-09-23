@@ -32,7 +32,10 @@ export function renderApp(state, options = {}) {
     active = [],
   } = options;
   const style = createStyle({ color });
-  const body = height - 3;
+  // Typing happens on the bottom line, the way a terminal tool has always done
+  // it, so whatever you were looking at stays on screen while you type.
+  const input = inputState({ prompt, editor, filtering, filter });
+  const body = height - (input ? 4 : 3);
   const lines = [
     header(state, { style, width, view, project, active }),
     "",
@@ -41,16 +44,19 @@ export function renderApp(state, options = {}) {
   const context = { style, width, height: body, cursor, now, editor, filter, filtering, scope, receipt, active };
   const rendered = help
     ? renderHelp({ style, width, height: body, offset: helpOffset })
-    : prompt
-      ? renderRunPrompt(prompt, { style, width, height: body })
-      : detail && view === "approvals"
-        ? renderApprovalDetail(state, context)
-        : detail && view === "runs"
-          ? renderRunDetail(state, context)
-          : renderView(view, state, context);
+    : detail && view === "approvals"
+      ? renderApprovalDetail(state, context)
+      : detail && view === "runs"
+        ? renderRunDetail(state, context)
+        : renderView(view, state, context);
   for (const line of rendered.slice(0, body)) lines.push(truncate(line, width));
-  while (lines.length < height - 1) lines.push("");
-  lines.push(footer({ style, width, view, detail, message, editor, prompt, help }));
+  while (lines.length < height - (input ? 2 : 1)) lines.push("");
+  if (input) {
+    lines.push(truncate(input.bad ? style.bad(input.hint) : style.dim(input.hint), width));
+    lines.push(inputLine(input, { style, width }));
+  } else {
+    lines.push(footer({ style, width, view, detail, message, editor, prompt, help }));
+  }
   return lines.slice(0, height).map((line) => truncate(line, width));
 }
 
@@ -58,9 +64,7 @@ function renderView(view, state, context) {
   if (view === "runs") return renderRuns(state, context);
   if (view === "queue") return renderQueue(state, context);
   if (view === "settings") {
-    return context.editor
-      ? renderSettingsEditor(state, context)
-      : renderSettings(state, context);
+    return renderSettings(state, context);
   }
   return renderApprovals(state, context);
 }
@@ -266,34 +270,6 @@ function queueTone(status) {
   return "muted";
 }
 
-// Starting a run from here. The task is the whole input; the agent is whatever
-// the project's default is unless one is named.
-function renderRunPrompt(prompt, { style, width, height }) {
-  const lines = [
-    style.bold(style.ink("Start a run")),
-    "",
-    style.dim("Task"),
-    `  ${style.ink(prompt.buffer)}${prompt.field === "agent" ? "" : style.invert(" ")}`,
-    "",
-  ];
-  lines.push(style.dim("Agent"));
-  lines.push(prompt.agent
-    ? `  ${style.ink(prompt.agent)}${prompt.field === "agent" ? style.invert(" ") : ""}`
-    // Empty means: whatever the project would run by itself. Saying which
-    // steps those are turns an empty field from a blank into an answer.
-    : `  ${prompt.field === "agent" ? style.invert(" ") : ""}${style.muted(prompt.steps?.length > 0 ? `the project's workflow: ${prompt.steps.join(" → ")}` : "the project's default agent")}`);
-  lines.push("");
-  if (prompt.error) {
-    for (const piece of wrap(prompt.error, width - 2)) lines.push(style.bad(`  ${piece}`));
-    lines.push("");
-  }
-  lines.push(
-    style.dim("The run works in its own worktree. Anything it needs approved"),
-    style.dim("appears under approvals here, where you can answer it."),
-  );
-  return lines.slice(0, height);
-}
-
 function renderRunDetail(state, { style, width, height, cursor, receipt }) {
   const runs = state.runs ?? [];
   const run = runs[clamp(cursor, runs.length)];
@@ -446,12 +422,9 @@ function renderSettings(state, { style, width, height, cursor, filter, filtering
     changed > 0 ? `${changed} changed locally` : "none changed",
     `writing to ${scope}`,
   ].join(" · ");
-  // While a filter is being typed the caret has to be visible, or there is no
-  // way to tell whether 'q' would quit or become part of the filter.
-  const prompt = filtering
-    ? `${style.dim("  ·  filter ")}${style.ink(filter)}${style.invert(" ")}`
-    : filter ? style.dim(`  ·  filter '${filter}'`) : "";
-  const head = [style.dim(summary) + prompt, ""];
+  // While the filter is being typed the input line at the bottom carries it,
+  // caret and all. Repeating it here would put two carets on one screen.
+  const head = [style.dim(summary) + (!filtering && filter ? style.dim(`  ·  filter '${filter}'`) : ""), ""];
   // A refused setting would stop the next run. Saying so here, above the list,
   // is the difference between a warning and a surprise an hour later.
   const refusals = settings?.refusals ?? [];
@@ -473,28 +446,6 @@ function renderSettings(state, { style, width, height, cursor, filter, filtering
     { label: "CHANGE", width: 14, value: (entry) => entry.mode, tone: (entry) => modeTone(entry.mode) },
   ];
   return [...head, ...table(entries, columns, { style, width, height: height - head.length, cursor })];
-}
-
-function renderSettingsEditor(state, { style, width, height, editor }) {
-  const entry = editor.entry;
-  const lines = [
-    `${style.bold(style.ink(entry.path))}  ${style.tone(entry.mode, modeTone(entry.mode))}`,
-    "",
-  ];
-  const field = (label, value) => {
-    lines.push(style.dim(label));
-    for (const piece of wrap(settingValue(value), width - 2)) lines.push(`  ${style.muted(piece)}`);
-    lines.push("");
-  };
-  field("Committed default", entry.defaultValue);
-  if (entry.source !== "project") field(`In effect, from ${sourceLabel(entry.source)}`, entry.value);
-  if (entry.mode === "stricter-only") {
-    lines.push(style.warn("This setting may only be narrowed, never widened."), "");
-  }
-  lines.push(style.dim(`New value as YAML, written to ${editor.scope === "global" ? "~/.config" : "this project, locally"}`));
-  lines.push(`  ${style.ink(editor.buffer)}${style.invert(" ")}`, "");
-  if (editor.error) for (const piece of wrap(editor.error, width - 2)) lines.push(style.bad(`  ${piece}`));
-  return lines.slice(0, height);
 }
 
 // What the editor starts from: JSON is valid YAML, so a value round-trips
@@ -521,4 +472,56 @@ function modeTone(mode) {
   if (mode === "locked") return "bad";
   if (mode === "stricter-only") return "warn";
   return "muted";
+}
+
+// One line at the bottom of the screen, the way every terminal tool does it:
+// a prefix that says what is being typed, the text, and the caret. What was on
+// screen stays there, which is the point — you can read the list you are
+// filtering, or the approval you are about to answer, while you type.
+function inputState({ prompt, editor, filtering, filter }) {
+  if (editor) {
+    return {
+      prefix: `set ${editor.entry.path}`,
+      value: editor.buffer,
+      bad: Boolean(editor.error),
+      hint: editor.error ?? [
+        editor.entry.mode,
+        `default ${settingValue(editor.entry.defaultValue)}`,
+        `writing ${editor.scope === "global" ? "~/.config" : "this project, locally"}`,
+        "enter saves · esc cancels",
+      ].join(" · "),
+    };
+  }
+  if (prompt) {
+    const agent = prompt.agent
+      || (prompt.steps?.length > 0 ? `the project's workflow: ${prompt.steps.join(" → ")}` : "the project's default agent");
+    return prompt.field === "agent"
+      ? {
+          prefix: "agent",
+          value: prompt.agent,
+          bad: Boolean(prompt.error),
+          hint: prompt.error ?? `task: ${prompt.buffer || "(none yet)"} · tab back to the task · enter starts`,
+        }
+      : {
+          prefix: "run",
+          value: prompt.buffer,
+          bad: Boolean(prompt.error),
+          hint: prompt.error ?? `agent: ${agent} · tab to name one · enter starts · esc cancels`,
+        };
+  }
+  if (filtering) {
+    return { prefix: "/", bare: true, value: filter, hint: "enter keeps the filter · esc clears it" };
+  }
+  return undefined;
+}
+
+function inputLine(input, { style, width }) {
+  const prefix = input.bare
+    ? style.accent(input.prefix)
+    : `${style.accent(input.prefix)}${style.dim("> ")}`;
+  // The caret has to stay visible even where the text is longer than the line,
+  // so a long value is cut at the front rather than the end.
+  const room = Math.max(1, width - displayWidth(prefix) - 1);
+  const value = input.value.length > room ? `…${input.value.slice(-(room - 1))}` : input.value;
+  return prefix + style.ink(value) + style.invert(" ");
 }

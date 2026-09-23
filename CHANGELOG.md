@@ -103,6 +103,18 @@ pre-1.0, so breaking changes may appear in any release.
   `git merge-tree`; a conflicting branch is not published by default.
 - `etnpilot init --template minimal|regulated`, `etnpilot pipeline status`.
 
+### Changed — typing happens on the bottom line
+
+- Starting a run, editing a setting and filtering all used to take over the
+  screen with a form. They now use a single prompt on the bottom line, the way
+  a terminal tool has always done it, so the list you are filtering or the
+  approval you are about to answer stays visible while you type. The line above
+  carries the context — the agent that would run, a setting's mode and
+  committed default, the scope being written — and a refusal replaces it in
+  place, directly above the line it was typed on.
+- A value longer than the line is cut at the front, so the caret stays visible
+  at phone and tablet widths. The filter caret no longer appears twice.
+
 ### Added — trying it out without a provider account
 
 - A `scripted` provider type performs exactly the workspace tool calls the

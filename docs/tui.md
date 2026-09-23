@@ -40,19 +40,20 @@ in.
 
 ## Starting a run
 
-`n` asks for a task and, optionally, an agent. Leaving the agent empty runs
-whatever the project runs by itself, and the prompt names those steps rather
-than showing a blank:
+`n` puts a prompt on the bottom line, the way a terminal tool has always done
+it. Whatever you were looking at stays on screen while you type:
 
 ```
-Task
-  Add a health check endpoint
+›   SHELL builder · 4f2a9c1b                                              4m
+    npm run migrate -- --database production --apply
 
-Agent
-  the project's workflow: build → verify
+agent: the project's workflow: build → verify · tab to name one · enter starts
+run> Add a health check endpoint█
 ```
 
-Naming an agent runs that agent instead of the configured steps.
+The line above the input says what an empty agent field would run, so it is
+never just a blank; `tab` moves to the agent and back. Naming an agent runs
+that agent instead of the configured steps.
 
 The run works in its own worktree, exactly as `etnpilot run` does, and it does
 not block the screen. Everything it needs approved appears under approvals in
@@ -126,24 +127,28 @@ Nothing you change here is ever committed. `s` decides whether the change lands
 in `.etnpilot/etnpilot.local.yaml` (this project) or `~/.config/etnpilot/config.yaml`
 (every project). See [settings.md](settings.md) for the layers and the modes.
 
-A refusal is shown where the change was made, and the editor stays open so it
-can be corrected:
+Editing works the same way: the list stays on screen with the cursor on the row
+you are changing, and the value is typed on the bottom line.
 
 ```
-approval.allow  stricter-only
+› approval.allow           ["read"]        committed    stricter-only
 
-Committed default
-  ["read"]
+stricter-only · default ["read"] · writing this project, locally · enter saves
+set approval.allow> ["read","write"]█
+```
 
-This setting may only be narrowed, never widened.
+A refusal replaces the hint, directly above the line it was typed on, and the
+input stays open so the change can be corrected:
 
-New value as YAML, written to this project, locally
-  ["read","write"]▌
-
-  Cannot change 'approval.allow': entries may only be removed; 'write' would be added.
+```
+Cannot change 'approval.allow': entries may only be removed; 'write' would be added.
+set approval.allow> ["read","write"]█
 ```
 
 A `locked` setting does not open at all, and says why.
+
+A value longer than the line is cut at the **front**, so the caret is always
+visible — which matters at phone and tablet widths.
 
 Two things the view is deliberately honest about. A local settings file that
 the loader would refuse is reported above the list, because otherwise the next

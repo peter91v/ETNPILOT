@@ -135,15 +135,21 @@ test("a run needs a task, and an empty agent field says what would run instead",
   try {
     await app.refresh();
     await app.handle("n");
+
+    // The task is typed on the bottom line, and whatever was on screen stays
+    // there — that is the point of typing down here. The line above says what
+    // an empty agent field would run, so it is never just a blank.
+    assert.deepEqual(app.prompt.steps, ["build"]);
+    const typing = app.frame().map(stripAnsi);
+    assert.match(typing.at(-1), /^run> {2}$/);
+    assert.match(typing.at(-2), /agent: the project's workflow: build · tab to name one/);
+    assert.match(typing.join("\n"), /Nothing is waiting for a decision/);
+
     await app.handle("\r");
     assert.match(app.prompt.error, /A run needs a task to work on/);
-    assert.match(screen(app), /A run needs a task to work on/);
+    // The refusal replaces the hint, right above the line it was typed on.
+    assert.match(app.frame().map(stripAnsi).at(-2), /^A run needs a task to work on\.$/);
     assert.equal(app.active.length, 0);
-
-    // Leaving the agent empty runs the project's own workflow, and the prompt
-    // names those steps rather than showing a blank.
-    assert.deepEqual(app.prompt.steps, ["build"]);
-    assert.match(screen(app), /Agent\n\s+the project's workflow: build/);
 
     await app.handle("\t");
     assert.equal(app.prompt.field, "agent");

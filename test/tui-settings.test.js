@@ -66,9 +66,12 @@ test("an open setting is edited in place and written to the local file", async (
     await select(app, "queue.workers");
     await app.handle("\r");
     assert.equal(app.editor.entry.path, "queue.workers");
-    // The editor starts from the value as it stands, not from an empty line.
+    // Typing happens on the bottom line, with the list still on screen.
     assert.equal(app.editor.buffer, "1");
-    assert.match(screen(app), /New value as YAML, written to this project, locally/);
+    const editing = screen(app);
+    assert.match(editing, /set queue\.workers> 1/);
+    assert.match(editing, /open · default 1 · writing this project, locally/);
+    assert.match(editing, /SETTING\s+VALUE\s+FROM\s+CHANGE/, "the list stays visible while typing");
 
     await app.handle("\u0015");
     await type(app, "4");
@@ -102,7 +105,7 @@ test("a widening change is refused in the editor, where it was made", async () =
   try {
     await select(app, "approval.allow");
     await app.handle("\r");
-    assert.match(screen(app), /may only be narrowed, never widened/);
+    assert.match(screen(app), /stricter-only · default \["read"\]/);
 
     await app.handle("\u0015");
     await type(app, '["read","write"]');
@@ -111,7 +114,10 @@ test("a widening change is refused in the editor, where it was made", async () =
     // The prompt stays open with the reason, so the change can be corrected.
     assert.equal(app.editor.entry.path, "approval.allow");
     assert.match(app.editor.error, /entries may only be removed; 'write' would be added/);
-    assert.match(screen(app), /entries may only be removed/);
+    // The refusal replaces the hint, directly above the line it was typed on.
+    const refused = screen(app);
+    assert.match(refused, /entries may only be removed/);
+    assert.match(refused, /set approval\.allow> \["read","write"\]/);
     assert.deepEqual((await loadConfig(file, env)).approval.allow, ["read"]);
 
     // Narrowing the same setting is accepted.
@@ -193,8 +199,12 @@ test("while a filter is typed, letters are text and not commands", async () => {
     await type(app, "ueue");
     assert.equal(app.filter, "queue");
     assert.equal(app.view, "settings");
-    // The caret is visible, so the mode is not a guess.
-    assert.match(screen(app), /·\s+filter queue/);
+    // The filter is typed on the bottom line, like every other terminal tool,
+    // and only there — two carets on one screen would be two claims about
+    // where the keys are going.
+    const typing = screen(app);
+    assert.match(typing, /^\/queue $/m);
+    assert.doesNotMatch(typing, /· {2}filter/);
 
     await app.handle("\u007F");
     assert.equal(app.filter, "queu");
@@ -264,17 +274,18 @@ test("a settings frame still fits the terminal it was given", () => {
     for (const line of frame) assert.ok(stripAnsi(line).length <= width, `${stripAnsi(line)} exceeds ${width}`);
   }
 
-  const editor = renderApp(snapshot, {
+  // An open editor keeps the list on screen and takes the bottom two lines.
+  const editing = renderApp(snapshot, {
     view: "settings",
     width: 80,
     height: 16,
     color: false,
     editor: { entry: snapshot.settings.entries[1], buffer: '["read"]', scope: "local" },
-  }).join("\n");
-  assert.match(editor, /approval\.allow\s+stricter-only/);
-  assert.match(editor, /Committed default/);
-  assert.match(editor, /In effect, from local/);
-  assert.match(editor, /enter save/);
+  });
+  assert.equal(editing.length, 16);
+  assert.match(editing.join("\n"), /SETTING\s+VALUE\s+FROM\s+CHANGE/);
+  assert.match(editing.at(-2), /stricter-only · default \["read"\] · writing this project, locally/);
+  assert.match(editing.at(-1), /^set approval\.allow> \["read"\] $/);
 
   assert.equal(settingLiteral([1, 2]), "[1,2]");
   assert.equal(settingLiteral(undefined), "");
