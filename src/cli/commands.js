@@ -55,12 +55,13 @@ export const CLI_OPTIONS = Object.freeze({
   url: { type: "string" },
   provider: { type: "string" },
   out: { type: "string", short: "o" },
+  template: { type: "string", short: "t" },
 });
 
 export const USAGE = `ETNPilot
 
 Usage:
-  etnpilot init [directory]
+  etnpilot init [directory] [--template default|minimal|regulated]
   etnpilot run <task> [--agent name] [--root directory]
     [--worktree | --no-worktree] [--cleanup-worktree] [--publish] [--dry-run]
   etnpilot replay <receipt-file> [--root directory] [--public-key path]
@@ -112,8 +113,8 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
   }
 
   if (command === "init") {
-    const result = await initializeProject(resolve(subcommand ?? "."));
-    console.log(`Initialized ETNPilot in ${result.root}`);
+    const result = await initializeProject(resolve(subcommand ?? "."), { template: values.template });
+    console.log(`Initialized ETNPilot in ${result.root} (template: ${result.template}).`);
     console.log("Next: review '.etnpilot/', commit it, then run 'etnpilot run \"<task>\"'.");
   } else if (command === "run") {
     if (values.worktree && (values["no-worktree"] || values["in-place"])) {

@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 
-export function git(args, { cwd, env = process.env, input } = {}) {
+export function git(args, { cwd, env = process.env, input, allowExitCodes = [] } = {}) {
   if (!Array.isArray(args) || args.some((arg) => typeof arg !== "string")) {
     throw new TypeError("Git arguments must be an array of strings.");
   }
@@ -12,8 +12,13 @@ export function git(args, { cwd, env = process.env, input } = {}) {
     child.stderr.setEncoding("utf8").on("data", (chunk) => { stderr += chunk; });
     child.once("error", reject);
     child.once("close", (code) => {
-      if (code === 0) resolve({ stdout: stdout.trim(), stderr: stderr.trim() });
-      else reject(new Error(`git ${args[0]} failed (${code}): ${stderr.trim()}`));
+      // Some porcelain reports a meaningful result through a non-zero exit,
+      // such as merge-tree signalling conflicts.
+      if (code === 0 || allowExitCodes.includes(code)) {
+        resolve({ stdout: stdout.trim(), stderr: stderr.trim(), exitCode: code });
+      } else {
+        reject(new Error(`git ${args[0]} failed (${code}): ${stderr.trim()}`));
+      }
     });
     if (input) child.stdin.end(input);
     else child.stdin.end();

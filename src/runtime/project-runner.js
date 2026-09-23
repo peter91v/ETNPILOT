@@ -10,6 +10,7 @@ import { loadReceiptSigner } from "../core/receipt-signing.js";
 import { runCheck } from "../checks/runner.js";
 import { CodeGraph, createCodeGraphMcpServer, isCodeGraphSourcePath } from "../codegraph/codegraph.js";
 import { git } from "../git/command.js";
+import { rehearseMerge } from "../git/merge-rehearsal.js";
 import { WorktreeManager } from "../git/worktrees.js";
 import { GitLabPublisher } from "../gitlab/publisher.js";
 import { registerConfiguredProviders } from "../providers/register.js";
@@ -250,6 +251,17 @@ export async function runProject({
   await harness.close();
 
   const gitEvidence = await collectGitEvidence(workspace.path);
+  // Rehearsed even when nothing will be published: knowing the branch has
+  // drifted from its target is evidence a reviewer wants either way.
+  const rehearsal = workspace.managed && config.git?.rehearseMerge !== false
+    ? await rehearseMerge({
+        cwd: workspace.path,
+        remote: config.git?.remote,
+        targetBranch: config.git?.targetBranch ?? "main",
+        fetch: config.git?.rehearseFetch !== false,
+      })
+    : undefined;
+
   let codegraphEvidence;
   if (codegraph) {
     try {
@@ -285,7 +297,7 @@ export async function runProject({
     durationMs: Date.now() - startedAt,
     workspace: { ...workspace, ...(sandbox ? { sandbox: sandbox.describe() } : {}) },
     content: contentEvidence,
-    git: gitEvidence,
+    git: { ...gitEvidence, ...(rehearsal ? { mergeRehearsal: rehearsal } : {}) },
     codegraph: codegraphEvidence,
     observability,
     summary,
@@ -296,6 +308,8 @@ export async function runProject({
     // Unreviewed work from a failed workflow is never pushed, even when
     // fail-fast is disabled and the engine returned without throwing.
     publication = { published: false, reason: "workflow-not-succeeded" };
+  } else if (publisher && rehearsal?.clean === false && config.git?.publishOnConflict !== true) {
+    publication = { published: false, reason: "merge-conflict", conflicts: rehearsal.conflicts };
   } else if (publisher) {
     mergeRequest = await publisher.publish({
       cwd: workspace.path,
@@ -332,6 +346,7 @@ export async function runProject({
     summary,
     content: contentEvidence,
     git: gitEvidence,
+    ...(rehearsal ? { mergeRehearsal: rehearsal } : {}),
     codegraph: codegraphEvidence,
     observability,
     mergeRequest,

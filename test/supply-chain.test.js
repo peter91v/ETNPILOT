@@ -63,10 +63,10 @@ test("the SBOM lists installed components and stays stable", async () => {
 
 test("secret scanning finds real tokens and ignores code and fixtures", () => {
   const findings = scanContent([
-    "const token = 'glpat-ABCDEFGHIJKLMNOPQRSTU';",
+    "const token = 'glpat-ABCDEFGHIJKLMNOPQRSTU';", // etnpilot:allow-secret
     "export const SECRET_PROVIDER_VERSION = SECRET_PROVIDER_API_VERSION;",
     "process.env.TEST_SECRET = 'must-not-cross-boundary';",
-    "const apiKey = 'AKIAIOSFODNN7EXAMPLE';",
+    "const apiKey = 'AKIAIOSFODNN7EXAMPLE';", // etnpilot:allow-secret
     "const allowed = 'glpat-ABCDEFGHIJKLMNOPQRSTU'; // etnpilot:allow-secret",
   ].join("\n"));
 
