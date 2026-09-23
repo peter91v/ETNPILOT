@@ -21,6 +21,10 @@ import { createSecretResolver } from "../secrets/resolver.js";
 import { PolicyEngine } from "../policy/engine.js";
 import { loadPlugins } from "../plugins/load-plugin.js";
 import { summarizeTelemetryFile } from "../observability/telemetry.js";
+import { checkDependencyPolicy, readInstalledPackages } from "../supply/dependencies.js";
+import { generateSbom } from "../supply/sbom.js";
+import { scanForSecrets } from "../supply/secret-scan.js";
+import { buildRunAttestation } from "../supply/attestation.js";
 
 export const CLI_OPTIONS = Object.freeze({
   help: { type: "boolean", short: "h" },
@@ -50,6 +54,7 @@ export const CLI_OPTIONS = Object.freeze({
   path: { type: "string" },
   url: { type: "string" },
   provider: { type: "string" },
+  out: { type: "string", short: "o" },
 });
 
 export const USAGE = `ETNPilot
@@ -86,6 +91,10 @@ Usage:
   etnpilot policy check (--kind kind [--path path | --url url] | --provider name)
     [--agent name] [--root directory]
   etnpilot pipeline status [ref] [--root directory]
+  etnpilot deps check [--root directory]
+  etnpilot sbom [--out file] [--root directory]
+  etnpilot scan secrets [--root directory]
+  etnpilot attest <receipt-file> [--out file] [--root directory]
   etnpilot telemetry summary [workflow-run-id] [--root directory]
   etnpilot doctor [--root directory]
 
@@ -338,6 +347,32 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     console.log(JSON.stringify(report, null, 2));
     const denied = values.provider ? result?.allowed === false : result?.kind === "reject";
     return denied || !result ? 1 : 0;
+  } else if (command === "deps" && subcommand === "check") {
+    const root = resolve(values.root);
+    const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml")).catch(ignoreMissing);
+    const packages = await readInstalledPackages(root);
+    const report = checkDependencyPolicy(packages, config?.supplyChain ?? {});
+    console.log(JSON.stringify(report, null, 2));
+    return report.ok ? 0 : 1;
+  } else if (command === "sbom") {
+    const root = resolve(values.root);
+    const document = await generateSbom(root);
+    await writeOrPrint(values.out ? resolve(root, values.out) : undefined, document);
+  } else if (command === "scan" && (subcommand === "secrets" || subcommand === undefined)) {
+    const root = resolve(values.root);
+    const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml")).catch(ignoreMissing);
+    const report = await scanForSecrets(root, { allow: config?.supplyChain?.secretScan?.allow ?? [] });
+    console.log(JSON.stringify(report, null, 2));
+    return report.ok ? 0 : 1;
+  } else if (command === "attest") {
+    if (!subcommand) throw new Error("A receipt file is required.");
+    const root = resolve(values.root);
+    const publicKeyPaths = await resolveReceiptPublicKeys(root, values["public-key"] ?? []);
+    const statement = await buildRunAttestation(resolve(subcommand), {
+      root,
+      verifiers: await loadReceiptVerifiers(publicKeyPaths),
+    });
+    await writeOrPrint(values.out ? resolve(root, values.out) : undefined, statement);
   } else if (command === "pipeline" && subcommand === "status") {
     const root = resolve(values.root);
     const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"));
@@ -365,6 +400,22 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     throw new Error(`Unknown command: ${positionals.join(" ")}`);
   }
   return 0;
+}
+
+async function writeOrPrint(path, document) {
+  const serialized = `${JSON.stringify(document, null, 2)}\n`;
+  if (!path) {
+    process.stdout.write(serialized);
+    return;
+  }
+  const { writeFile } = await import("node:fs/promises");
+  await writeFile(path, serialized, "utf8");
+  console.log(`Wrote ${path}`);
+}
+
+function ignoreMissing(error) {
+  if (error.code === "ENOENT") return undefined;
+  throw error;
 }
 
 async function diagnose(root) {

@@ -159,6 +159,16 @@ checks:
   # Checks run agent-authored code. They inherit only these variables, so
   # repository and provider credentials stay out of their environment.
   envAllow: []
+supplyChain:
+  # Optional gates. With no licenses configured nothing is enforced.
+  licenses:
+    allow: []
+    deny: []
+  packages:
+    deny: []
+  secretScan:
+    # Fingerprints of reviewed false positives, from 'etnpilot scan secrets'.
+    allow: []
 sandbox:
   # Runs checks and approved commands in a disposable container. Requires a
   # local container runtime; the run fails rather than silently using the host.
