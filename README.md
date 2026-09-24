@@ -46,6 +46,22 @@ npm run etnpilot -- graph build .
 npm test
 ```
 
+### Calling it `etnpilot`
+
+`npm run etnpilot -- <command>` needs no installation, but the `--` is easy to
+forget and only works inside the checkout. To get the bare command, link the
+package once — the `bin` entry is already declared:
+
+```bash
+npm link            # in this checkout; creates the 'etnpilot' command
+etnpilot doctor     # works from any directory, on the checkout it links to
+```
+
+`npm link` symlinks the command at your Node installation's `bin`, so it keeps
+pointing at this working copy: a `git pull` here changes what `etnpilot` runs,
+with nothing to reinstall. `npm unlink -g etnpilot` removes it again. On
+Termux this is the same command and needs no root.
+
 `init` writes the configuration plus a starter `orchestrator` agent and prompt,
 and never overwrites files that already exist. A run needs an agent manifest
 under `.etnpilot/agents/` whose name matches `defaultAgent` or the workflow
