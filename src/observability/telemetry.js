@@ -99,7 +99,9 @@ export class Telemetry {
   recordProviderUsage({ workflowRunId, agentRunId, provider, model, usage = {} }) {
     const normalized = normalizeUsage(usage);
     const key = workflowRunId ?? agentRunId;
-    const rate = this.pricing.models[model] ?? this.pricing.models["*"];
+    const rate = this.pricing.models[model]
+      ?? this.pricing.models[undatedModel(model)]
+      ?? this.pricing.models["*"];
     const estimatedCost = rate ? calculateCost(normalized, rate) : undefined;
     const previous = this.totals.get(key) ?? emptySummary(this.pricing.currency);
     const total = {
@@ -164,6 +166,11 @@ export async function summarizeTelemetryFile(path, { workflowRunId } = {}) {
     throw error;
   });
   const summary = emptySummary();
+  // Which models went without a rate. 'not priced' with no model named leaves
+  // someone setting a rate for a model the runs never used, and the card says
+  // the same thing afterwards.
+  const unpriced = new Map();
+  const priced = new Set();
   let spans = 0;
   for (const line of content.split("\n").filter(Boolean)) {
     const payload = JSON.parse(line);
@@ -179,17 +186,37 @@ export async function summarizeTelemetryFile(path, { workflowRunId } = {}) {
           summary.cacheReadTokens += attributes["gen_ai.usage.cache_read.input_tokens"] ?? 0;
           summary.cacheWriteTokens += attributes["gen_ai.usage.cache_creation.input_tokens"] ?? 0;
           summary.providerUnits += attributes["etnpilot.provider.usage_units"] ?? 0;
+          const model = attributes["gen_ai.request.model"] ?? "unknown";
           if (attributes["etnpilot.cost.estimated"] !== undefined) {
             summary.estimatedCost = (summary.estimatedCost ?? 0) + attributes["etnpilot.cost.estimated"];
             summary.pricedInvocations += 1;
-          } else summary.unpricedInvocations += 1;
+            priced.add(model);
+          } else {
+            summary.unpricedInvocations += 1;
+            unpriced.set(model, (unpriced.get(model) ?? 0) + 1);
+          }
           summary.invocations += 1;
           summary.currency ??= attributes["etnpilot.cost.currency"];
         }
       }
     }
   }
-  return { version: TELEMETRY_VERSION, spans, workflowRunId, ...summary };
+  return {
+    version: TELEMETRY_VERSION,
+    spans,
+    workflowRunId,
+    ...summary,
+    // A cost is recorded when the call happens, so a rate set afterwards
+    // never reaches a call already on disk. Naming the models says which rate
+    // is missing, and how many calls predate the one that exists.
+    ...(unpriced.size > 0
+      ? {
+        unpricedModels: [...unpriced]
+          .map(([model, calls]) => ({ model, calls, ...(priced.has(model) ? { pricedSince: true } : {}) }))
+          .sort((left, right) => right.calls - left.calls),
+      }
+      : {}),
+  };
 }
 
 function normalizeConfig(config = {}) {
@@ -411,6 +438,15 @@ function providerAttributes(accounting = {}) {
 
 export function telemetryProviderAttributes(accounting) {
   return providerAttributes(accounting);
+}
+
+// Providers answer with the dated snapshot they actually served —
+// 'gpt-5-mini-2025-08-07' for a request that named 'gpt-5-mini'. A rate keyed
+// by the name someone configured must reach it, or every rate goes stale the
+// next time the provider rotates its snapshot. The suffix is an exact shape,
+// not a prefix guess: 'gpt-5' never picks up the rate for 'gpt-5-mini'.
+function undatedModel(model) {
+  return typeof model === "string" ? model.replace(/-\d{4}-\d{2}-\d{2}$/, "") : model;
 }
 
 function emptySummary(currency) {

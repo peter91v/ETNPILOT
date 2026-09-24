@@ -77,6 +77,7 @@ test("the OpenAI-compatible provider runs an approved tool loop", async () => {
   ];
   const provider = createOpenAICompatibleProvider({
     baseUrl: "https://models.example.invalid/v1",
+    apiKey: "key",
     model: "test-model",
     tools: true,
     workingDirectory: root,
@@ -112,6 +113,7 @@ test("the tool loop is bounded", async () => {
   const root = await mkdtemp(join(tmpdir(), "etnpilot-tool-bound-"));
   const provider = createOpenAICompatibleProvider({
     baseUrl: "https://models.example.invalid/v1",
+    apiKey: "key",
     tools: true,
     workingDirectory: root,
     maxToolIterations: 2,
@@ -133,4 +135,47 @@ test("the tool loop is bounded", async () => {
     }),
     /exceeded 2 tool iterations/,
   );
+});
+
+test("a command that failed says why, and an optional path may be left empty", async () => {
+  // Reported from a real run: 'run_command did not succeed: no reason
+  // recorded', twice. The reason was recorded — the exit code and the output
+  // were in the result the model read — it just never reached the receipt.
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-tool-reasons-"));
+  await writeFile(join(root, "README.md"), "x\n");
+  const tools = createWorkspaceTools({ workingDirectory: root });
+  const approving = { approve: async () => ({ kind: "approve-once" }) };
+
+  const failed = await tools.invoke("run_command", {
+    command: ["node", "-e", 'console.error("boom: missing config"); process.exit(2)'],
+  }, approving);
+  assert.equal(failed.ok, false);
+  assert.equal(failed.exitCode, 2);
+  assert.match(failed.error, /'node' exited with code 2: boom: missing config/);
+
+  // A command that fails silently still says which command and which code.
+  const quiet = await tools.invoke("run_command", { command: ["node", "-e", "process.exit(3)"] }, approving);
+  assert.match(quiet.error, /'node' exited with code 3, and said nothing\./);
+
+  // And the same run reported "list_files did not succeed: 'path' must be a
+  // non-empty string" — for a tool whose own schema marks 'path' optional.
+  for (const args of [{ path: "" }, { path: "  " }, {}]) {
+    const listed = await tools.invoke("list_files", args, approving);
+    assert.equal(listed.ok, true, JSON.stringify(args));
+    assert.equal(listed.path, ".");
+    assert.deepEqual(listed.entries, [{ name: "README.md", type: "file" }]);
+  }
+
+  // Where the path is required, an empty one is still a mistake and says so.
+  const read = await tools.invoke("read_file", { path: "" }, approving);
+  assert.equal(read.ok, false);
+  assert.match(read.error, /'path' must be a non-empty string/);
+
+  // Arguments that could not be read became an empty object, so the model was
+  // told 'content must be a string' when its JSON was the problem.
+  const broken = await tools.invoke("write_file", "{not json", approving);
+  assert.equal(broken.ok, false);
+  assert.match(broken.error, /Tool arguments are not valid JSON/);
+  const wrongShape = await tools.invoke("write_file", "[1,2]", approving);
+  assert.match(wrongShape.error, /Tool arguments must be a JSON object\./);
 });

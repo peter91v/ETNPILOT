@@ -245,11 +245,21 @@ function onlyEnable(current, value) {
   return { ok: true, value };
 }
 
+// Paths that must not be flattened further: their keys are external strings
+// this project does not choose — a model id ('gpt-5.4', 'gpt-4.1') — and
+// every path in this project is dot-separated. Splitting on '.' inside such
+// a key turns one entry into two nested ones ('gpt-5' -> '4'), silently, for
+// both reading and writing. Stopping here keeps the whole map as one leaf,
+// which is also the only shape 'setSetting' can write back without the same
+// corruption — see docs/trying-it-out.md's pricing section.
+const OPAQUE_KEY_PATHS = new Set(["observability.pricing.models"]);
+
 export function leaves(value, prefix = "") {
   const entries = [];
   for (const [key, item] of Object.entries(value ?? {})) {
     const path = prefix ? `${prefix}.${key}` : key;
-    if (isPlainObject(item) && Object.keys(item).length > 0) entries.push(...leaves(item, path));
+    if (OPAQUE_KEY_PATHS.has(path)) entries.push([path, item]);
+    else if (isPlainObject(item) && Object.keys(item).length > 0) entries.push(...leaves(item, path));
     else entries.push([path, item]);
   }
   return entries;

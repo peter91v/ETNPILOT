@@ -38,13 +38,29 @@ the approval inbox.
 npm install
 npm install @github/copilot-sdk
 npm run etnpilot -- init .            # or: init . --template regulated
-npm run etnpilot -- doctor            # verify node, git, sqlite, and the SDK
+npm run etnpilot -- doctor            # node, git, sqlite, and the provider a run would reach
 # Describe at least one agent under .etnpilot/agents/, then:
 git add .etnpilot && git commit -m "Add ETNPilot configuration"
 npm run etnpilot -- content lock --root .
 npm run etnpilot -- graph build .
 npm test
 ```
+
+### Calling it `etnpilot`
+
+`npm run etnpilot -- <command>` needs no installation, but the `--` is easy to
+forget and only works inside the checkout. To get the bare command, link the
+package once — the `bin` entry is already declared:
+
+```bash
+npm link            # in this checkout; creates the 'etnpilot' command
+etnpilot doctor     # works from any directory, on the checkout it links to
+```
+
+`npm link` symlinks the command at your Node installation's `bin`, so it keeps
+pointing at this working copy: a `git pull` here changes what `etnpilot` runs,
+with nothing to reinstall. `npm unlink -g etnpilot` removes it again. On
+Termux this is the same command and needs no root.
 
 `init` writes the configuration plus a starter `orchestrator` agent and prompt,
 and never overwrites files that already exist. A run needs an agent manifest
@@ -184,11 +200,41 @@ routing:
       require: [chat]
 ```
 
-Built-in GitHub Copilot sessions provide `chat`, `tools`, `permissions`, and `skills`; the
-OpenAI-compatible adapter currently provides `chat`. ETNPilot skips unavailable or incompatible
+The route is, in order: the agent's own `provider`, then `routing.rules`, then
+`routing.defaults`, then the project's `defaultProvider`. An agent manifest that names no
+provider takes `defaultProvider` too, so one provider does not have to be repeated in every
+agent.
+
+`etnpilot init` configures all three built-in providers, so switching is one setting and
+not an edit to every agent manifest:
+
+| Provider | `type` | Credential | Notes |
+| --- | --- | --- | --- |
+| `github-copilot` | `github-copilot` | a Copilot subscription, through the Copilot SDK | `chat`, `tools`, `permissions`, `skills`. No SDK build exists for Android. |
+| `anthropic` | `anthropic` | `ANTHROPIC_API_KEY` (secret `anthropic.apiKey`) | The Messages API, spoken directly. `chat`, and `tools` when `tools: true`. |
+| `openai` | `openai-compatible` | `OPENAI_API_KEY` (secret `openai.apiKey`) | Any OpenAI-compatible endpoint. A model server on loopback needs no key at all. |
+
+```sh
+export OPENAI_API_KEY=sk-...
+npm run etnpilot -- config set defaultProvider openai
+```
+
+The generated `routing.defaults` is empty on purpose, so `defaultProvider` alone decides and
+nothing quietly outranks it. A key is read when the provider is used, not when it is
+configured: a project can configure all three and run with one of them. A provider that is
+reached without its key names the variable to set — the one its own
+`apiKeySecret` maps to, not a generic default. A request the API refuses keeps
+the API's own message, so a rejected key and a model the account cannot reach
+are told apart.
+
+ETNPilot skips unavailable or incompatible
 providers. It retries with another provider only when the adapter marks the failure as both
 retryable and safe to replay. The selected provider and all routing attempts are stored in the run
 receipt.
+
+When nothing in the route works, the error says what was tried, why each one was passed over or
+failed, and which providers are configured and ready — a provider that refused a connection is
+named as such rather than reported as "no provider can satisfy".
 
 ## Secret providers
 
@@ -465,11 +511,15 @@ above everyone else's. See [docs/tui.md](docs/tui.md).
 ```bash
 etnpilot ui --root .
 # ETNPilot review UI: http://127.0.0.1:8788/?token=…
+# Opened it with 'xdg-open'. Use --no-open to keep it in the terminal.
 ```
 
-Pending approvals with their full command, the workflow queue, and finished
-runs read from their receipts. It binds to localhost, requires the token it
-prints, and loads nothing from anywhere. See [docs/review-ui.md](docs/review-ui.md).
+The same things the terminal interface shows, in a browser: approvals with
+their full command and the rule that stopped them, the queue with cancel and
+resume, a run's sealed receipt, the worktrees, the project's merge requests,
+the settings with their layers, and a box to start a run whose approvals come
+back to the same page. It binds to localhost, requires the token it prints, and
+loads nothing from anywhere. See [docs/review-ui.md](docs/review-ui.md).
 
 ## Sandboxed execution
 
@@ -517,6 +567,36 @@ workflow:
       distinctProviders: true
       needs: [build]
 ```
+
+## A step that must change something
+
+A model can describe a change, or ask whether it may make one, and return a
+perfectly successful message having touched nothing. A step that exists to
+change the repository says so, and is failed when it did not:
+
+```yaml
+workflow:
+  steps:
+    - id: build
+      type: agent
+      agent: builder
+      needs: [plan]
+      expect: tool-use
+```
+
+The step fails unless at least one tool call succeeded, and the error says
+which it is — no tool called at all, or every call refused — and quotes what
+the agent answered instead. Steps without `expect` are unaffected: most steps
+are answers, not changes.
+
+This is the mechanical half. The other half is the prompt: approval in
+ETNPilot is mechanical, not conversational. The agent calls the tool, and the
+harness asks the human before the effect happens. An instruction that tells an
+agent to "ask for approval before writing" produces prose that reaches nobody
+and leaves the work undone — the project instructions and the starter prompt
+say so explicitly.
+
+## Quorum review
 
 Each reviewer ends its answer with `VERDICT: approve` or `VERDICT: reject`;
 anything else is an abstention. Two reviewers on the same provider count once,

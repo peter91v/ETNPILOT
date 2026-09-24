@@ -5,11 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createStyle, stripAnsi } from "../src/tui/ansi.js";
-import { mergeEntries, renderApp, renderMerges, renderWorktrees } from "../src/tui/render.js";
+import { mergeEntries, renderApp, renderMerges, renderWorktreeChanges, renderWorktrees } from "../src/tui/render.js";
 import { createTuiApp } from "../src/tui/app.js";
 import { git } from "../src/git/command.js";
 import { WorktreeManager } from "../src/git/worktrees.js";
-import { openProjectState, readMergeRequests, readWorktrees } from "../src/runtime/project-state.js";
+import { openProjectState, parseDiff, readMergeRequests, readWorktrees } from "../src/runtime/project-state.js";
 
 const style = createStyle({ color: false });
 
@@ -255,3 +255,178 @@ function fakeOutput() {
   output.write = (text) => output.written.push(text);
   return output;
 }
+
+test("opening a worktree says which files it is holding", async () => {
+  const root = await createRepository();
+  const manager = new WorktreeManager(root);
+  await manager.create({ name: "run-dirty", branch: "etnpilot/run-dirty" });
+  const workspace = join(root, ".etnpilot", "worktrees", "run-dirty");
+  await writeFile(join(workspace, "draft.txt"), "unsaved\n");
+  await writeFile(join(workspace, "README.md"), "# changed\n");
+  await mkdir(join(workspace, ".etnpilot", "state"), { recursive: true });
+  await writeFile(join(workspace, ".etnpilot", "state", "runs.jsonl"), "{}\n");
+
+  const state = await openProjectState({ root });
+  try {
+    const changes = await state.worktreeChanges("run-dirty");
+    const byPath = Object.fromEntries(changes.entries.map((entry) => [entry.path, entry]));
+    // git counts what git tracks; an untracked file is entirely added.
+    assert.deepEqual(
+      { added: byPath["README.md"].added, deleted: byPath["README.md"].deleted },
+      { added: 1, deleted: 1 },
+    );
+    assert.equal(byPath["draft.txt"].added, 1);
+    assert.equal(byPath[".etnpilot/state/"].directory, true);
+    // A modification is not an addition, and the artifacts ETNPilot writes
+    // into a workspace are listed but marked as not a person's work.
+    assert.equal(byPath["README.md"].label, "modified");
+    assert.equal(byPath["README.md"].ignorable, false);
+    assert.equal(byPath["draft.txt"].label, "untracked");
+    assert.equal(byPath[".etnpilot/state/"].ignorable, true);
+    assert.equal(changes.blocking, 2);
+
+    // A name that is not a worktree of this project never reaches the disk.
+    await assert.rejects(() => state.worktreeChanges("../elsewhere"), TypeError);
+    await assert.rejects(() => state.worktreeChanges("run-absent"), TypeError);
+
+    const app = createTuiApp({ state, output: fakeOutput(), input: new EventEmitter() });
+    try {
+      await app.refresh();
+      await app.handle("5");
+      await app.handle("g");
+      const index = app.worktrees.entries.findIndex((entry) => entry.name === "run-dirty");
+      await moveTo(app, index);
+      await app.handle("\r");
+      assert.equal(app.detail, true);
+      const screen = stripAnsi(app.frame().join("\n"));
+      // How much changed, not only that something did.
+      assert.match(screen, /modified\s+\+1 −1 README\.md/);
+      assert.match(screen, /untracked\s+\+1 draft\.txt/);
+      // An untracked directory has no line count to give.
+      assert.match(screen, /untracked\s+dir \.etnpilot\/state\//);
+      assert.match(screen, /2 unsaved; removing is refused/);
+      // Leaving the detail drops what it was showing rather than keeping it.
+      await app.handle("\u001B");
+      assert.equal(app.detail, false);
+      assert.equal(app.worktreeChanges, undefined);
+    } finally {
+      app.stop();
+    }
+  } finally {
+    state.close();
+  }
+});
+
+test("a clean worktree says there is nothing to lose", async () => {
+  const root = await createRepository();
+  const manager = new WorktreeManager(root);
+  await manager.create({ name: "run-clean", branch: "etnpilot/run-clean" });
+  const state = await openProjectState({ root });
+  try {
+    const changes = await state.worktreeChanges("run-clean");
+    assert.deepEqual(changes.entries, []);
+    assert.equal(changes.blocking, 0);
+    const worktrees = await state.worktrees();
+    const frame = renderWorktreeChanges({}, {
+      style,
+      width: 90,
+      height: 14,
+      cursor: worktrees.entries.findIndex((entry) => entry.name === "run-clean"),
+      worktrees,
+      changes: { ...changes, name: "run-clean" },
+    }).join("\n");
+    assert.match(frame, /Nothing changed here/);
+  } finally {
+    state.close();
+  }
+});
+
+test("a file in a worktree shows the lines it changed", async () => {
+  const root = await createRepository();
+  const manager = new WorktreeManager(root);
+  await manager.create({ name: "run-diff", branch: "etnpilot/run-diff" });
+  const workspace = join(root, ".etnpilot", "worktrees", "run-diff");
+  await writeFile(join(workspace, "README.md"), "# fixture\nsecond line\nthird line\n");
+  await writeFile(join(workspace, "new.txt"), "one\ntwo\n");
+
+  const state = await openProjectState({ root });
+  try {
+    const diff = await state.worktreeDiff("run-diff", "README.md");
+    assert.equal(diff.file, "README.md");
+    assert.deepEqual({ added: diff.added, deleted: diff.deleted, hunks: diff.hunks }, { added: 2, deleted: 0, hunks: 1 });
+    // Every line carries the number it has on its own side.
+    const added = diff.lines.filter((line) => line.kind === "add");
+    assert.deepEqual(added.map((line) => [line.newLine, line.text]), [[2, "second line"], [3, "third line"]]);
+    assert.equal(diff.lines.find((line) => line.kind === "context").oldLine, 1);
+    assert.equal(diff.lines[0].kind, "hunk");
+
+    // A file git does not track yet is a diff against nothing.
+    const untracked = await state.worktreeDiff("run-diff", "new.txt");
+    assert.equal(untracked.added, 2);
+    assert.deepEqual(untracked.lines.filter((line) => line.kind === "add").map((line) => line.text), ["one", "two"]);
+
+    // A file this worktree never reported is refused before anything is read.
+    await assert.rejects(() => state.worktreeDiff("run-diff", "../../etc/passwd"), TypeError);
+    await assert.rejects(() => state.worktreeDiff("run-diff", "README.md.orig"), TypeError);
+
+    const app = createTuiApp({ state, output: fakeOutput(), input: new EventEmitter() });
+    try {
+      await app.refresh();
+      await app.handle("5");
+      await app.handle("g");
+      await moveTo(app, app.worktrees.entries.findIndex((entry) => entry.name === "run-diff"));
+      await app.handle("\r");
+      assert.equal(app.worktreeChanges.entries.length, 2);
+      // Enter again, on the file the cursor is on, shows what it changed.
+      await app.handle("\r");
+      assert.equal(app.worktreeDiff.file, "README.md");
+      const screen = stripAnsi(app.frame().join("\n"));
+      assert.match(screen, /README\.md\s+\+2 −0 in 1 place/);
+      assert.match(screen, /\+second line/);
+      assert.match(screen, /↑↓ scroll/);
+
+      // Escape steps back to the files, then out of the worktree.
+      await app.handle("\u001B");
+      assert.equal(app.worktreeDiff, undefined);
+      assert.equal(app.detail, true);
+      await app.handle("\u001B");
+      assert.equal(app.detail, false);
+    } finally {
+      app.stop();
+    }
+  } finally {
+    state.close();
+  }
+});
+
+test("a diff is read as lines, with the number each one has", () => {
+  const parsed = parseDiff([
+    "diff --git a/x b/x",
+    "index 1111111..2222222 100644",
+    "--- a/x",
+    "+++ b/x",
+    "@@ -3,4 +3,5 @@ function head() {",
+    " kept",
+    "-gone",
+    "+added one",
+    "+added two",
+    " also kept",
+    "\\ No newline at end of file",
+  ].join("\n"));
+  assert.deepEqual({ added: parsed.added, deleted: parsed.deleted, hunks: parsed.hunks }, { added: 2, deleted: 1, hunks: 1 });
+  // The header lines are not part of what changed.
+  assert.equal(parsed.lines.filter((line) => line.text.startsWith("diff --git")).length, 0);
+  assert.deepEqual(parsed.lines.map((line) => [line.kind, line.oldLine, line.newLine]), [
+    ["hunk", undefined, undefined],
+    ["context", 3, 3],
+    ["remove", 4, undefined],
+    ["add", undefined, 4],
+    ["add", undefined, 5],
+    ["context", 5, 6],
+    ["note", undefined, undefined],
+  ]);
+  // A long diff says it was cut rather than pretending to be whole.
+  const long = parseDiff(["@@ -1,1 +1,1 @@", ...Array.from({ length: 50 }, (_, index) => "+line " + index)].join("\n"), { limit: 10 });
+  assert.equal(long.cut, true);
+  assert.equal(long.lines.length, 10);
+});

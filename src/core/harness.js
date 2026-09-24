@@ -85,7 +85,10 @@ export class Harness {
 
   registerAgent(agent) {
     if (!agent?.name || (!agent.provider && !agent.providers?.length) || !agent.prompt) {
-      throw new TypeError("An agent requires name, at least one provider, and prompt.");
+      throw new TypeError(
+        `An agent requires name, prompt, and a provider: ${agent?.name ? `'${agent.name}'` : "this manifest"}`
+        + " names none, and the project sets no 'defaultProvider' to fall back on.",
+      );
     }
     this.agents.register(agent.name, Object.freeze({ skills: [], subagents: [], requires: [], ...agent }));
     return agent;
@@ -174,6 +177,11 @@ export class Harness {
         runId,
         parentRunId,
         agent: agentName,
+        // Which workflow step this invocation belongs to, when it is one — a
+        // subagent spawned from inside an agent carries none, and nests under
+        // its parent instead. This is what lets a run's agents be read back
+        // as the tree they actually ran in, rather than a flat list of lines.
+        ...(metadata.workflowStep ? { workflowStep: metadata.workflowStep } : {}),
         provider: routed.provider,
         providerAttempts: routed.attempts,
         status: "succeeded",
@@ -198,6 +206,7 @@ export class Harness {
         runId,
         parentRunId,
         agent: agentName,
+        ...(metadata.workflowStep ? { workflowStep: metadata.workflowStep } : {}),
         provider: error.provider ?? agent.provider,
         providerAttempts: error.providerAttempts ?? [],
         status: "failed",

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { join, resolve } from "node:path";
+import { access } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { loadConfig } from "../config/load.js";
 import { settingsEvidence } from "../config/layers.js";
 import { loadProject } from "../content/load-project.js";
@@ -56,6 +57,7 @@ export async function runProject({
   signal,
   metadata = {},
   secretResolver,
+  onEvent,
 } = {}) {
   if (!input) throw new TypeError("A task prompt is required.");
   const repositoryRoot = resolve(root);
@@ -76,6 +78,10 @@ export async function runProject({
     policy,
     secrets,
   });
+  // A surface that started this run can watch it: which step is working and
+  // which agent is inside it. An observer never changes the run — the event
+  // bus contains a listener that throws.
+  if (onEvent) harness.events.on("*", onEvent);
   let config;
   let gitLabToken;
   let receiptSigner;
@@ -188,12 +194,19 @@ export async function runProject({
         harness.providers.replace(name, recorder.wrap(harness.providers.get(name)));
       }
     }
-    harness.setProviderRouter(new ProviderRouter(harness.providers, config.routing, { policy }));
+    harness.setProviderRouter(new ProviderRouter(harness.providers, config.routing, {
+      policy,
+      defaultProvider: config.defaultProvider,
+    }));
     workflow = normalizeWorkflow(config.workflow, {
       requested: agent,
       fallback: config.defaultAgent ?? "orchestrator",
     });
     assertWorkflowAgents(harness, workflow);
+    await harness.events.emit("workflow.planned", {
+      runId,
+      steps: workflow.steps.map((step) => step.id),
+    });
   } catch (error) {
     codegraph?.graph.close();
     await harness.close();
@@ -225,7 +238,7 @@ export async function runProject({
   try {
     summary = await engine.run(workflow.steps, async (step, execution) => {
       if (step.type === "agent") {
-        return harness.run({
+        const receipt = await harness.run({
           agent: step.agent,
           input: composeAgentInput(input, execution.dependencyResults),
           metadata: {
@@ -237,6 +250,8 @@ export async function runProject({
           },
           signal: execution.signal,
         });
+        assertStepExpectation(step, receipt);
+        return receipt;
       }
       if (step.type === "quorum") {
         return runQuorumStep(step, harness, {
@@ -253,6 +268,7 @@ export async function runProject({
         if (dryRun) return { name: step.name ?? step.id, command: step.command, skipped: true, reason: "dry-run" };
         return runObservedCheck(step, {
           cwd: workspace.path,
+          root,
           signal: execution.signal,
           env: checkEnv,
           sandbox,
@@ -261,7 +277,12 @@ export async function runProject({
           workflowRunId: runId,
         });
       }
-      throw new Error(`Unsupported workflow step type: '${step.type}'.`);
+      // Which step, and what it may be: 'type: undefined' on its own leaves
+      // someone reading a workflow file with no idea which line is wrong.
+      throw new Error(
+        `Workflow step '${step.id}' has an unsupported type: '${step.type}'.`
+        + " Every step needs one of 'agent', 'quorum' or 'check'.",
+      );
     }, { signal, context: { runId, workspace } });
     contentEvidence = await verifyContentAfterRun(workspace.path, config, contentEvidence);
   } catch (error) {
@@ -439,10 +460,34 @@ export async function runProject({
   };
 }
 
-const DEFAULT_CHECK_ENV_ALLOW = Object.freeze(["PATH", "HOME", "LANG", "LC_ALL", "TZ", "TMPDIR"]);
+// PATH and the locale are what any command needs. The rest are what one needs
+// on Termux, where a check without them fails before it runs: LD_PRELOAD holds
+// libtermux-exec, which is what lets Android execute a script's interpreter at
+// all — without it 'npm' dies as "env: 'node': Permission denied" — and PREFIX,
+// LD_LIBRARY_PATH and the ANDROID_* pair are read by the loader and by every
+// wrapper script. None of them carry credentials, which is what this list
+// keeps out; they come from the same shell that started the run, exactly as
+// PATH does.
+const DEFAULT_CHECK_ENV_ALLOW = Object.freeze([
+  "PATH",
+  "HOME",
+  "LANG",
+  "LC_ALL",
+  "TZ",
+  "TMPDIR",
+  "LD_PRELOAD",
+  "LD_LIBRARY_PATH",
+  "PREFIX",
+  "ANDROID_DATA",
+  "ANDROID_ROOT",
+]);
 
 // Checks execute code the agent just wrote. They inherit an allow-listed
 // environment so repository and provider credentials cannot be read by them.
+// Exported under its own name so a test can assert what a check inherits and
+// what it must not, without starting a run to find out.
+export const checkEnvironmentForTest = (env, config) => checkEnvironment(env, config);
+
 function checkEnvironment(env, config = {}) {
   const extra = config.envAllow ?? [];
   if (!Array.isArray(extra) || extra.some((name) => typeof name !== "string" || !/^[A-Z][A-Z0-9_]*$/.test(name))) {
@@ -601,7 +646,28 @@ async function runSequentially(agents, run) {
   return receipts;
 }
 
-async function runObservedCheck(step, { cwd, signal, env, telemetry, trace, workflowRunId, sandbox }) {
+// A linked worktree is a fresh checkout: it has the repository's files and no
+// 'node_modules' of its own. That is only a problem when nothing above it has
+// one either — a worktree inside the project, which is where ETNPilot puts
+// them, resolves to the checkout's own, exactly as Node does. Saying
+// 'dependencies are missing' about a worktree that finds them would be the
+// same invention this file keeps removing, so the walk up is done rather than
+// assumed.
+export const dependenciesMissingForTest = (cwd, root) => dependenciesMissing(cwd, root);
+
+async function dependenciesMissing(cwd, root) {
+  if (resolve(cwd) === resolve(root)) return false;
+  if (!await access(join(cwd, "package.json")).then(() => true, () => false)) return false;
+  let directory = resolve(cwd);
+  for (;;) {
+    if (await access(join(directory, "node_modules")).then(() => true, () => false)) return false;
+    const parent = dirname(directory);
+    if (parent === directory) return true;
+    directory = parent;
+  }
+}
+
+async function runObservedCheck(step, { cwd, signal, env, telemetry, trace, workflowRunId, sandbox, root }) {
   const span = telemetry?.startSpan("etnpilot.check", {
     traceId: trace.traceId,
     parentSpanId: trace.parentSpanId,
@@ -625,6 +691,12 @@ async function runObservedCheck(step, { cwd, signal, env, telemetry, trace, work
         "etnpilot.duration_ms": Date.now() - startedAt,
       },
     });
+    if (root && await dependenciesMissing(cwd, root)) {
+      error.message += `\nThis ran in ${cwd}, a linked worktree with a 'package.json' and no`
+        + " 'node_modules' in it or above it, so the project's dependencies are not installed"
+        + " where the check ran. Install them there, or run in the checkout itself with"
+        + " 'etnpilot config set workspace.mode in-place' — that stays local.";
+    }
     throw error;
   }
 }
@@ -659,6 +731,39 @@ function normalizeWorkflow(workflow = {}, { requested, fallback } = {}) {
     maxSteps: workflow.maxSteps ?? 50,
     steps,
   };
+}
+
+// What a step must have done, not only that its agent answered. A model that
+// describes a change, or asks whether it may make one, returns a perfectly
+// successful message and touches nothing — and a workflow that calls that
+// 'succeeded' is reporting work that did not happen. A step that exists to
+// change the repository says so, and is held to it.
+const STEP_EXPECTATIONS = new Set(["tool-use"]);
+
+// Exported under its own name so a test can put a step and a receipt to it
+// without starting a run.
+export const assertStepExpectationForTest = (step, receipt) => assertStepExpectation(step, receipt);
+
+function assertStepExpectation(step, receipt) {
+  if (step.expect === undefined) return;
+  if (!STEP_EXPECTATIONS.has(step.expect)) {
+    throw new TypeError(
+      `Workflow step '${step.id}' expects '${step.expect}', which is not something a step can expect.`
+      + ` The only one is 'tool-use'.`,
+    );
+  }
+  const calls = receipt?.result?.toolCalls ?? receipt?.result?.steps ?? [];
+  if (calls.some((call) => call.ok !== false)) return;
+  const refused = calls.filter((call) => call.ok === false);
+  const said = String(receipt?.result?.text ?? "").trim().replace(/\s+/g, " ").slice(0, 300);
+  throw new Error(
+    `Workflow step '${step.id}' ran agent '${step.agent}' and changed nothing:`
+    + (refused.length > 0
+      ? ` every tool call was refused (${refused.map((call) => call.tool ?? "a tool").join(", ")}).`
+      : " it called no tool at all.")
+    + " This step declares 'expect: tool-use', so describing the work is not doing it."
+    + (said ? ` The agent answered: ${said}` : ""),
+  );
 }
 
 function composeAgentInput(input, dependencies) {

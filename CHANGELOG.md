@@ -6,6 +6,174 @@ pre-1.0, so breaking changes may appear in any release.
 
 ## [Unreleased]
 
+### Added — roadmap UI-1: the page does what the TUI does
+
+- The review page resumes queue jobs, opens a run's receipt (branch, sandbox,
+  merge rehearsal and its collisions, every approval with who decided it, and
+  the settings layers that were in effect), lists and changes settings against
+  the same layers as the CLI and the TUI, and starts runs whose approvals come
+  back to the same page.
+- `POST /api/runs/start` answers `202` rather than holding the request for the
+  whole run. What is running and what a run failed with are part of the state
+  the page polls (`active`, `recentRunErrors`), and closing the server stops
+  the runs it started.
+- Runs started from a surface are tracked in `project-state.js` rather than in
+  each surface, so the TUI and the page cannot disagree about what is running.
+- A refusal is an answer: `SettingsRefused` and the queue's and inbox's state
+  errors are `409` with `{ error, path, reason }`, unparsable YAML is `400`,
+  and a receipt name that is not this project's is refused before anything is
+  read.
+- The page also lists the worktrees and the project's merge requests, with the
+  same `removeIfClean` behaviour as the other surfaces.
+
+### Fixed — 'no provider can satisfy' said the least useful true thing
+
+- `defaultProvider` was written into every generated project and used nowhere.
+  It is now the last entry in the route — after the agent's own provider,
+  `routing.rules` and `routing.defaults` — and an agent manifest that names no
+  provider takes it, so one provider does not have to be repeated in every
+  agent.
+- When no provider works, the error names what was tried, what was skipped and
+  why, **what failed and with which message**, and which providers are
+  configured and ready. A provider that was reached and refused the connection
+  was previously reported as "no provider can satisfy these capabilities".
+- The OpenAI-compatible adapter reports the cause beneath `fetch failed`, so a
+  wrong `baseUrl` reads as `connect ECONNREFUSED 127.0.0.1:45999`.
+
+### Changed — the run dialog offers the project's agents
+
+- The agent field is a dropdown of the agents in `.etnpilot/agents/`, and each
+  choice says which provider it would use — its own or the project's default —
+  and what it requires. A name typed by hand is a run that fails a minute
+  later.
+
+### Changed — the menu button collapses the sidebar
+
+- It is back on every width. Wide, it collapses the sidebar to a rail of icons
+  that keeps every view and its count reachable, and remembers that per
+  browser; narrow, it is still the drawer. Removing the button was the wrong
+  half of the fix.
+
+### Added — a worktree's changes, in lines
+
+- Each file in a worktree says how many lines it added and deleted; an
+  untracked file is counted as entirely added, and a binary or oversized one
+  says so rather than being read to be counted.
+- Opening a file shows its diff with the number every line has on its own
+  side, in the page and in the terminal interface. The file must be one that
+  worktree itself reported as changed, so a name from a surface never decides
+  what is read from disk.
+
+### Fixed — the menu button had no function
+
+- The button was visible at every width because `.btn` declares a `display` of
+  its own further down the stylesheet, and at equal specificity the later rule
+  wins. Above 860px it toggled a sidebar that is not a drawer, so it did
+  nothing at all. It is now shown only where it opens something.
+- A view's own detail decides its keys before the generic one: the terminal
+  interface promised "approve" and "reject" under a worktree's file list.
+
+### Changed — the settings control is in the row
+
+- A setting that accepts one of a known list is a dropdown in its own row, and
+  choosing saves it; a refusal puts the row back rather than showing a change
+  that did not happen. Everything else shows its value with a caret that opens
+  the editor, and a `locked` setting has no control at all. The dropdowns were
+  there before, but only inside the editor behind a click on the name, which
+  is the same as not being there.
+- In the terminal interface the arrows step through those same values while
+  editing.
+- A table cell holding a control is that column's cell again: it was being
+  right-aligned as if it were an action, which is why the setting names sat
+  against the value column.
+
+### Added — `etnpilot ui` opens the page
+
+- At a terminal the command opens the review page in a browser, because the
+  link carries a token nobody wants to retype. Not when the output is a pipe,
+  not under `CI`, not with `BROWSER=none`, and not with `--no-open`; `--open`
+  asks for it anyway. `BROWSER` chooses the opener, and `termux-open-url` is
+  tried before `xdg-open`, since a phone is a place this runs.
+- The URL is passed as an argument and never through a shell, the opener is
+  detached so the browser outlives the command and writes nothing into the
+  terminal, and an opener that is missing or fails is reported rather than
+  failing the server that is already listening.
+
+### Added — four things the surfaces were not saying
+
+- **Settings offer the values they accept.** Where a setting takes one of a
+  known list, the page shows a dropdown; where it takes a set, checkboxes; the
+  terminal interface names the same values under the editor. The lists are the
+  ones the code validates against, and `test/settings.test.js` checks each
+  offered value against its own validator, so a surface cannot suggest a value
+  a run would then refuse. Providers come from the project's own
+  configuration rather than from a fixed list.
+- **A worktree says which files it is holding.** Opening one lists them with
+  what happened to each, and marks the state ETNPilot writes itself apart from
+  a person's work — so "1 unsaved, removing refused" can be read rather than
+  taken on trust.
+- **A run says why it ended.** Opening a receipt leads with the failing step
+  and its own error, the steps that never ran because of it, a rejected
+  approval, and whether it was published, followed by every step with its
+  attempts and duration.
+- **Usage is shown.** Tokens sent, tokens read from cache, provider calls and
+  estimated cost: per run in its receipt, and for the project on the overview.
+  Where `observability.enabled` is false, the surfaces say so instead of
+  showing a zero that looks like a measurement.
+- **A run in progress says where it is**: which step, which agent inside it,
+  and how far along the plan — from the events the harness already emits,
+  which `runProject` now lets a caller observe.
+
+### Fixed
+
+- `git()` no longer trims output where a column matters: the first status
+  column of `git status --porcelain` is a space for an unstaged change, and
+  trimming it shifted every path in the first line by one character.
+- The terminal interface reads an input chunk as the keys it contains. A
+  terminal delivers what it has, so typing quickly or pasting a task arrived
+  as one chunk and every character in it was dropped.
+
+### Changed — the review page follows the GUI draft
+
+- The page is a shell now: a sidebar of views (Overview, Approvals, Queue,
+  Runs, Worktrees, Merge requests, Settings) instead of one long scroll, a top
+  bar that says which project is being reviewed, panels with heads, status
+  pills, stat cards, a command palette on `ctrl` `K`, toasts, and a dialog for
+  starting a run. The view is in the address, so a reload returns to it.
+- Taken from the draft only where something real is behind it. Its screens for
+  features that do not exist are not here, and the page still supports light as
+  well as dark, loads nothing from anywhere, and inserts every agent-controlled
+  value as text.
+
+### Fixed — found by looking, again
+
+- Every grid that holds content now says `minmax(0, 1fr)`: the new inner grid
+  had brought the sideways drag back at 390px.
+- The views no longer render on top of each other — a `display` declaration
+  overrides the `hidden` attribute, so they are told twice.
+
+### Added — reaching the surfaces from a tablet
+
+- The page is checked at tablet widths (768px, 820px, 1180px) as well as at
+  1280px and 390px, and its controls are finger-sized on a touch screen.
+- `etnpilot ui --host 0.0.0.0` prints an address the other device can actually
+  reach, instead of a `127.0.0.1` link that only works where it was printed,
+  and says plainly that the port is now open to the network and what that
+  gives away. The SSH tunnel that keeps the loopback guarantee is printed with
+  it.
+
+### Fixed — the page, from looking at it
+
+- A wide table no longer stretches the whole page: grid children are
+  `min-width: auto` by default, so one settings row dragged every section off
+  screen at both 1280px and 390px.
+- The settings list says when it is cut ("Showing 25 of 122") instead of
+  running to 122 rows, and long values are shortened with the whole value in
+  the tooltip.
+- The five-second poll holds still while a field has focus, so it no longer
+  throws away a half-typed reason, and it no longer overwrites the answer to
+  something you just did.
+
 ### Added — roadmap UI-2.3 and UI-2.5
 
 - The TUI shows the worktrees (`5`): which branch each holds, which ones a run

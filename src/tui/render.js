@@ -33,6 +33,8 @@ export function renderApp(state, options = {}) {
     merges,
     active = [],
   } = options;
+  const worktreeDiffOpen = Boolean(options.worktreeDiff);
+  const agentTextOpen = Boolean(options.agentText);
   const style = createStyle({ color });
   // Typing happens on the bottom line, the way a terminal tool has always done
   // it, so whatever you were looking at stays on screen while you type.
@@ -44,22 +46,33 @@ export function renderApp(state, options = {}) {
   ];
 
   const context = {
-    style, width, height: body, cursor, now, editor, filter, filtering, scope, receipt, worktrees, merges, active,
+    style, width, height: body, cursor, now, editor, filter, filtering, scope, receipt,
+    worktrees, changes: options.worktreeChanges, changeCursor: options.changeCursor, merges, active,
+    agentMode: options.agentMode, agentCursor: options.agentCursor,
   };
   const rendered = help
     ? renderHelp({ style, width, height: body, offset: helpOffset })
     : detail && view === "approvals"
       ? renderApprovalDetail(state, context)
       : detail && view === "runs"
-        ? renderRunDetail(state, context)
-        : renderView(view, state, context);
+        ? (agentTextOpen
+            ? renderAgentText(state, { ...context, agentText: options.agentText, offset: options.agentTextOffset })
+            : renderRunDetail(state, context))
+        : detail && view === "worktrees"
+          ? (options.worktreeDiff
+              ? renderDiff(state, { ...context, diff: options.worktreeDiff, offset: options.diffOffset })
+              : renderWorktreeChanges(state, context))
+          : renderView(view, state, context);
   for (const line of rendered.slice(0, body)) lines.push(truncate(line, width));
   while (lines.length < height - (input ? 2 : 1)) lines.push("");
   if (input) {
     lines.push(truncate(input.bad ? style.bad(input.hint) : style.dim(input.hint), width));
     lines.push(inputLine(input, { style, width }));
   } else {
-    lines.push(footer({ style, width, view, detail, message, editor, prompt, help }));
+    lines.push(footer({
+      style, width, view, detail, message, editor, prompt, help, diff: worktreeDiffOpen,
+      agentMode: options.agentMode, agentText: agentTextOpen,
+    }));
   }
   return lines.slice(0, height).map((line) => truncate(line, width));
 }
@@ -86,24 +99,36 @@ function header(state, { style, width, view, project, active = [] }) {
     return name === view ? style.bold(style.accent(label)) : style.dim(label);
   }).join(style.dim("  ·  "));
   const left = `${style.bold(style.accent("ETNPILOT"))}  ${tabs}`;
-  const right = style.dim(`${project}${project ? "  " : ""}${running} running`);
+  const working = active.find((run) => run.step);
+  const where = working ? ` ${working.step}${working.stepAgent ? `/${working.stepAgent}` : ""}` : "";
+  const right = style.dim(`${project}${project ? "  " : ""}${running} running${where}`);
   const gap = Math.max(1, width - displayWidth(left) - displayWidth(right));
   return left + " ".repeat(gap) + right;
 }
 
-function footer({ style, width, view, detail, message, editor, prompt, help }) {
+function footer({ style, width, view, detail, message, editor, prompt, help, ...options }) {
   if (message) return truncate(style.warn(message), width);
-  const keys = footerKeys({ view, detail, editor, prompt, help });
+  const keys = footerKeys({ view, detail, editor, prompt, help, diff: options.diff, agentMode: options.agentMode, agentText: options.agentText });
   return truncate(keys.map(([key, label]) => `${style.accent(key)} ${style.dim(label)}`).join(style.dim("  ")), width);
 }
 
 // Whatever is on screen decides which keys the footer promises. A key it names
 // has to do something here, or the footer is teaching the wrong thing.
-function footerKeys({ view, detail, editor, prompt, help }) {
+function footerKeys({ view, detail, editor, prompt, help, diff, agentMode, agentText }) {
   if (help) return [["↑↓", "scroll"], ["?", "close"], ["esc", "close"], ["q", "quit"]];
   if (prompt) return [["enter", "start"], ["tab", "agent"], ["esc", "cancel"], ["^u", "clear"]];
-  if (editor) return [["enter", "save"], ["esc", "cancel"], ["^u", "clear"]];
-  if (detail && view === "runs") return [["esc", "back"], ["↑↓", "move"], ["n", "run"], ["q", "quit"]];
+  if (editor) {
+    return editor.entry.choices?.kind === "one"
+      ? [["← →", "choose"], ["enter", "save"], ["esc", "cancel"]]
+      : [["enter", "save"], ["esc", "cancel"], ["^u", "clear"]];
+  }
+  if (agentText && view === "runs") return [["↑↓", "scroll"], ["esc", "back"], ["q", "quit"]];
+  if (agentMode && view === "runs") return [["↑↓", "move"], ["enter", "read"], ["esc", "back"], ["q", "quit"]];
+  if (detail && view === "runs") return [["a", "agents"], ["esc", "back"], ["n", "run"], ["q", "quit"]];
+  if (diff && view === "worktrees") return [["↑↓", "scroll"], ["esc", "back"], ["q", "quit"]];
+  if (detail && view === "worktrees") {
+    return [["↑↓", "move"], ["enter", "what changed"], ["esc", "back"], ["x", "remove if clean"], ["q", "quit"]];
+  }
   if (detail) return [["a", "approve"], ["r", "reject"], ["esc", "back"], ["q", "quit"]];
   if (view === "approvals") {
     return [["↑↓", "move"], ["enter", "open"], ["a", "approve"], ["r", "reject"], ["n", "run"], ["tab", "view"], ["q", "quit"]];
@@ -112,7 +137,7 @@ function footerKeys({ view, detail, editor, prompt, help }) {
     return [["↑↓", "move"], ["c", "cancel"], ["R", "resume"], ["n", "run"], ["tab", "view"], ["q", "quit"]];
   }
   if (view === "worktrees") {
-    return [["↑↓", "move"], ["x", "remove if clean"], ["g", "reread"], ["n", "run"], ["tab", "view"], ["q", "quit"]];
+    return [["↑↓", "move"], ["enter", "what it holds"], ["x", "remove if clean"], ["g", "reread"], ["tab", "view"], ["q", "quit"]];
   }
   if (view === "merges") {
     return [["↑↓", "move"], ["g", "reread"], ["n", "run"], ["tab", "view"], ["?", "help"], ["q", "quit"]];
@@ -210,6 +235,122 @@ function renderQueue(state, { style, width, height, cursor, now }) {
 // The worktrees on disk: which branch each holds, which ones a run made, and
 // whether removing one would throw away work. A worktree is where a run's
 // changes physically are, so it is evidence as much as the receipt is.
+// The files a worktree is holding: a number is a claim, the list is the
+// evidence, and it is what removing the worktree would throw away.
+export function renderWorktreeChanges(state, { style, width, height, cursor, worktrees, changes, changeCursor = 0 }) {
+  const entries = worktrees?.entries ?? [];
+  const entry = entries[clamp(cursor, entries.length)];
+  if (!entry) return [style.dim("No worktrees are registered.")];
+  const lines = [
+    `${style.bold(style.ink(entry.name))} ${style.muted(entry.branch ?? "")}`,
+    "",
+  ];
+  if (!changes || changes.name !== entry.name) return [...lines, style.dim("Reading what it holds…")];
+  if (changes.unreadable) {
+    return [...lines, style.bad("Its directory cannot be read; 'git worktree prune' clears it.")];
+  }
+  if (changes.entries.length === 0) {
+    return [...lines, style.ok("Nothing changed here. Removing it throws nothing away.")];
+  }
+  const room = Math.max(1, height - lines.length - 3);
+  const selected = clamp(changeCursor, changes.entries.length);
+  for (const change of window(changes.entries, changeCursor, room)) {
+    const name = change.renamedFrom ? `${change.renamedFrom} → ${change.path}` : change.path;
+    const marker = changes.entries.indexOf(change) === selected ? style.accent("›") : " ";
+    lines.push(`${marker} ${style.tone(pad(change.label, 12), change.ignorable ? "muted" : "warn")} `
+      + `${padStart(countLabel(change, style), 12)} ${style.ink(truncate(name, width - 30))}`);
+  }
+  if (changes.entries.length > room) {
+    lines.push(style.dim(`  … ${changes.entries.length - room} more`));
+  }
+  lines.push("", changes.blocking === 0
+    ? style.ok("None of this is a person's work, so this worktree can be removed.")
+    : style.warn(`${changes.blocking} unsaved; removing is refused while they are here.`));
+  return lines;
+}
+
+// How much changed, not only that something did.
+function countLabel(change, style) {
+  if (change.binary) return style.muted("binary");
+  if (change.large) return style.muted("large");
+  if (change.directory) return style.muted("dir");
+  if (change.added === undefined && change.deleted === undefined) return style.muted("—");
+  const added = change.added ? style.ok(`+${change.added}`) : "";
+  const deleted = change.deleted ? style.bad(`−${change.deleted}`) : "";
+  return `${added}${added && deleted ? " " : ""}${deleted}` || style.muted("0");
+}
+
+// One file's diff, with the number each line has on its own side.
+export function renderDiff(state, { style, width, height, diff, offset = 0 }) {
+  if (!diff) return [style.dim("Reading the diff…")];
+  const head = [
+    `${style.bold(style.ink(diff.file))} ${style.muted(diff.reason
+      ? diff.reason
+      : `+${diff.added ?? 0} −${diff.deleted ?? 0} in ${diff.hunks ?? 0} ${diff.hunks === 1 ? "place" : "places"}`)}`,
+    "",
+  ];
+  if (diff.reason) return [...head, style.dim(`No diff: this file is ${diff.reason}.`)];
+  if ((diff.lines ?? []).length === 0) return [...head, style.dim("git reports no textual change for this file.")];
+  const room = Math.max(1, height - head.length - 1);
+  const start = Math.min(Math.max(0, offset), Math.max(0, diff.lines.length - room));
+  const body = diff.lines.slice(start, start + room).map((line) => {
+    const numbers = `${padStart(line.oldLine === undefined ? "" : String(line.oldLine), 5)} `
+      + `${padStart(line.newLine === undefined ? "" : String(line.newLine), 5)} `;
+    if (line.kind === "hunk") return style.dim(truncate(`${" ".repeat(12)}${line.text}`, width));
+    const mark = line.kind === "add" ? "+" : line.kind === "remove" ? "−" : " ";
+    const text = truncate(`${mark}${line.text}`, Math.max(8, width - 13));
+    const tone = line.kind === "add" ? "ok" : line.kind === "remove" ? "bad" : "muted";
+    return `${style.dim(numbers)}${style.tone(text, tone)}`;
+  });
+  const hidden = diff.lines.length - start - body.length;
+  const footer = hidden > 0
+    ? style.dim(`↑↓ scroll · ${hidden} more lines`)
+    : style.dim(diff.cut || diff.truncated ? "cut here; read the rest with 'git diff'" : "the end");
+  return [...head, ...body, footer];
+}
+
+// One agent's full reasoning, exactly as the receipt holds it — the same
+// text the page shows when a row is opened there. Scrolls like the diff
+// viewer, because it is read the same way: too long to fit, so a footer says
+// how much more there is rather than cutting it silently.
+export function renderAgentText(state, { style, width, height, agentText, offset = 0 }) {
+  if (!agentText) return [style.dim("Reading…")];
+  const label = (agentText.workflowStep ? `${agentText.workflowStep} · ` : "") + agentText.agent;
+  const head = [
+    `${style.bold(style.ink(label))} ${style.tone(agentText.status, statusTone(agentText.status))} `
+      + style.muted(`${agentText.provider ?? "—"} · ${duration(agentText.durationMs)}`),
+    "",
+  ];
+  const lines = [];
+  const text = agentText.text || (agentText.error ? "" : "It produced no text.");
+  for (const paragraph of text.split("\n")) {
+    if (paragraph === "") { lines.push(""); continue; }
+    for (const piece of wrap(paragraph, width - 2)) lines.push(style.ink(piece));
+  }
+  if (agentText.error) {
+    lines.push("", style.dim("Error"));
+    for (const piece of wrap(agentText.error, width - 2)) lines.push(style.bad(piece));
+  }
+  if (agentText.toolCalls?.length > 0) {
+    lines.push("", style.dim("Tool calls"));
+    for (const call of agentText.toolCalls) {
+      const tone = call.ok === false ? "bad" : "ok";
+      lines.push(`  ${style.tone(pad(call.ok === false ? "refused" : "ran", 8), tone)} ${style.ink(pad(call.tool ?? "—", 14))} ${style.muted(call.error ?? "")}`);
+    }
+  }
+  if (agentText.usage) {
+    const usage = agentText.usage;
+    lines.push("", style.dim("Usage"));
+    lines.push(`  ${style.ink(`${(usage.inputTokens ?? 0).toLocaleString()} in · ${(usage.outputTokens ?? 0).toLocaleString()} out`)}`);
+  }
+  const room = Math.max(1, height - head.length - 1);
+  const start = Math.min(Math.max(0, offset), Math.max(0, lines.length - room));
+  const body = lines.slice(start, start + room);
+  const hidden = lines.length - start - body.length;
+  const bottom = hidden > 0 ? style.dim(`↑↓ scroll · ${hidden} more lines`) : style.dim("the end");
+  return [...head, ...body, bottom];
+}
+
 export function renderWorktrees(state, { style, width, height, cursor, worktrees }) {
   if (worktrees === undefined) return [style.dim("Reading the worktrees…")];
   if (worktrees.available === false) {
@@ -352,6 +493,17 @@ function table(rows, columns, { style, width, height, cursor }) {
 }
 
 // Keeps the selected row on screen without redrawing the world around it.
+// The same tree the page renders as nested, clickable rows — flattened, with
+// each row's depth, so the terminal interface can move a cursor over it.
+export function flattenAgents(nodes, depth = 0) {
+  const rows = [];
+  for (const node of nodes) {
+    rows.push({ node, depth });
+    rows.push(...flattenAgents(node.children, depth + 1));
+  }
+  return rows;
+}
+
 export function window(items, cursor, size) {
   if (items.length <= size) return items;
   const selected = clamp(cursor, items.length);
@@ -397,6 +549,13 @@ function kindLabel(kind, style) {
   return style.tone(padStart(text, 7), tone);
 }
 
+function stepTone(status) {
+  if (status === "succeeded") return "ok";
+  if (status === "failed") return "bad";
+  if (status === "blocked") return "warn";
+  return "muted";
+}
+
 function statusTone(status) {
   if (status === "succeeded") return "ok";
   if (status === "failed") return "bad";
@@ -410,7 +569,7 @@ function queueTone(status) {
   return "muted";
 }
 
-function renderRunDetail(state, { style, width, height, cursor, receipt }) {
+function renderRunDetail(state, { style, width, height, cursor, receipt, agentMode = false, agentCursor = 0 }) {
   const runs = state.runs ?? [];
   const run = runs[clamp(cursor, runs.length)];
   if (!run) return [style.dim("No runs have been recorded yet.")];
@@ -426,14 +585,74 @@ function renderRunDetail(state, { style, width, height, cursor, receipt }) {
     for (const piece of wrap(String(value), width - 2)) lines.push(`  ${style.ink(piece)}`);
     lines.push("");
   };
+  const outcome = receipt.outcome ?? { reasons: [], steps: [] };
+  if (outcome.reasons.length > 0) {
+    lines.push(style.dim(run.status === "succeeded" ? "Worth knowing" : "Why it ended"));
+    for (const reason of outcome.reasons) {
+      const text = `${reason.step ? `${reason.step}: ` : ""}${reason.text}`;
+      const tone = reason.kind === "publication" || reason.kind === "blocked" ? "warn" : "bad";
+      for (const [index, piece] of wrap(text, width - 4).entries()) {
+        lines.push(`  ${index === 0 ? style.tone(piece, tone) : style.muted(piece)}`);
+      }
+    }
+    lines.push("");
+  }
+  // The agents that ran, as the tree they ran in. In agent mode this list is
+  // what 'enter' opens; ETNPilot never invents a hierarchy that did not run —
+  // today every provider is flat, so this reads as one row per step, and
+  // nests the day a provider actually spawns a subagent.
+  const flatAgents = flattenAgents(outcome.agents ?? []);
+  if (flatAgents.length > 0) {
+    lines.push(style.dim(agentMode ? "Agents — ↑↓ move, enter to read" : "Agents — press 'a'"));
+    const selected = agentMode ? clamp(agentCursor, flatAgents.length) : -1;
+    for (const [index, row] of flatAgents.entries()) {
+      const marker = agentMode && index === selected ? style.accent("›") : " ";
+      const indent = "  ".repeat(row.depth);
+      const label = (row.node.workflowStep ? `${row.node.workflowStep} · ` : "") + row.node.agent;
+      lines.push(`${marker} ${indent}${style.tone(pad(row.node.status, 10), stepTone(row.node.status))} `
+        + `${style.ink(truncate(label, width - 30))} ${style.muted(duration(row.node.durationMs))}`);
+    }
+    lines.push("");
+  }
+  if (outcome.steps.length > 1) {
+    lines.push(style.dim("Steps"));
+    for (const step of outcome.steps) {
+      lines.push(`  ${style.tone(pad(step.status, 10), stepTone(step.status))} ${style.ink(pad(step.id, 18))} ${style.muted(step.error ?? "")}`);
+    }
+    lines.push("");
+  }
+  // What the providers cost. A surface that never shows this leaves a budget
+  // nobody can see.
+  const usage = outcome.usage;
+  if (usage?.invocations) {
+    const cost = usage.estimatedCost === undefined
+      ? "not priced"
+      : `${usage.currency ? `${usage.currency} ` : ""}${usage.estimatedCost.toFixed(4)}`;
+    lines.push(style.dim("Usage"));
+    lines.push(`  ${style.ink(`${(usage.inputTokens + usage.outputTokens).toLocaleString()} tokens`)} ${style.muted(`${usage.inputTokens.toLocaleString()} in · ${usage.outputTokens.toLocaleString()} out · ${usage.cacheReadTokens.toLocaleString()} cached`)}`);
+    lines.push(`  ${style.ink(`${usage.invocations} provider calls`)} ${style.muted(cost)}`);
+    lines.push("");
+  }
+  if (outcome.tools) {
+    lines.push(style.dim("Tools it used"));
+    for (const row of outcome.tools) {
+      const refused = row.failed > 0 ? style.bad(`${row.failed} refused`) : style.muted("none refused");
+      lines.push(`  ${style.ink(pad(row.tool, 14))} ${style.muted(`${row.ok} ran`)} ${refused} ${style.muted(row.error ?? "")}`);
+    }
+    lines.push("");
+  }
   field("Branch", terminal.workspace?.branch);
+  // Where the files are: a worktree run leaves them there, not in the checkout.
+  field("Workspace", terminal.workspace?.path);
   field("Sandbox", terminal.workspace?.sandbox?.image);
-  if (terminal.git?.mergeRehearsal) {
-    const rehearsal = terminal.git.mergeRehearsal;
+  const rehearsal = outcome.rehearsal;
+  if (rehearsal) {
     lines.push(style.dim("Merge rehearsal"));
-    lines.push(rehearsal.clean
-      ? `  ${style.ok("clean")} ${style.muted(`into ${rehearsal.targetBranch ?? "the target branch"}`)}`
-      : `  ${style.bad("conflicts")} ${style.muted((rehearsal.conflicts ?? []).join(", "))}`);
+    const tone = rehearsal.state === "clean" ? "ok" : rehearsal.state === "conflicts" ? "bad" : "warn";
+    for (const [index, piece] of wrap(rehearsal.text, width - 4).entries()) {
+      lines.push(`  ${index === 0 ? style.tone(piece, tone) : style.muted(piece)}`);
+    }
+    if (rehearsal.error) for (const piece of wrap(rehearsal.error, width - 4)) lines.push(`  ${style.muted(piece)}`);
     lines.push("");
   }
   // Which settings were in effect is evidence, so it belongs next to the run
@@ -525,9 +744,13 @@ const HELP_SECTIONS = Object.freeze([
     ["a / r", "approve once / reject"],
     ["esc", "back to the list"],
   ]],
-  ["Runs", [["enter", "open the receipt"]]],
+  ["Runs", [["enter", "open the receipt"], ["a", "its agents, as a tree — enter reads one"]]],
   ["Queue", [["c", "request cancellation"], ["R", "resume a failed job"]]],
-  ["Worktrees", [["x", "remove it, if it is clean"], ["g", "read them again"]]],
+  ["Worktrees", [
+    ["enter", "the files it holds, then one file's diff"],
+    ["x", "remove it, if it is clean"],
+    ["g", "read them again"],
+  ]],
   ["Merge requests", [["↑↓", "ours first, then others"], ["g", "ask GitLab again"]]],
   ["Settings", [
     ["enter", "edit"],
@@ -626,9 +849,14 @@ function inputState({ prompt, editor, filtering, filter }) {
       prefix: `set ${editor.entry.path}`,
       value: editor.buffer,
       bad: Boolean(editor.error),
+      // Where a setting accepts only certain values, those values are the
+      // useful fact and they take the place of the default, which is one of
+      // them. The line is cut from the right, so nothing else may grow.
       hint: editor.error ?? [
         editor.entry.mode,
-        `default ${settingValue(editor.entry.defaultValue)}`,
+        editor.entry.choices
+          ? `${editor.entry.choices.kind === "set" ? "any of" : "one of"}: ${editor.entry.choices.values.map((value) => JSON.stringify(value)).join(", ")}`
+          : `default ${settingValue(editor.entry.defaultValue)}`,
         `writing ${editor.scope === "global" ? "~/.config" : "this project, locally"}`,
         "enter saves · esc cancels",
       ].join(" · "),

@@ -48,7 +48,13 @@ test("settings are a view of their own, showing where each value comes from", as
   try {
     assert.equal(app.view, "settings");
     const text = screen(app);
-    assert.match(text, /122 settings · none changed · writing to local/);
+    // The number is the project's own count, not one kept in step by hand: a
+    // headline that drifts from the settings beneath it is the bug here.
+    const headline = text.match(/(\d+) settings · none changed · writing to local/);
+    assert.notEqual(headline, null, "the headline says how many settings there are");
+    const described = await state.settings();
+    assert.equal(Number(headline[1]), described.entries.length);
+    assert.equal(described.entries.length > 100, true, "a real project has more than a handful");
     assert.match(text, /SETTING\s+VALUE\s+FROM\s+CHANGE/);
     // The mode is on screen, so nobody has to guess what they may change.
     assert.match(text, /committed\s+open/);
@@ -105,7 +111,9 @@ test("a widening change is refused in the editor, where it was made", async () =
   try {
     await select(app, "approval.allow");
     await app.handle("\r");
-    assert.match(screen(app), /stricter-only · default \["read"\]/);
+    // Where a setting accepts only certain values, the hint names them in
+    // place of the default, which is one of them.
+    assert.match(screen(app), /stricter-only · any of: "read", "write", "shell", "network"/);
 
     await app.handle("\u0015");
     await type(app, '["read","write"]');
@@ -263,7 +271,15 @@ test("a settings frame still fits the terminal it was given", () => {
       overrides: ["queue.workers"],
       entries: [
         { path: "queue.workers", value: 4, defaultValue: 1, source: "user-local", mode: "open" },
-        { path: "approval.allow", value: [], defaultValue: ["read"], source: "user-local", mode: "stricter-only" },
+        {
+          path: "approval.allow",
+          value: [],
+          defaultValue: ["read"],
+          source: "user-local",
+          mode: "stricter-only",
+          // As describeSettings reports it: this setting accepts a known set.
+          choices: { kind: "set", values: ["read", "write", "shell", "network"] },
+        },
         { path: "receipts.signing.enabled", value: false, defaultValue: false, source: "project", mode: "locked" },
       ],
     },
@@ -284,9 +300,37 @@ test("a settings frame still fits the terminal it was given", () => {
   });
   assert.equal(editing.length, 16);
   assert.match(editing.join("\n"), /SETTING\s+VALUE\s+FROM\s+CHANGE/);
-  assert.match(editing.at(-2), /stricter-only · default \["read"\] · writing this project, locally/);
+  assert.match(editing.at(-2), /stricter-only · any of: "read", "write", "shell", "network"/);
   assert.match(editing.at(-1), /^set approval\.allow> \["read"\] $/);
 
   assert.equal(settingLiteral([1, 2]), "[1,2]");
   assert.equal(settingLiteral(undefined), "");
+});
+
+test("the arrows step through the values a setting accepts", async () => {
+  const { app, state } = await settingsApp();
+  try {
+    await select(app, "workspace.mode");
+    await app.handle("\r");
+    assert.equal(app.editor.buffer, '"worktree"');
+    // Right and left walk the list the page offers as a dropdown, and it
+    // wraps rather than stopping at the end.
+    await app.handle("\u001B[C");
+    assert.equal(app.editor.buffer, '"in-place"');
+    await app.handle("\u001B[C");
+    assert.equal(app.editor.buffer, '"worktree"');
+    await app.handle("\u001B[D");
+    assert.equal(app.editor.buffer, '"in-place"');
+    await app.handle("\r");
+    assert.equal((await state.collect()).settings.entries.find((entry) => entry.path === "workspace.mode").value, "in-place");
+
+    // A setting with no list keeps the arrows out of its text.
+    await select(app, "queue.workers");
+    await app.handle("\r");
+    const before = app.editor.buffer;
+    await app.handle("\u001B[C");
+    assert.equal(app.editor.buffer, before);
+  } finally {
+    state.close();
+  }
 });

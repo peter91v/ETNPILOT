@@ -6,50 +6,50 @@
       "type": "agent",
       "name": "builder",
       "path": ".etnpilot/agents/builder.yaml",
-      "digest": "sha256:302d5fbf93888f1218f6fe6a074ca59199f7c1004585fbf21fac2c7363fac31d",
-      "bytes": 138
+      "digest": "sha256:f68f40f04b0af45525c558a81dc48051f01dcd63e2eb9fa045b67e0096502e87",
+      "bytes": 101
     },
     {
       "type": "agent",
       "name": "orchestrator",
       "path": ".etnpilot/agents/orchestrator.yaml",
-      "digest": "sha256:6c339fde6347cfba897fbacc9981d5b440a67e665ae0ca27a16c7810fa7277d0",
-      "bytes": 158
+      "digest": "sha256:a422e1aa03249300820efb612d0dd527755637e735bd2ad177a66d18523f9752",
+      "bytes": 121
     },
     {
       "type": "agent",
       "name": "reviewer",
       "path": ".etnpilot/agents/reviewer.yaml",
-      "digest": "sha256:96463c1496dd388a2f40099fc0a8c94987f486926a8cc2bd753ae59a236597a6",
-      "bytes": 133
+      "digest": "sha256:e7654e1b847f390697b27e9573310d29843ec03643e821c4477fa2e1747eb1f8",
+      "bytes": 96
     },
     {
       "type": "instruction",
       "name": "project",
       "path": ".etnpilot/instructions/project.md",
-      "digest": "sha256:b95351251914b295158435f08391084610bf989e6fac1642ee80858efd88c73b",
-      "bytes": 354
+      "digest": "sha256:8bfdd3cfc90048a2ec45b4715757782759005c0415496ea1f46fdbe4a3ce72ad",
+      "bytes": 562
     },
     {
       "type": "prompt",
       "name": "builder",
       "path": ".etnpilot/prompts/builder.md",
-      "digest": "sha256:11abd19126c6e1f5cdeb96b43e45ef6ebb5760a20815d2b23e65073806f0822c",
-      "bytes": 182
+      "digest": "sha256:9cf50d5507a1ec90fe6ec38af66a0ef5cb0fab5e6bd5132db052a3c33f91f4f0",
+      "bytes": 628
     },
     {
       "type": "prompt",
       "name": "orchestrator",
       "path": ".etnpilot/prompts/orchestrator.md",
-      "digest": "sha256:a608acaf6e0a481c0fe4203829605da427d9a22d750c31617c8bfba348f74b98",
-      "bytes": 238
+      "digest": "sha256:7cb91e7b12676e0cd6acf652960a0b754b5847eb29c41f0c6cf8c1d098e71d91",
+      "bytes": 569
     },
     {
       "type": "prompt",
       "name": "reviewer",
       "path": ".etnpilot/prompts/reviewer.md",
-      "digest": "sha256:f110eae6a37ba478e12716c94c50fc8c28eb0184bbe97082f3207082f55a4c02",
-      "bytes": 175
+      "digest": "sha256:e957ddd4be32bcbca0de2ade32f92785ae9f5c016d2b3de1bc9d732b4e3b23e0",
+      "bytes": 426
     },
     {
       "type": "skill",
@@ -66,5 +66,5 @@
       "bytes": 175
     }
   ],
-  "digest": "sha256:b22d046290a16913e4d6e85d6f985bf00ba34fed7059addbf246b383b60498a1"
+  "digest": "sha256:d53761ec1ea854283bd3d574026722e35477b96ad434e30316a1690f06b35620"
 }

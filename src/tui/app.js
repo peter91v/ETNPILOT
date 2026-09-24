@@ -1,6 +1,6 @@
 import { screen, shortId } from "./ansi.js";
 import { parseSettingValue } from "../config/settings.js";
-import { clamp, mergeEntries, renderApp, settingEntries, settingLiteral, settingValue, viewList } from "./render.js";
+import { clamp, flattenAgents, mergeEntries, renderApp, settingEntries, settingLiteral, settingValue, viewList } from "./render.js";
 
 const VIEWS = viewList();
 
@@ -35,9 +35,18 @@ export function createTuiApp({
   let helpOffset = 0;
   let receipt;
   let worktrees;
+  let worktreeChanges;
+  let changeCursor = 0;
+  let worktreeDiff;
+  let diffOffset = 0;
+  // Reading one agent's full reasoning, inside an open run: 'agentMode'
+  // selects a row in the tree, 'agentText' is the one currently open.
+  let agentMode = false;
+  let agentCursor = 0;
+  let agentText;
+  let agentTextOffset = 0;
   let worktreesReadAt = 0;
   let merges;
-  const active = new Set();
   let messageTimer;
   let timer;
   let stopped = false;
@@ -58,8 +67,14 @@ export function createTuiApp({
     get helpOffset() { return helpOffset; },
     get receipt() { return receipt; },
     get worktrees() { return worktrees; },
+    get worktreeChanges() { return worktreeChanges; },
+    get worktreeDiff() { return worktreeDiff; },
+    get agentMode() { return agentMode; },
+    get agentText() { return agentText; },
     get merges() { return merges; },
-    get active() { return [...active]; },
+    // What is running is tracked in the shared state, because the page needs
+    // the same answer; this is a view of it, not a second copy.
+    get active() { return snapshot.active ?? []; },
 
     async refresh() {
       snapshot = await state.collect();
@@ -76,8 +91,12 @@ export function createTuiApp({
         cursor,
         detail,
         message,
-        width: output.columns ?? 100,
-        height: output.rows ?? 30,
+        // A pty reports 0×0 before its first resize event lands — a real
+        // sequence on Android terminal apps, and '?? 100' does not catch 0,
+        // which is falsy but not nullish. Rendering at that size draws
+        // nothing at all, silently, with no error to say why.
+        width: output.columns || 100,
+        height: output.rows || 30,
         color: output.isTTY === true && !process.env.NO_COLOR,
         now: now(),
         editor,
@@ -89,8 +108,16 @@ export function createTuiApp({
         helpOffset,
         receipt,
         worktrees,
+        worktreeChanges,
+        changeCursor,
+        worktreeDiff,
+        diffOffset,
+        agentMode,
+        agentCursor,
+        agentText,
+        agentTextOffset,
         merges,
-        active: [...active],
+        active: snapshot.active ?? [],
         project: state.config?.git?.project ?? "",
       });
     },
@@ -156,14 +183,39 @@ export function createTuiApp({
         scope = scope === "local" ? "global" : "local";
         note(`Changes will be written ${scope === "global" ? "to ~/.config, for every project" : "to this project, locally"}.`);
       } else if (key === "\u001B[B" || key === "j") {
-        cursor = clamp(cursor + 1, selection().length);
+        if (agentText) agentTextOffset += 1;
+        else if (agentMode) agentCursor = clamp(agentCursor + 1, agentRows().length);
+        else if (worktreeDiff) diffOffset += 1;
+        else if (detail && view === "worktrees") changeCursor = clamp(changeCursor + 1, changeCount());
+        else cursor = clamp(cursor + 1, selection().length);
       } else if (key === "\u001B[A" || key === "k") {
-        cursor = clamp(cursor - 1, selection().length);
+        if (agentText) agentTextOffset = Math.max(0, agentTextOffset - 1);
+        else if (agentMode) agentCursor = clamp(agentCursor - 1, agentRows().length);
+        else if (worktreeDiff) diffOffset = Math.max(0, diffOffset - 1);
+        else if (detail && view === "worktrees") changeCursor = clamp(changeCursor - 1, changeCount());
+        else cursor = clamp(cursor - 1, selection().length);
       } else if (key === "\r" || key === "\n") {
-        if (view === "approvals" && selection().length > 0) detail = true;
-        else if (view === "runs" && selection().length > 0) await openRun();
+        if (agentMode && !agentText) openAgentText();
+        else if (view === "approvals" && selection().length > 0) detail = true;
+        else if (view === "runs" && !detail && selection().length > 0) await openRun();
+        else if (view === "worktrees" && detail && !worktreeDiff) await openFileDiff();
+        else if (view === "worktrees" && selection().length > 0) await openWorktree();
       } else if (key === "\u001B") {
-        detail = false;
+        if (agentText) {
+          agentText = undefined;
+          agentTextOffset = 0;
+        } else if (agentMode) {
+          agentMode = false;
+        } else if (worktreeDiff) {
+          worktreeDiff = undefined;
+          diffOffset = 0;
+        } else {
+          detail = false;
+          worktreeChanges = undefined;
+        }
+      } else if (key === "a" && detail && view === "runs" && !agentMode && agentRows().length > 0) {
+        agentMode = true;
+        agentCursor = 0;
       } else if (key === "a" || key === "r") {
         await decide(key === "a" ? "approved" : "rejected");
       } else if (key === "c" && view === "queue") {
@@ -205,7 +257,7 @@ export function createTuiApp({
       clearTimeout(messageTimer);
       // Quitting must not leave a run half-finished in a worktree nobody is
       // watching: each one is asked to stop, and its receipt records why.
-      for (const run of active) run.controller.abort();
+      state.stopRuns();
       input.off("data", onData);
       output.off?.("resize", app.paint);
       if (input.isTTY) {
@@ -218,9 +270,17 @@ export function createTuiApp({
   };
 
   function onData(chunk) {
-    void app.handle(String(chunk)).then((keepGoing) => {
-      if (!keepGoing) app.stop();
-    }).catch(report);
+    // A terminal delivers what it has, not one key at a time: typing quickly
+    // or pasting a task arrives as a single chunk. Treating that chunk as one
+    // key drops every character in it.
+    void (async () => {
+      for (const key of splitKeys(String(chunk))) {
+        if (!await app.handle(key)) {
+          app.stop();
+          return;
+        }
+      }
+    })().catch(report);
   }
 
   function selection() {
@@ -250,6 +310,11 @@ export function createTuiApp({
         worktrees = await state.worktrees();
       } catch (error) {
         worktrees = { available: false, error: error.message, entries: [] };
+      }
+      if (worktreeChanges && !(worktrees.entries ?? []).some((entry) => entry.name === worktreeChanges.name)) {
+        worktreeChanges = undefined;
+        worktreeDiff = undefined;
+        if (view === "worktrees") detail = false;
       }
       worktreesReadAt = now();
       cursor = clamp(cursor, selection().length);
@@ -301,6 +366,18 @@ export function createTuiApp({
   async function editKey(key) {
     if (key === "\u0003" || key === "\u001B") {
       editor = undefined;
+      return;
+    }
+    // Where a setting accepts one of a list, the arrows step through it: the
+    // terminal's answer to the page's dropdown.
+    const choices = editor.entry.choices?.kind === "one" ? editor.entry.choices.values : undefined;
+    if (choices && (key === "\u001B[C" || key === "\u001B[D")) {
+      const literals = choices.map((value) => settingLiteral(value));
+      const at = literals.indexOf(editor.buffer);
+      const next = key === "\u001B[C"
+        ? (at + 1) % literals.length
+        : (at <= 0 ? literals.length - 1 : at - 1);
+      editor = { ...editor, buffer: literals[next], error: undefined };
       return;
     }
     if (key === "\r" || key === "\n") return saveSetting();
@@ -363,11 +440,65 @@ export function createTuiApp({
     if (!run) return;
     detail = true;
     receipt = undefined;
+    agentMode = false;
+    agentCursor = 0;
+    agentText = undefined;
+    agentTextOffset = 0;
     try {
       receipt = await state.readReceipt(run.receiptFile);
     } catch (error) {
       note(error.message);
       detail = false;
+    }
+  }
+
+  // The same tree the run detail shows, flattened for the cursor to move
+  // over — recomputed from whatever receipt is on screen, never cached, so it
+  // never drifts from what the panel above it says.
+  function agentRows() {
+    return flattenAgents(receipt?.outcome?.agents ?? []);
+  }
+
+  // What 'enter' opens: the full text this agent invocation produced, already
+  // sitting in the receipt this session has read — nothing more to fetch.
+  function openAgentText() {
+    const rows = agentRows();
+    const row = rows[clamp(agentCursor, rows.length)];
+    if (!row) return;
+    agentText = row.node;
+    agentTextOffset = 0;
+  }
+
+  // What a worktree holds is read when it is opened, not in the poll: it is
+  // another 'git status', and only the one on screen is worth the cost.
+  async function openWorktree() {
+    const entry = selection()[clamp(cursor, selection().length)];
+    if (!entry) return;
+    detail = true;
+    worktreeChanges = undefined;
+    worktreeDiff = undefined;
+    changeCursor = 0;
+    try {
+      worktreeChanges = await state.worktreeChanges(entry.name);
+    } catch (error) {
+      note(error.message);
+      detail = false;
+    }
+  }
+
+  function changeCount() {
+    return worktreeChanges?.entries?.length ?? 0;
+  }
+
+  // The lines a file changed, read from the same worktree that reported it.
+  async function openFileDiff() {
+    const change = worktreeChanges?.entries?.[clamp(changeCursor, changeCount())];
+    if (!change) return;
+    diffOffset = 0;
+    try {
+      worktreeDiff = await state.worktreeDiff(worktreeChanges.name, change.path);
+    } catch (error) {
+      note(error.message);
     }
   }
 
@@ -412,29 +543,21 @@ export function createTuiApp({
       prompt = { ...prompt, error: "A run needs a task to work on." };
       return;
     }
-    const controller = new AbortController();
-    const run = { input: buffer.trim(), agent: agent.trim() || undefined, startedAt: now(), controller };
+    const task = buffer.trim();
     let started;
     try {
-      started = state.startRun({ input: run.input, agent: run.agent, signal: controller.signal });
+      started = state.startRun({ input: task, agent: agent.trim() || undefined });
     } catch (error) {
       prompt = { ...prompt, error: error.message };
       return;
     }
     prompt = undefined;
-    active.add(run);
-    note(`Started: ${run.input}. Its approvals will appear here.`);
+    note(`Started: ${task}. Its approvals will appear here.`);
     // The run proceeds while the screen keeps painting; it is not awaited, or
     // the interface would freeze exactly when it is needed to answer a request.
     void started.then(
-      (result) => {
-        active.delete(run);
-        note(`${shortId(result.runId, { kind: "run" })} ${result.summary?.status ?? result.status}.`);
-      },
-      (error) => {
-        active.delete(run);
-        note(`The run failed: ${error.message}`);
-      },
+      (result) => note(`${shortId(result.runId, { kind: "run" })} ${result.summary?.status ?? result.status}.`),
+      (error) => note(`The run failed: ${error.message}`),
     ).then(() => app.refresh()).then(app.paint, report);
     await app.refresh();
   }
@@ -498,4 +621,31 @@ export function createTuiApp({
   }
 
   return app;
+}
+
+// Splits a chunk into keys: an escape sequence stays whole, everything else is
+// one code point, so a pasted word arrives as its letters.
+export function splitKeys(chunk) {
+  const keys = [];
+  let index = 0;
+  while (index < chunk.length) {
+    if (chunk[index] === "\u001B") {
+      const rest = chunk.slice(index + 1);
+      const sequence = /^[[O][0-9;]*[A-Za-z~]/u.exec(rest);
+      if (sequence) {
+        keys.push(chunk.slice(index, index + 1 + sequence[0].length));
+        index += 1 + sequence[0].length;
+        continue;
+      }
+      // A lone escape, or one that has not finished arriving: on its own it
+      // means 'back', which is what every view does with it.
+      keys.push("\u001B");
+      index += 1;
+      continue;
+    }
+    const character = [...chunk.slice(index)][0];
+    keys.push(character);
+    index += character.length;
+  }
+  return keys;
 }

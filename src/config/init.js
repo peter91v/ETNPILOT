@@ -21,13 +21,46 @@ settings:
     "approval.requireHuman": stricter-only
     "checks.envAllow": stricter-only
     "sandbox.enabled": stricter-only
+# Which provider a run uses when neither the agent nor 'routing.rules' names
+# one. Change it on your own machine with 'etnpilot settings set
+# defaultProvider anthropic' (or in the Settings view) — the change stays
+# local and is never committed. Every provider below is configured; the one
+# that is used is the one named here, and it needs its own credential:
+#   github-copilot  a GitHub Copilot subscription, through the Copilot SDK.
+#                   The SDK has no build for Android, so on a tablet or phone
+#                   use 'anthropic' or 'openai'.
+#   anthropic       ANTHROPIC_API_KEY, from console.anthropic.com
+#   openai          OPENAI_API_KEY, from platform.openai.com
 defaultProvider: github-copilot
 providers:
   github-copilot:
     type: github-copilot
     model: auto
+  anthropic:
+    type: anthropic
+    baseUrl: https://api.anthropic.com
+    model: claude-opus-5
+    # The provider reads and writes files and runs commands through the
+    # harness's own tools, so every effect goes through the approval path.
+    tools: true
+    maxTokens: 8192
+  openai:
+    type: openai-compatible
+    baseUrl: https://api.openai.com/v1
+    # Any model your account can reach. A model it cannot reach is answered by
+    # the API itself, and the error repeats what it said.
+    model: gpt-5
+    apiKeySecret: openai.apiKey
+    tools: true
+    # Uncomment for a reasoning model that refuses function tools on
+    # /v1/chat/completions ("set reasoning_effort to 'none'"). It turns that
+    # model's reasoning off, which is why it is not on by default.
+    # reasoningEffort: none
 routing:
-  defaults: [github-copilot]
+  # Empty on purpose: with no list here the route is 'defaultProvider', so
+  # changing that one setting is enough to switch provider. Name providers
+  # here to try them in a fixed order instead.
+  defaults: []
   fallback:
     enabled: true
     maxAttempts: 2
@@ -90,6 +123,8 @@ secrets:
         - ETNPILOT_GITLAB_WEBHOOK_TOKEN
         - ETNPILOT_GITHUB_TOKEN
         - ETNPILOT_PROVIDER_API_KEY
+        - ANTHROPIC_API_KEY
+        - OPENAI_API_KEY
         - ETNPILOT_OTLP_HEADERS
     local:
       type: file
@@ -100,7 +135,11 @@ secrets:
     gitlab.webhookSigningSecret: { provider: env, key: ETNPILOT_GITLAB_WEBHOOK_SIGNING_SECRET }
     gitlab.webhookToken: { provider: env, key: ETNPILOT_GITLAB_WEBHOOK_TOKEN }
     github.token: { provider: env, key: ETNPILOT_GITHUB_TOKEN }
+    # 'provider.apiKey' is what every OpenAI-compatible provider reads unless
+    # it names another with 'apiKeySecret'.
     provider.apiKey: { provider: env, key: ETNPILOT_PROVIDER_API_KEY }
+    anthropic.apiKey: { provider: env, key: ANTHROPIC_API_KEY }
+    openai.apiKey: { provider: env, key: OPENAI_API_KEY }
     observability.otlpHeaders: { provider: env, key: ETNPILOT_OTLP_HEADERS }
 receipts:
   signing:
@@ -176,9 +215,9 @@ policy:
   providers:
     default: deny
     rules:
-      - id: configured-copilot
+      - id: configured-providers
         effect: allow
-        providers: [github-copilot]
+        providers: [github-copilot, anthropic, openai]
 checks:
   # Checks run agent-authored code. They inherit only these variables, so
   # repository and provider credentials stay out of their environment.
@@ -238,9 +277,10 @@ secrets/
 *.sqlite-wal
 `;
 
+// No 'provider' and no 'model': the agent follows the project's
+// 'defaultProvider' and that provider's own model, so switching provider is
+// one setting and not an edit to every manifest.
 const STARTER_AGENT = `name: orchestrator
-provider: github-copilot
-model: auto
 promptRef: orchestrator
 skills: []
 requires: [chat]
@@ -250,9 +290,17 @@ subagents: []
 const STARTER_PROMPT = `You implement one requested change at a time in the current repository.
 
 Read before you write, keep the change minimal and reviewable, and run the
-project's own checks. Every write, shell command, and network call is reviewed
-by a human, so explain what you intend to do and why. Report what you verified
-and what remains uncertain; never claim a check passed that you did not run.
+project's own checks.
+
+You have tools; use them. Writing a file means calling write_file, running a
+command means calling run_command. Approval is mechanical, not conversational:
+ETNPilot asks a human before every write, shell command, and network call, and
+tells you if they declined. So do not ask for permission in prose — nobody
+receives it, and the work is left undone. If a tool was refused, say so and
+stop.
+
+Report what you verified and what remains uncertain; never claim a check
+passed that you did not run, or a file you did not write.
 `;
 
 // Templates are overrides on the documented default, applied through the YAML

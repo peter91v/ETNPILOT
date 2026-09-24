@@ -20,6 +20,7 @@ setting changed here is refused for the same reasons.
 | `a` / `r` | Approve once / reject |
 | `c` / `R` | Request cancellation of / resume the queue job under the cursor |
 | `x` | Remove the worktree under the cursor, if it is clean |
+| `enter` (worktrees) | What that worktree is holding, file by file |
 | `n` | Start a run |
 | `esc` | Leave the detail view |
 | `g` | Refresh now, rather than waiting for the next poll |
@@ -30,7 +31,8 @@ In the settings view:
 
 | Key | Does |
 | --- | --- |
-| `enter` | Edit the setting under the cursor |
+| `enter` | Edit the setting under the cursor; the line beneath names the values it accepts |
+| `←` `→` (editing) | Step through those values, where a setting has a list |
 | `d` | Put it back to the committed default |
 | `s` | Switch between writing locally and writing to `~/.config` |
 | `/` | Filter by path; `enter` keeps the filter, `esc` clears it |
@@ -38,6 +40,14 @@ In the settings view:
 While a filter or a value is being typed, every printable key is text. `q` does
 not quit and `d` does not reset — the caret on screen says which mode you are
 in.
+
+## From a tablet or a phone
+
+In a terminal app on the device, over SSH, or in Termux where ETNPilot runs on
+the device itself. Every view lays out from 46 columns up, the detail panes
+stack instead of sitting side by side below 92 columns, and a value longer than
+the line is cut at the front so the caret stays visible. For a browser instead,
+see [review-ui.md](review-ui.md#from-a-tablet-or-a-phone).
 
 ## Worktrees
 
@@ -54,9 +64,25 @@ and what removing one would throw away.
   run-9f2a1c44      etnpilot/run-9f2a1c44   3c278aed  a run     clean
 ```
 
-`x` removes the one under the cursor through the same `removeIfClean` the CLI
-uses, which is the point: a worktree holding unsaved work is **not** removed,
-and the screen says what it is keeping.
+`enter` lists what a worktree is holding, file by file, with the lines each
+one added and deleted and whether it is a person's work or state ETNPilot
+wrote itself. `enter` again shows that file's diff, with the number every line
+has on its own side:
+
+```
+src.js +5 −1 in 1 place
+            @@ -1,5 +1,9 @@
+    1     1  export function total(rows) {
+          2 +  // Skip the rows a run has already counted.
+    2     3    let sum = 0;
+    3       −  for (const row of rows) sum += row.value;
+```
+
+`esc` steps back one level: from the diff to the files, then out of the
+worktree. `x` removes the one under the
+cursor through the same `removeIfClean` the CLI uses, which is the point: a
+worktree holding unsaved work is **not** removed, and the screen says what it
+is keeping.
 
 ```
 run-7e1b0a33 keeps 1 unsaved change — nothing was removed.
@@ -131,9 +157,57 @@ abort, its waiting request is closed, and its receipt records why.
 
 ## What a run's receipt shows
 
-`enter` on a run opens what was sealed: the branch and sandbox, the merge
-rehearsal and any conflicts, the approvals with who decided them, and which
-settings layers were in effect:
+`enter` on a run opens what was sealed, beginning with why it ended — the
+failing step and its own error, the steps that never ran because of it, and
+whether it was published:
+
+```
+Why it ended
+  verify: checks failed: 2 of 18 tests (src/workflow/queue.test.js)
+  publish: never ran: a step it needs failed
+  not published: the workflow did not succeed
+```
+
+Then the agents that ran, as the tree they actually ran in — a subagent a
+manifest declares nests under the agent that spawned it, rather than being
+listed beside it:
+
+```
+Agents — press 'a'
+  succeeded  plan · orchestrator 21.8s
+  succeeded  build · builder 9.6s
+    failed     linter 1.4s
+  succeeded  review · reviewer 8.0s
+```
+
+`a` selects it, `↑↓` moves, `enter` opens the one under the cursor — its full
+text exactly as the receipt holds it, whatever it called and what came back:
+
+```
+linter failed openai · 1.4s
+
+Error
+lint failed: unexpected token at line 12
+
+Tool calls
+  refused  run_command    exit code 2
+```
+
+`esc` backs out one layer at a time: the text, then the tree, then the run.
+The same tree and the same full text are what the review page shows when a
+row there is clicked, and what `etnpilot receipt show` prints under `agents`
+— one receipt, read the same way everywhere.
+
+Then every step with its attempts, what the run cost:
+
+```
+Usage
+  204,621 tokens 184,203 in · 20,418 out · 120,000 cached
+  7 provider calls USD 0.8123
+```
+
+and the branch and sandbox, the merge rehearsal and any conflicts, the
+approvals with who decided them, and which settings layers were in effect:
 
 ```
 Settings in effect

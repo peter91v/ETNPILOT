@@ -1,13 +1,17 @@
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import YAML from "yaml";
 import { loadConfig } from "../config/load.js";
 import { describeSettings, setSetting, unsetSetting } from "../config/settings.js";
 import { ApprovalInbox, createInboxApprovalHandler } from "../core/approval-inbox.js";
 import { escapeControlCharacters } from "../core/text-safety.js";
 import { WorktreeManager } from "../git/worktrees.js";
 import { GitLabClient } from "../gitlab/client.js";
+import { summarizeTelemetryFile } from "../observability/telemetry.js";
 import { runProject, RUN_BRANCH_PREFIX } from "./project-runner.js";
 import { createSecretResolver } from "../secrets/resolver.js";
+import { resolveConfiguredApiKey } from "../providers/register.js";
+import { knownPriceFor } from "../observability/known-pricing.js";
 import { WorkflowQueue } from "../workflow/queue.js";
 
 // These name files this state opened when it started. Changing one is allowed,
@@ -31,13 +35,49 @@ export async function openProjectState({ root = process.cwd(), env = process.env
   const runsDirectory = join(projectRoot, ".etnpilot", "state", "runs");
 
   let current = config;
+  // Runs started from a surface are tracked here rather than in each surface:
+  // the TUI and the page both need to say what is running, and closing either
+  // one must stop what it started rather than stranding it.
+  const running = new Set();
+  const runErrors = [];
   return {
     root: projectRoot,
     get config() { return current; },
     inbox,
     queue,
     runsDirectory,
-    collect: (options) => collectState({ inbox, queue, runsDirectory, root: projectRoot, env }, options),
+    collect: (options) => collectState(
+      { inbox, queue, runsDirectory, root: projectRoot, env, running, runErrors },
+      options,
+    ),
+    settings: () => describeSettings({ root: projectRoot, env }),
+    // The models a configured provider can currently reach, read live — never
+    // cached here, because the answer is the provider's own and changes on
+    // its schedule. Only 'anthropic' and 'openai-compatible' expose a models
+    // endpoint this project knows how to call; anything else says so rather
+    // than guessing at one.
+    async listProviderModels(name) {
+      const providerConfig = current.providers?.[name];
+      if (!providerConfig) throw new TypeError(`'${name}' is not a configured provider.`);
+      const type = providerConfig.type;
+      if (type !== "anthropic" && type !== "openai-compatible") {
+        return { available: false, reason: `'${type}' has no models endpoint this project can call.` };
+      }
+      const resolver = createSecretResolver({ root: projectRoot, config: current, env });
+      const apiKey = providerConfig.apiKey ?? await resolveConfiguredApiKey(type, providerConfig, { secretResolver: resolver, env });
+      const module = type === "anthropic"
+        ? await import("../providers/anthropic.js")
+        : await import("../providers/openai-compatible.js");
+      const all = await module.listModels({ baseUrl: providerConfig.baseUrl, apiKey });
+      // Only ETNPilot's own judgment of which are chat-capable, for the
+      // provider type whose listing endpoint does not separate them itself.
+      const models = type === "openai-compatible" ? all.filter((model) => module.looksLikeChatModel(model.id)) : all;
+      return {
+        available: true,
+        models: models.map((model) => ({ ...model, knownPrice: knownPriceFor(type, model.id) })),
+      };
+    },
+    get active() { return [...running].map(presentRun); },
     decide: (id, decision, options) => inbox.decide(id, decision, options),
     cancelJob: (id, options) => queue.requestCancel(id, options),
     resumeJob: (id, options) => queue.resume(id, options),
@@ -50,30 +90,126 @@ export async function openProjectState({ root = process.cwd(), env = process.env
       if (inboxConfig.enabled === false) {
         throw new Error("approval.inbox.enabled is false, so a run started here would have nobody to ask.");
       }
-      return runProject({
+      const task = String(input).trim();
+      // The run owns a controller of its own, so 'stop everything' works even
+      // for a caller that passed no signal — a browser tab cannot pass one.
+      const controller = new AbortController();
+      if (signal) {
+        if (signal.aborted) controller.abort();
+        else signal.addEventListener("abort", () => controller.abort(), { once: true });
+      }
+      const record = { task, agent, startedAt: new Date().toISOString(), controller, done: 0 };
+      const started = runProject({
         root: projectRoot,
         env,
-        input: String(input).trim(),
+        input: task,
         agent,
-        signal,
+        signal: controller.signal,
+        // Where the run is, so a surface can say more than 'working'.
+        onEvent: (event) => {
+          if (event.type === "workflow.planned") {
+            record.runId = event.runId;
+            record.steps = event.steps;
+          }
+          if (event.type === "workflow.step.started") {
+            record.step = event.step;
+            record.stepSince = event.at;
+            record.stepAgent = undefined;
+          }
+          if (event.type === "run.started") record.stepAgent = event.agent;
+          if (event.type === "workflow.step.completed") {
+            record.done += 1;
+            record.step = undefined;
+            record.stepAgent = undefined;
+          }
+          if (event.type === "workflow.step.failed") {
+            record.done += 1;
+            record.failed = event.step;
+            record.error = event.error;
+            record.step = undefined;
+          }
+        },
         dryRun,
         providerFactories,
         approvalHandler: createInboxApprovalHandler({
           inbox,
           timeoutMs: inboxConfig.timeoutMs ?? 24 * 60 * 60_000,
           pollIntervalMs: inboxConfig.pollIntervalMs ?? 500,
-          signal,
+          signal: controller.signal,
         }),
       });
+      running.add(record);
+      // A surface that does not await the run — the page answers 202 and moves
+      // on — must still learn that it failed, so the reason is kept here.
+      started.then(
+        () => running.delete(record),
+        (error) => {
+          running.delete(record);
+          runErrors.unshift({ task, at: new Date().toISOString(), error: error.message });
+          runErrors.length = Math.min(runErrors.length, 5);
+        },
+      );
+      return started;
+    },
+    // Whoever closes the surface stops what that surface started; a run left
+    // working in a worktree nobody watches is worse than one that says why it
+    // stopped, which its receipt records.
+    stopRuns() {
+      const stopped = [...running].map(presentRun);
+      for (const record of running) record.controller.abort();
+      return stopped;
     },
     // Receipts are read on demand rather than in every poll: a detail view is
     // opened now and then, and the files grow with the run.
-    readReceipt: (file) => readReceipt(runsDirectory, file),
+    readReceipt: async (file) => {
+      const receipt = await readReceipt(runsDirectory, file);
+      // Whether the run is still going is not in the file: a receipt with no
+      // terminal record looks the same while it is being written and after it
+      // was abandoned. This surface knows what it started, so it says so.
+      const runId = file.replace(/\.jsonl$/, "");
+      const active = runId !== undefined && [...running].some((record) => record.runId === runId);
+      return active
+        ? { ...receipt, outcome: describeOutcome(receipt, { running: true }) }
+        : receipt;
+    },
     // Worktrees and merge requests are read on demand for the same reason,
     // more sharply: one runs 'git status' per worktree, the other crosses the
     // network. A poll every second must do neither.
     worktrees: () => readWorktrees({ root: projectRoot, config: current }),
-    removeWorktree: (name) => new WorktreeManager(projectRoot).removeIfClean(name),
+    // What a worktree is holding, so 'it keeps unsaved work' can be read as a
+    // list of files rather than a number to be taken on trust.
+    async worktreeChanges(name) {
+      const manager = worktreeManager(projectRoot, current);
+      const entry = (await manager.describe()).find((candidate) => candidate.name === name);
+      if (!entry) throw new TypeError(`'${name}' is not a worktree of this project.`);
+      if (entry.readable === false) {
+        return { name, path: entry.path, entries: [], total: 0, blocking: 0, unreadable: true };
+      }
+      return { name, branch: entry.branch, ...await manager.changesAt(entry.path) };
+    },
+    // One file's diff, so 'modified' can be read as the lines it changed. The
+    // file must be one this worktree itself reported as changed: a name from a
+    // surface never decides what is read from disk.
+    async worktreeDiff(name, file) {
+      const manager = worktreeManager(projectRoot, current);
+      const entry = (await manager.describe()).find((candidate) => candidate.name === name);
+      if (!entry) throw new TypeError(`'${name}' is not a worktree of this project.`);
+      const changes = await manager.changesAt(entry.path);
+      const change = changes.entries.find((candidate) => candidate.path === file);
+      if (!change) throw new TypeError(`'${file}' is not a changed file in '${name}'.`);
+      if (change.binary || change.large || change.directory) {
+        return { name, file, ...change, lines: [], reason: change.binary ? "binary" : change.large ? "too large" : "a directory" };
+      }
+      const diff = await manager.diffAt(entry.path, file, { untracked: change.label === "untracked" });
+      return { name, file, ...change, ...parseDiff(diff.text), truncated: diff.truncated === true };
+    },
+    removeWorktree: (name) => worktreeManager(projectRoot, current).removeIfClean(name),
+    // What the provider cost. Read on demand and only when the telemetry file
+    // has changed, because it is the whole file every time.
+    usage: () => readUsage({ root: projectRoot, config: current }),
+    // Which agents this project has, so a surface can offer them by name
+    // instead of asking a person to remember how they spelled one.
+    agents: () => readAgents({ root: projectRoot, config: current }),
     mergeRequests: (options) => readMergeRequests({ root: projectRoot, config: current, env }, options),
     // Changing a setting from any surface goes through the same module the
     // CLI uses, so every surface is refused for the same reason.
@@ -88,22 +224,55 @@ export async function openProjectState({ root = process.cwd(), env = process.env
       return { ...result, restartRequired: HELD_OPEN.includes(path) };
     },
     close() {
+      for (const record of running) record.controller.abort();
       inbox.close();
       queue.close();
     },
   };
 }
 
-export async function collectState({ inbox, queue, runsDirectory, root, env }, { runLimit = 20 } = {}) {
+export async function collectState(
+  { inbox, queue, runsDirectory, root, env, running = new Set(), runErrors = [] },
+  { runLimit = 20 } = {},
+) {
   return {
     generatedAt: new Date().toISOString(),
+    root,
     settings: root ? await describeSettings({ root, env }).catch(settingsUnreadable) : undefined,
+    // What this process started and has not finished, so a surface can say a
+    // run is working before it has produced a receipt to read.
+    active: [...running].map(presentRun),
+    recentRunErrors: [...runErrors],
     approvals: {
       pending: inbox.list({ status: "pending", limit: 50 }),
       recent: inbox.list({ status: "all", limit: 20 }),
     },
     queue: { counts: queue.counts(), jobs: queue.list({ status: "all", limit: 20 }) },
-    runs: await readRuns(runsDirectory, { limit: runLimit }),
+    // A run this process is running right now has a receipt on disk with no
+    // terminal record yet. Reading that as a run that stopped is how a row
+    // said 'incomplete' one minute and 'succeeded' the next, with nobody
+    // touching anything.
+    runs: markRunning(await readRuns(runsDirectory, { limit: runLimit }), running),
+  };
+}
+
+function markRunning(runs, running) {
+  const active = new Set([...running].map((record) => record.runId).filter(Boolean));
+  if (active.size === 0) return runs;
+  return runs.map((run) => (run.terminal || !active.has(run.runId)
+    ? run
+    : { ...run, status: "running", running: true }));
+}
+
+function presentRun(record) {
+  return {
+    task: record.task,
+    agent: record.agent,
+    startedAt: record.startedAt,
+    ...(record.steps ? { steps: record.steps, done: record.done } : {}),
+    ...(record.step ? { step: record.step, stepSince: record.stepSince } : {}),
+    ...(record.stepAgent ? { stepAgent: record.stepAgent } : {}),
+    ...(record.failed ? { failedStep: record.failed, error: record.error } : {}),
   };
 }
 
@@ -127,28 +296,246 @@ export async function readRuns(directory, { limit = 20 } = {}) {
     const content = await readFile(join(directory, file), "utf8").catch(() => "");
     const lines = content.split("\n").filter(Boolean);
     if (lines.length === 0) continue;
-    let terminal;
-    try {
-      terminal = JSON.parse(lines.at(-1));
-    } catch {
-      continue;
+    const parsed = [];
+    for (const line of lines) {
+      try {
+        parsed.push(JSON.parse(line));
+      } catch {
+        // A malformed line is reported by 'etnpilot receipt verify'.
+      }
     }
+    if (parsed.length === 0) continue;
+    // The last line is not the terminal record: a run that stopped before it
+    // could seal leaves an ordinary entry there, and reading that entry's own
+    // status, hash and duration as the run's reports a step's success as the
+    // run's. What is sealed is what carries 'terminal: true', and nothing
+    // else.
+    const sealed = parsed.findLast((entry) => entry.terminal === true);
     runs.push({
-      runId: terminal.runId ?? file.replace(/\.jsonl$/, ""),
-      status: terminal.status ?? "unknown",
-      mode: terminal.mode ?? "execute",
-      terminal: terminal.terminal === true,
+      // A receipt carries two kinds of id: each agent invocation writes its
+      // own, and the workflow writes the run's. The run's is what every
+      // surface names and what the file is called, so an unsealed receipt
+      // takes it from the file rather than from the first agent that happened
+      // to write a line.
+      runId: sealed?.runId ?? file.replace(/\.jsonl$/, ""),
+      status: sealed?.status ?? "incomplete",
+      mode: sealed?.mode ?? parsed.find((entry) => typeof entry.mode === "string")?.mode ?? "execute",
+      terminal: Boolean(sealed),
       entries: lines.length,
-      hash: terminal.hash,
-      signed: Boolean(terminal.proof),
-      durationMs: terminal.durationMs,
-      branch: terminal.workspace?.branch,
-      sandbox: terminal.workspace?.sandbox?.image,
+      hash: sealed?.hash,
+      signed: Boolean(sealed?.proof),
+      durationMs: sealed?.durationMs,
+      branch: sealed?.workspace?.branch,
+      sandbox: sealed?.workspace?.sandbox?.image,
       approvals: countApprovals(lines),
       receiptFile: file,
     });
   }
   return runs;
+}
+
+// Why a run ended the way it did, from what the receipt already holds. Both
+// surfaces ask this module rather than each reading the entries their own way,
+// so neither can give a different answer about the same run.
+export function describeOutcome(receipt, { running = false } = {}) {
+  const terminal = receipt?.terminal ?? {};
+  const summary = terminal.summary ?? {};
+  const steps = Object.entries(summary.steps ?? {}).map(([id, step]) => ({ id, ...step }));
+  const failed = steps.filter((step) => step.status === "failed");
+  const blocked = steps.filter((step) => step.status === "blocked");
+  const rejected = receipt?.entries?.flatMap((entry) => entry.approvals ?? [])
+    .filter((approval) => approval.decision && approval.decision !== "approve-once") ?? [];
+  const reasons = [];
+  // The fatal error first: it is what actually stopped the run.
+  if (summary.error) reasons.push({ kind: "error", text: summary.error });
+  for (const step of failed) reasons.push({ kind: "step", step: step.id, text: step.error ?? "failed", attempts: step.attempts });
+  for (const step of blocked) {
+    reasons.push({
+      kind: "blocked",
+      step: step.id,
+      text: step.reason === "dependency-failed"
+        ? "never ran: a step it needs failed"
+        : step.reason === "fail-fast"
+          ? "never ran: the workflow stops at the first failure"
+          : step.reason ?? "never ran",
+    });
+  }
+  for (const approval of rejected) {
+    reasons.push({
+      kind: "approval",
+      text: `${approval.operationKind ?? "an operation"} was ${approval.decision}`
+        + (approval.evidence?.reason ? `: ${approval.evidence.reason}` : ""),
+    });
+  }
+  // What the run actually did with its tools. A run can be told to write a
+  // file, have the write refused, and still end 'succeeded' because the model
+  // finished its turn — the receipt records the refusal, so it is said here
+  // rather than left for someone to notice by the file not being there.
+  // Chat providers record 'toolCalls'; the scripted provider records the same
+  // shape under 'steps', because its steps are the tools it ran.
+  const toolCalls = receipt?.entries?.flatMap((entry) => entry.result?.toolCalls ?? entry.result?.steps ?? []) ?? [];
+  for (const call of toolCalls.filter((call) => call.ok === false)) {
+    reasons.push({
+      kind: "tool",
+      text: `${call.tool ?? "a tool"} did not succeed: ${call.error ?? "no reason recorded"}`,
+    });
+  }
+  if (terminal.content?.verificationError) {
+    reasons.push({ kind: "content", text: `content verification: ${terminal.content.verificationError}` });
+  }
+  // Not published is not a failure, but it is the first thing a reviewer asks.
+  const publication = terminal.publication;
+  if (publication && publication.published === false) {
+    reasons.push({ kind: "publication", text: publicationReason(publication) });
+  }
+  if (terminal.terminal !== true && terminal.status === undefined) {
+    // A receipt with no terminal record looks the same while it is being
+    // written and after it was abandoned. Saying 'the run stopped' about one
+    // that is still going is the surface inventing what it cannot see: a run
+    // that then seals turns that sentence into a plain falsehood.
+    reasons.push(running
+      ? { kind: "running", text: "the run is still going: its receipt is sealed when it ends" }
+      : {
+        kind: "incomplete",
+        text: "the receipt has no terminal record: the run stopped before it could finish,"
+          + " or it is still going somewhere this surface did not start it",
+      });
+  }
+  return {
+    // 'incomplete' rather than 'unknown': a receipt with no terminal record
+    // is not a run whose outcome could not be read, it is a run that never
+    // reported one.
+    status: terminal.status ?? summary.status ?? (receipt?.terminal ? "unknown" : running ? "running" : "incomplete"),
+    sealed: Boolean(receipt?.terminal),
+    agents: agentTree(receipt),
+    steps,
+    reasons,
+    usage: terminal.observability?.summary,
+    // Where the work is. A run in a worktree leaves its files there and not in
+    // the checkout, and 'BRANCH etnpilot/run-…' does not tell anyone where to
+    // look for them.
+    ...(terminal.workspace ? { workspace: terminal.workspace } : {}),
+    ...(toolCalls.length > 0 ? { tools: summarizeToolCalls(toolCalls) } : {}),
+    ...(terminal.git?.mergeRehearsal ? { rehearsal: describeRehearsal(terminal.git.mergeRehearsal) } : {}),
+    ...(terminal.cleanup ? { cleanup: terminal.cleanup } : {}),
+  };
+}
+
+// One row per tool, so 'it wrote three files and one was refused' is readable
+// without counting lines.
+function summarizeToolCalls(calls) {
+  const byTool = new Map();
+  for (const call of calls) {
+    const name = call.tool ?? "unknown";
+    const row = byTool.get(name) ?? { tool: name, ok: 0, failed: 0 };
+    if (call.ok === false) {
+      row.failed += 1;
+      if (call.error && !row.error) row.error = call.error;
+    } else row.ok += 1;
+    byTool.set(name, row);
+  }
+  return [...byTool.values()];
+}
+
+const REHEARSAL_REASONS = Object.freeze({
+  "fetch-failed": "the target branch could not be fetched",
+  "merge-tree-unavailable": "this git does not support 'merge-tree --write-tree'",
+});
+
+// A merge that was never attempted is not a merge that is not clean. The
+// rehearsal fetches the target branch first, and a fetch that fails leaves
+// nothing to be clean or dirty about — reporting that as 'not clean' invents
+// a conflict nobody found.
+function describeRehearsal(rehearsal) {
+  const target = rehearsal.targetBranch ?? "the target branch";
+  if (rehearsal.rehearsed === false) {
+    const why = REHEARSAL_REASONS[rehearsal.reason] ?? rehearsal.reason ?? "no reason recorded";
+    return {
+      state: "not-rehearsed",
+      text: `not rehearsed against ${target}: ${why}`,
+      ...(rehearsal.error ? { error: rehearsal.error } : {}),
+    };
+  }
+  if (rehearsal.clean === true) return { state: "clean", text: `clean into ${target}` };
+  const conflicts = rehearsal.conflicts ?? [];
+  return conflicts.length > 0
+    ? { state: "conflicts", text: `conflicts with ${target}: ${conflicts.join(", ")}`, conflicts }
+    : { state: "conflicts", text: `does not merge into ${target}, with no file named`, conflicts };
+}
+
+// The agents that ran, as the tree they actually ran in rather than a flat
+// list of lines: each invocation's own runId and parentRunId are what link a
+// subagent call to the agent that spawned it. Every surface reads this tree
+// instead of the raw entries, so a run opened on the phone and one read from
+// the terminal show the same shape.
+//
+// Today every built-in provider is flat — none call the 'spawn' a manifest's
+// 'subagents' declares — so this renders as one row per workflow step. It
+// nests correctly the day one does, without either surface changing.
+export function agentTree(receipt) {
+  const entries = (receipt?.entries ?? [])
+    .filter((entry) => typeof entry.agent === "string" && typeof entry.runId === "string");
+  const byId = new Map(entries.map((entry) => [entry.runId, agentNode(entry)]));
+  const roots = [];
+  for (const entry of entries) {
+    const node = byId.get(entry.runId);
+    const parent = entry.parentRunId ? byId.get(entry.parentRunId) : undefined;
+    if (parent) parent.children.push(node);
+    else roots.push(node);
+  }
+  return roots;
+}
+
+function agentNode(entry) {
+  const result = entry.result ?? {};
+  // The scripted provider records its steps under 'steps' rather than
+  // 'toolCalls' — the same shape under another name, read the same way here
+  // as it already is for 'Tools it used'.
+  const toolCalls = result.toolCalls ?? result.steps ?? [];
+  return {
+    runId: entry.runId,
+    agent: entry.agent,
+    ...(entry.workflowStep ? { workflowStep: entry.workflowStep } : {}),
+    provider: entry.provider,
+    status: entry.status ?? "unknown",
+    durationMs: entry.durationMs,
+    // The full text, untruncated: it is already what the receipt holds, and
+    // reading it back is the point of showing this at all.
+    text: result.text ?? "",
+    toolCalls,
+    ...(entry.usage ? { usage: entry.usage } : {}),
+    ...(entry.error ? { error: entry.error } : {}),
+    approvals: entry.approvals?.length ?? 0,
+    children: [],
+  };
+}
+
+// What the provider actually sent back, per agent invocation, exactly as it
+// arrived — 'raw' is what each provider's invoke() already returns and the
+// receipt already stores; this only reads it back rather than adding a new
+// place to look. Kept out of agentTree(): the page and the terminal render
+// that tree on every screen a run has, and a full API payload does not
+// belong on a phone by default. This is for the one command that asks for it.
+export function agentRawResponses(receipt) {
+  return (receipt?.entries ?? [])
+    .filter((entry) => typeof entry.agent === "string" && entry.result?.raw !== undefined)
+    .map((entry) => ({
+      runId: entry.runId,
+      agent: entry.agent,
+      ...(entry.workflowStep ? { workflowStep: entry.workflowStep } : {}),
+      ...(entry.parentRunId ? { parentRunId: entry.parentRunId } : {}),
+      provider: entry.provider,
+      model: entry.result.raw?.model ?? entry.result.model,
+      raw: entry.result.raw,
+    }));
+}
+
+function publicationReason(publication) {
+  if (publication.reason === "workflow-not-succeeded") return "not published: the workflow did not succeed";
+  if (publication.reason === "merge-conflict") {
+    return `not published: it would conflict with ${(publication.conflicts ?? []).join(", ") || "the target branch"}`;
+  }
+  return `not published: ${publication.reason ?? "no reason recorded"}`;
 }
 
 export async function readReceipt(directory, file) {
@@ -164,7 +551,8 @@ export async function readReceipt(directory, file) {
       entries.push({ malformed: true });
     }
   }
-  return { file, entries, terminal: entries.findLast((entry) => entry.terminal === true) };
+  const receipt = { file, entries, terminal: entries.findLast((entry) => entry.terminal === true) };
+  return { ...receipt, outcome: describeOutcome(receipt) };
 }
 
 function countApprovals(lines) {
@@ -182,8 +570,121 @@ function countApprovals(lines) {
 // The worktrees this repository has, with ETNPilot's own marked and the
 // branches they hold. A run works in one of these, so what is on disk is part
 // of the same evidence as the receipt it wrote.
+// A unified diff, read as the lines it touches: every line carries the number
+// it has on each side, so a surface can show where a change is rather than
+// only what it says.
+export function parseDiff(text, { limit = 2000 } = {}) {
+  const lines = [];
+  let oldLine = 0;
+  let newLine = 0;
+  let hunks = 0;
+  let added = 0;
+  let deleted = 0;
+  for (const line of String(text ?? "").split("\n")) {
+    if (lines.length >= limit) return { lines, hunks, added, deleted, cut: true };
+    if (line.startsWith("diff --git") || line.startsWith("index ")
+      || line.startsWith("--- ") || line.startsWith("+++ ")
+      || line.startsWith("new file") || line.startsWith("deleted file")
+      || line.startsWith("similarity index") || line.startsWith("rename ")
+      || line.startsWith("old mode") || line.startsWith("new mode")) continue;
+    const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/.exec(line);
+    if (hunk) {
+      oldLine = Number(hunk[1]);
+      newLine = Number(hunk[2]);
+      hunks += 1;
+      lines.push({ kind: "hunk", text: line, context: hunk[3].trim() });
+      continue;
+    }
+    if (line.startsWith("\\ No newline")) {
+      lines.push({ kind: "note", text: line.slice(2) });
+      continue;
+    }
+    if (hunks === 0) continue;
+    if (line.startsWith("+")) {
+      added += 1;
+      lines.push({ kind: "add", text: line.slice(1), newLine });
+      newLine += 1;
+    } else if (line.startsWith("-")) {
+      deleted += 1;
+      lines.push({ kind: "remove", text: line.slice(1), oldLine });
+      oldLine += 1;
+    } else if (line.startsWith(" ") || line === "") {
+      lines.push({ kind: "context", text: line.slice(1), oldLine, newLine });
+      oldLine += 1;
+      newLine += 1;
+    }
+  }
+  // A diff that ends with a blank line is the split's doing, not the file's.
+  while (lines.at(-1)?.kind === "context" && lines.at(-1).text === "") lines.pop();
+  return { lines, hunks, added, deleted };
+}
+
+function worktreeManager(root, config) {
+  return new WorktreeManager(root, config?.git?.worktreeRoot ?? ".etnpilot/worktrees");
+}
+
+// The agents a run can be given, read from the manifests the run itself would
+// load. A name typed by hand is a run that fails a minute later.
+export async function readAgents({ root, config }) {
+  const directory = join(resolve(root), ".etnpilot", "agents");
+  const files = await readdir(directory).catch((error) => {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  });
+  const agents = [];
+  for (const file of files.filter((name) => name.endsWith(".yaml") || name.endsWith(".yml")).sort()) {
+    const content = await readFile(join(directory, file), "utf8").catch(() => "");
+    let manifest;
+    try {
+      manifest = YAML.parse(content) ?? {};
+    } catch (error) {
+      // A manifest that does not parse is named rather than hidden: a run
+      // would fail on it too.
+      agents.push({ name: file.replace(/\.ya?ml$/, ""), file, error: error.message });
+      continue;
+    }
+    // What it would actually run with: its own provider, or the project's.
+    const provider = manifest.provider ?? (manifest.providers?.length ? undefined : config?.defaultProvider);
+    agents.push({
+      name: typeof manifest.name === "string" && manifest.name ? manifest.name : file.replace(/\.ya?ml$/, ""),
+      file,
+      ...(provider ? { provider, ...(manifest.provider ? {} : { inheritedProvider: true }) } : {}),
+      ...(Array.isArray(manifest.requires) ? { requires: manifest.requires } : {}),
+      ...(typeof manifest.description === "string" ? { description: manifest.description } : {}),
+    });
+  }
+  return {
+    agents,
+    // What an empty choice means, so the surface does not have to guess.
+    defaultAgent: config?.defaultAgent,
+    steps: (config?.workflow?.steps ?? []).map((step) => step.id ?? step.agent).filter(Boolean),
+  };
+}
+
+// Tokens and cost for this project, as recorded by the runs themselves. A
+// surface that never shows this leaves a budget nobody can see.
+let usageCache;
+export async function readUsage({ root, config }) {
+  const file = resolve(root, config?.observability?.file ?? ".etnpilot/state/telemetry.jsonl");
+  const stats = await stat(file).catch(() => undefined);
+  if (!stats) {
+    return {
+      available: false,
+      reason: config?.observability?.enabled === true
+        ? "No telemetry has been written yet; usage appears once a run records it."
+        : "observability.enabled is false, so nothing records what a run costs.",
+    };
+  }
+  const key = `${file}:${stats.mtimeMs}:${stats.size}`;
+  if (usageCache?.key === key) return usageCache.value;
+  const summary = await summarizeTelemetryFile(file);
+  const value = { available: true, file, ...summary, budgets: config?.observability?.budgets ?? {} };
+  usageCache = { key, value };
+  return value;
+}
+
 export async function readWorktrees({ root, config }) {
-  const manager = new WorktreeManager(root, config?.git?.worktreeRoot ?? ".etnpilot/worktrees");
+  const manager = worktreeManager(root, config);
   try {
     const entries = await manager.describe();
     return {

@@ -1,5 +1,5 @@
 import { access } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { CodeGraph } from "../codegraph/codegraph.js";
 import { initializeProject } from "../config/init.js";
 import { loadConfig } from "../config/load.js";
@@ -18,13 +18,15 @@ import { verifyReceiptFile } from "../core/receipt-store.js";
 import { generateReceiptKeyPair, loadReceiptVerifiers } from "../core/receipt-signing.js";
 import { createTerminalApprovalHandler } from "../core/terminal-approval.js";
 import { copilotSdkAdvice, copilotSdkPlatformSupported } from "../providers/copilot.js";
+import { routeFor } from "../providers/router.js";
 import { WorktreeManager } from "../git/worktrees.js";
 import { GitLabClient } from "../gitlab/client.js";
 import { latestPipeline } from "../gitlab/pipelines.js";
 import { createGitLabWebhookServer } from "../gitlab/webhook-server.js";
+import { openInBrowser } from "../ui/open-browser.js";
 import { createReviewServer } from "../ui/server.js";
 import { createTuiApp } from "../tui/app.js";
-import { openProjectState, readMergeRequests, readWorktrees } from "../runtime/project-state.js";
+import { agentRawResponses, openProjectState, readMergeRequests, readWorktrees } from "../runtime/project-state.js";
 import { runProject } from "../runtime/project-runner.js";
 import { replayRun } from "../runtime/replay.js";
 import { WorkflowQueue } from "../workflow/queue.js";
@@ -49,6 +51,9 @@ export const CLI_OPTIONS = Object.freeze({
   "cleanup-worktree": { type: "boolean", default: false },
   publish: { type: "boolean", default: false },
   "dry-run": { type: "boolean", default: false },
+  // 'etnpilot ui' opens a browser; both spellings the help names must parse.
+  open: { type: "boolean", default: false },
+  "no-open": { type: "boolean", default: false },
   host: { type: "string" },
   port: { type: "string" },
   status: { type: "string" },
@@ -72,6 +77,7 @@ export const CLI_OPTIONS = Object.freeze({
   global: { type: "boolean", default: false },
   changed: { type: "boolean", default: false },
   "record-fixtures": { type: "string" },
+  raw: { type: "boolean", default: false },
   fixtures: { type: "string" },
 });
 
@@ -100,7 +106,7 @@ Usage:
   etnpilot content lock [--root directory]
   etnpilot content verify [--root directory]
   etnpilot webhook serve [--root directory] [--host address] [--port number]
-  etnpilot ui [--root directory] [--host address] [--port number]
+  etnpilot ui [--root directory] [--host address] [--port number] [--no-open]
   etnpilot tui [--root directory]
   etnpilot approval list [--status pending|approved|rejected|expired|all] [--limit number]
   etnpilot approval show <id>
@@ -111,6 +117,7 @@ Usage:
   etnpilot queue resume <id> [--force]
   etnpilot queue cancel <id> [--actor name] [--reason text]
   etnpilot receipt keygen [--private-key path] [--public-key path]
+  etnpilot receipt show [file] [--root directory] [--raw]
   etnpilot receipt verify <file> [--public-key path]
     [--require-signatures | --allow-unsigned] [--require-terminal | --allow-incomplete]
   etnpilot secret check <name> [--root directory]
@@ -316,7 +323,26 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     const review = await createReviewServer({ root: resolve(values.root) });
     const address = await review.listen({ host: values.host, port });
     console.log(`ETNPilot review UI: ${address.url}`);
-    console.log("The link contains a one-time token. Anyone who has it can approve operations.");
+    console.log("The link contains a one-time token. Anyone who has it can approve operations,");
+    console.log("change local settings, and start runs.");
+    if (address.exposed) {
+      // Binding away from loopback drops the guarantee the rest of this
+      // surface is built on, so it is said plainly rather than left to the
+      // documentation.
+      console.log("");
+      console.log("This port is open to your network, not just this machine. Everyone who can reach");
+      console.log("it and has the token has that same power. An SSH tunnel keeps it on loopback:");
+      console.log(`  ssh -N -L ${address.port}:127.0.0.1:${address.port} <user>@<this-machine>`);
+    }
+    // The point of this command is to look at the page, so it opens where
+    // there is a person to look: an interactive terminal, unless they said
+    // otherwise. Nothing here can fail the server that is already listening.
+    if (shouldOpenBrowser(values, process.env, process.stdout)) {
+      const opened = await openInBrowser(address.url).catch((error) => ({ opened: false, reason: error.message }));
+      console.log(opened.opened
+        ? `Opened it with '${opened.command}'. Use --no-open to keep it in the terminal.`
+        : `Could not open a browser (${opened.reason}) — copy the link above.`);
+    }
     await waitForShutdown();
     await review.close();
   } else if (command === "approval" && subcommand === "list") {
@@ -375,6 +401,58 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
       publicKeyPath: resolve(root, publicKeys[0] ?? ".etnpilot/receipt-signing-public.pem"),
     });
     console.log(JSON.stringify(result, null, 2));
+  } else if (command === "receipt" && subcommand === "show") {
+    // The same answer the review page and the terminal interface give, from
+    // the same reader: a run explained in one place and not the others is a
+    // run explained differently depending on where you look.
+    const root = resolve(values.root);
+    const state = await openProjectState({ root });
+    try {
+      const runs = await state.collect().then((snapshot) => snapshot.runs ?? []);
+      const file = rest[0] ? basename(rest[0]) : runs[0]?.receiptFile;
+      if (!file) throw new Error("No receipt to show: this project has recorded no runs yet.");
+      // A path printed by 'etnpilot run' is the natural thing to paste, so the
+      // directory part is dropped rather than refused; what is read is always
+      // this project's own runs directory.
+      const receipt = await state.readReceipt(file).catch((error) => {
+        if (error.code === "ENOENT") {
+          throw new Error(`No receipt named '${file}' in .etnpilot/state/runs. 'etnpilot receipt show' with no file takes the newest.`);
+        }
+        throw error instanceof TypeError ? new Error(`${error.message} Receipts live in .etnpilot/state/runs.`) : error;
+      });
+      const run = runs.find((candidate) => candidate.receiptFile === file);
+      const outcome = receipt.outcome;
+      console.log(JSON.stringify({
+        receipt: file,
+        ...(run ? { runId: run.runId, mode: run.mode, sealed: run.terminal, signed: run.signed, durationMs: run.durationMs } : {}),
+        status: outcome.status,
+        entries: receipt.entries.length,
+        // Why it ended, first: that is what someone opening a failed run is
+        // asking. The step's whole result belongs in the file, not in an
+        // answer read on a phone.
+        why: outcome.reasons.map((reason) => (reason.step ? `${reason.step}: ` : "") + reason.text),
+        steps: outcome.steps.map((step) => ({
+          id: step.id,
+          status: step.status,
+          ...(step.attempts > 1 ? { attempts: step.attempts } : {}),
+          ...(step.error ? { error: step.error } : {}),
+        })),
+        // Where the files are, and what it did to them.
+        ...(outcome.workspace ? { workspace: outcome.workspace } : {}),
+        ...(outcome.tools ? { tools: outcome.tools } : {}),
+        ...(outcome.agents.length > 0 ? { agents: outcome.agents } : {}),
+        ...(outcome.rehearsal ? { mergeRehearsal: outcome.rehearsal } : {}),
+        ...(outcome.usage ? { usage: outcome.usage } : {}),
+        ...(outcome.cleanup ? { cleanup: outcome.cleanup } : {}),
+        // The provider's own response body, exactly as it arrived — not shown
+        // by default, because it is one payload per call and belongs to
+        // whoever asked for it by name with '--raw'.
+        ...(values.raw ? { raw: agentRawResponses(receipt) } : {}),
+      }, null, 2));
+      return receipt.outcome.status === "succeeded" ? 0 : 1;
+    } finally {
+      state.close();
+    }
   } else if (command === "receipt" && subcommand === "verify") {
     if (!rest[0]) throw new Error("A receipt file is required.");
     if (values["require-signatures"] && values["allow-unsigned"]) {
@@ -539,12 +617,22 @@ async function writeOrPrint(path, document) {
   console.log(`Wrote ${path}`);
 }
 
+// Opening a browser is for a person at a terminal. A pipe, a service manager,
+// or CI gets the URL and nothing else, and '--open' asks for it anyway.
+export function shouldOpenBrowser(values = {}, env = process.env, stdout = process.stdout) {
+  if (values["no-open"]) return false;
+  if (values.open) return true;
+  if (typeof env.BROWSER === "string" && env.BROWSER.trim().toLowerCase() === "none") return false;
+  if (env.CI !== undefined && env.CI !== "" && env.CI !== "false") return false;
+  return stdout?.isTTY === true;
+}
+
 function ignoreMissing(error) {
   if (error.code === "ENOENT") return undefined;
   throw error;
 }
 
-async function diagnose(root) {
+export async function diagnose(root) {
   const [major, minor] = process.versions.node.split(".").map(Number);
   const checks = {
     node: process.versions.node,
@@ -556,16 +644,122 @@ async function diagnose(root) {
     copilotSdkAvailableForPlatform: copilotSdkPlatformSupported(),
     project: await access(join(root, ".etnpilot", "etnpilot.yaml")).then(() => true, () => false),
   };
+  // Whether a run could actually start here. 'ready' that ignores the route
+  // says yes on a machine where the configured provider cannot run at all —
+  // which is what 'etnpilot run' then reports, one command too late.
+  const routing = checks.project ? await diagnoseRoute(root, checks) : undefined;
   return {
     ...checks,
-    ready: checks.nodeSupported && checks.git && checks.sqlite,
+    ...(routing ? { routing } : {}),
+    ready: checks.nodeSupported && checks.git && checks.sqlite && (routing ? routing.usable !== null : true),
     hints: [
       checks.nodeSupported ? undefined : "Node.js 22.13 or newer is required for node:sqlite.",
       checks.git ? undefined : "Install git; ETNPilot runs every repository operation through it.",
       checks.copilotSdk ? undefined : copilotSdkAdvice(),
       checks.project ? undefined : "No '.etnpilot/etnpilot.yaml' found. Run 'etnpilot init' first.",
+      ...(routing?.hints ?? []),
     ].filter(Boolean),
   };
+}
+
+// The provider a run would reach, and whether it can run here. Everything it
+// reports is read the same way the run reads it.
+async function diagnoseRoute(root, checks) {
+  const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml")).catch(() => undefined);
+  if (!config) return { error: "The project configuration could not be read.", route: [], usable: null, hints: [] };
+  const state = await openProjectState({ root }).catch(() => undefined);
+  const described = await state?.agents().catch(() => undefined);
+  state?.close?.();
+  // The same agent a run would take: 'defaultAgent', or 'orchestrator', which
+  // is what the workflow falls back to.
+  const name = described?.defaultAgent ?? config.defaultAgent ?? "orchestrator";
+  const agent = described?.agents?.find((entry) => entry.name === name);
+  const { providers } = routeFor(
+    { name: name ?? "the default agent", ...(agent?.provider ? { provider: agent.provider } : {}) },
+    { rules: config.routing?.rules ?? [], defaults: [...(config.routing?.defaults ?? []), ...(config.defaultProvider ? [config.defaultProvider] : [])] },
+  );
+  const resolver = createSecretResolver({ root, config, env: process.env });
+  const policy = config.policy ? new PolicyEngine(config.policy) : undefined;
+  const route = [];
+  for (const provider of providers) {
+    route.push(await diagnoseProvider(provider, config, resolver, checks, policy));
+  }
+  const usable = route.find((entry) => entry.usable)?.name ?? null;
+  // A way out beats a diagnosis: where the routed provider cannot run but
+  // another configured one can, name it and the setting that switches.
+  const alternatives = [];
+  if (!usable) {
+    for (const other of Object.keys(config.providers ?? {})) {
+      if (route.some((entry) => entry.name === other)) continue;
+      if ((await diagnoseProvider(other, config, resolver, checks, policy)).usable) alternatives.push(other);
+    }
+  }
+  return {
+    agent: name,
+    route,
+    usable,
+    ...(alternatives.length > 0 ? { alternatives } : {}),
+    hints: usable
+      ? []
+      : [
+        route.length === 0
+          ? "No provider is routed: set 'defaultProvider', or name one in the agent manifest."
+          : `No routed provider can run here: ${route.map((entry) => `'${entry.name}' ${entry.reason}`).join("; ")}.`,
+        ...(alternatives.length > 0
+          ? [`Ready to use instead: ${alternatives.map((one) => `'${one}'`).join(", ")}.`
+            + ` Switch with 'etnpilot config set defaultProvider ${alternatives[0]}' — that stays local.`]
+          : []),
+      ],
+  };
+}
+
+async function diagnoseProvider(name, config, resolver, checks, policy) {
+  const configured = config.providers?.[name];
+  if (!configured) return { name, usable: false, reason: "is not configured under 'providers'" };
+  // Policy first: a denied provider cannot run however well it is configured,
+  // and 'policy.**' is stricter-only, so no local file can allow it.
+  const decision = policy?.evaluateProvider(name);
+  if (decision && decision.allowed === false) {
+    return {
+      name,
+      type: configured.type,
+      usable: false,
+      reason: "is denied by policy.providers, which only the committed file can change",
+    };
+  }
+  const type = configured.type;
+  if (type === "github-copilot") {
+    return checks.copilotSdk
+      ? { name, type, usable: true }
+      : { name, type, usable: false, reason: "needs '@github/copilot-sdk', which is not installed here" };
+  }
+  if (type === "openai-compatible" || type === "anthropic") {
+    const secret = configured.apiKeySecret ?? (type === "anthropic" ? "anthropic.apiKey" : "provider.apiKey");
+    const key = configured.apiKey ? { available: true } : await resolver.check(secret);
+    if (key.available) return { name, type, usable: true, key: secret };
+    // A model server on this machine is the one endpoint that needs no key.
+    if (type === "openai-compatible" && isLoopbackUrl(configured.baseUrl)) return { name, type, usable: true };
+    return { name, type, usable: false, key: secret, reason: `has no key: ${describeMissingKey(secret, config)}` };
+  }
+  // A provider type this command does not know about is not a provider that
+  // cannot run; saying so would be a guess.
+  return { name, type, usable: true, checked: false };
+}
+
+function describeMissingKey(secret, config) {
+  const reference = config.secrets?.values?.[secret];
+  if (reference?.provider === "env") return `set ${reference.key}`;
+  if (reference) return `secret '${secret}' is not available from '${reference.provider}'`;
+  return `secret '${secret}' is not mapped under 'secrets.values'`;
+}
+
+function isLoopbackUrl(value) {
+  try {
+    const { hostname } = new URL(value);
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
+  } catch {
+    return false;
+  }
 }
 
 async function resolveReceiptPublicKeys(root, explicitPaths) {

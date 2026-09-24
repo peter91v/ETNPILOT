@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { displayWidth, duration, pad, since, stripAnsi, truncate } from "../src/tui/ansi.js";
 import { clamp, renderApp, window as slidingWindow, wrap } from "../src/tui/render.js";
-import { createTuiApp } from "../src/tui/app.js";
+import { createTuiApp, splitKeys } from "../src/tui/app.js";
 import { openProjectState } from "../src/runtime/project-state.js";
 import { ApprovalInbox } from "../src/core/approval-inbox.js";
 import { JsonlReceiptStore } from "../src/core/receipt-store.js";
@@ -259,4 +259,31 @@ test("the harness tells the approval handler why it is asking", async () => {
   const decision = await harness.approveOperation({ kind: "shell", fullCommandText: "npm test" }, { agent: "builder" });
   assert.equal(decision.kind, "approve-once");
   assert.deepEqual(seen, [{ section: "operations", effect: "human", rule: "shell-with-review" }]);
+});
+
+test("a chunk of input is read as the keys it contains, not as one key", async () => {
+  assert.deepEqual(splitKeys("2j\r"), ["2", "j", "\r"]);
+  assert.deepEqual(splitKeys("\u001B[A\u001B[Bk"), ["\u001B[A", "\u001B[B", "k"]);
+  assert.deepEqual(splitKeys("\u001B"), ["\u001B"]);
+  // A pasted word is its letters, and a wide character stays one key.
+  assert.deepEqual(splitKeys("héllo"), ["h", "é", "l", "l", "o"]);
+
+  const { root, inbox } = await createProject();
+  inbox.close();
+  const state = await openProjectState({ root });
+  const app = createTuiApp({ state, output: fakeOutput(), input: new EventEmitter() });
+  try {
+    await app.refresh();
+    // Typing quickly: three keys in one chunk, as a terminal delivers them.
+    for (const key of splitKeys("2j")) await app.handle(key);
+    assert.equal(app.view, "runs");
+
+    // And a pasted task reaches the prompt whole.
+    await app.handle("n");
+    for (const key of splitKeys("Add a health check")) await app.handle(key);
+    assert.equal(app.prompt.buffer, "Add a health check");
+  } finally {
+    app.stop();
+    state.close();
+  }
 });

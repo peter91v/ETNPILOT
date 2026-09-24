@@ -138,3 +138,73 @@ test("harness receipts record the provider selected by fallback", async () => {
 async function fail() {
   throw new Error("must not be invoked");
 }
+
+test("the project's defaultProvider is part of the route, after the ones it lists", async () => {
+  const harness = new Harness();
+  harness.registerProvider({ name: "listed", capabilities: ["chat"], invoke: async () => ({ text: "listed" }) });
+  harness.registerProvider({ name: "fallback", capabilities: ["chat"], invoke: async () => ({ text: "fallback" }) });
+
+  // A project that only names a default has a route all the same.
+  const plain = new ProviderRouter(harness.providers, {}, { defaultProvider: "fallback" });
+  assert.equal((await plain.invoke({ agent: { name: "worker" } })).provider, "fallback");
+
+  // And one that lists providers keeps that order, with the default last.
+  const listed = new ProviderRouter(harness.providers, { defaults: ["listed"] }, { defaultProvider: "fallback" });
+  const result = await listed.invoke({ agent: { name: "worker" } });
+  assert.equal(result.provider, "listed");
+
+  // A default that is not configured is skipped like any other candidate,
+  // rather than ending the route.
+  const missing = new ProviderRouter(harness.providers, { defaults: ["absent"] }, { defaultProvider: "fallback" });
+  const recovered = await missing.invoke({ agent: { name: "worker" } });
+  assert.equal(recovered.provider, "fallback");
+  assert.deepEqual(recovered.attempts[0], { provider: "absent", status: "skipped", reason: "not-registered" });
+});
+
+test("a route that finds nothing says what it tried and what exists", async () => {
+  const harness = new Harness();
+  harness.registerProvider({ name: "configured", capabilities: ["chat"], invoke: async () => ({ text: "ok" }) });
+  const router = new ProviderRouter(harness.providers, { defaults: ["absent"] }, { defaultProvider: "also-absent" });
+  await assert.rejects(() => router.invoke({ agent: { name: "orchestrator", requires: ["chat"] } }), (error) => {
+    assert.equal(error.code, "no_eligible_provider");
+    assert.match(error.message, /agent 'orchestrator' with capabilities: chat/);
+    // The candidates and why each was passed over.
+    assert.match(error.message, /'absent' not configured under 'providers'/);
+    assert.match(error.message, /Tried in order: 'absent', 'also-absent'/);
+    // What there is instead, and which settings decide the route.
+    assert.match(error.message, /Configured and ready: 'configured'/);
+    assert.match(error.message, /routing\.defaults.*defaultProvider/);
+    return true;
+  });
+
+  const empty = new ProviderRouter(new Harness().providers, {});
+  await assert.rejects(() => empty.invoke({ agent: { name: "orchestrator" } }), (error) => {
+    assert.match(error.message, /Tried in order: nothing/);
+    assert.match(error.message, /No provider is configured under 'providers'/);
+    return true;
+  });
+});
+
+test("a provider that was tried and failed is named, with why", async () => {
+  const harness = new Harness();
+  harness.registerProvider({
+    name: "flaky",
+    capabilities: ["chat"],
+    invoke: async () => {
+      throw new ProviderError("Provider network request failed: connect ECONNREFUSED 127.0.0.1:45999", {
+        code: "network_error",
+        retryable: true,
+        safeToRetry: true,
+      });
+    },
+  });
+  const router = new ProviderRouter(harness.providers, { defaults: ["absent", "flaky"] });
+  await assert.rejects(() => router.invoke({ agent: { name: "worker", requires: ["chat"] } }), (error) => {
+    // Without this the message reads 'no provider can satisfy' while the
+    // truth is that one was reached and refused the connection.
+    assert.match(error.message, /Tried and failed: 'flaky' \(network_error\) Provider network request failed: connect ECONNREFUSED/);
+    assert.match(error.message, /'absent' not configured/);
+    assert.equal(error.providerAttempts.find((attempt) => attempt.provider === "flaky").status, "failed");
+    return true;
+  });
+});

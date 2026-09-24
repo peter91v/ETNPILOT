@@ -9,6 +9,8 @@ import { loadConfig } from "../src/config/load.js";
 import { SETTINGS, settingsEvidence } from "../src/config/layers.js";
 import { describeSettings, diffSettings, setSetting, unsetSetting } from "../src/config/settings.js";
 import { PolicyEngine } from "../src/policy/engine.js";
+import { createTelemetry } from "../src/observability/telemetry.js";
+import { createSandbox } from "../src/runtime/sandbox.js";
 
 async function project() {
   const root = await mkdtemp(join(tmpdir(), "etnpilot-settings-"));
@@ -177,4 +179,98 @@ test("the committed default declares the modes, and a local file cannot relax th
   assert.match(committed, /^settings:$/m);
   await writeLocal(root, 'settings:\n  modes:\n    "receipts.signing.**": open\n');
   await assert.rejects(loadConfig(file, env), /settings\.modes/);
+});
+
+test("a setting that only accepts certain values offers them, and they are accepted", async () => {
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-choices-"));
+  await initializeProject(root);
+  const env = { ...process.env, ETNPILOT_CONFIG_HOME: join(root, "config-home") };
+  const described = await describeSettings({ root, env });
+  const byPath = Object.fromEntries(described.entries.map((entry) => [entry.path, entry]));
+
+  assert.deepEqual(byPath["workspace.mode"].choices, { kind: "one", values: ["worktree", "in-place"] });
+  assert.deepEqual(byPath["sandbox.enabled"].choices, { kind: "one", values: [true, false] });
+  assert.deepEqual(byPath["approval.allow"].choices, { kind: "set", values: ["read", "write", "shell", "network"] });
+  // The choice list is the project's own where the project decides it: which
+  // provider to route to is whichever providers this project configures.
+  assert.deepEqual(byPath["defaultProvider"].choices, {
+    kind: "one",
+    values: ["github-copilot", "anthropic", "openai"],
+  });
+  // A free-text setting is left alone rather than given a made-up list.
+  assert.equal(byPath["git.committer.name"].choices, undefined);
+
+  // Every offered value is one that can actually be written and loaded back.
+  const writable = ["workspace.mode", "workspace.cleanup", "sandbox.network", "sandbox.runtime", "observability.failureMode"]
+    .filter((path) => byPath[path].mode === "open");
+  assert.equal(writable.length >= 4, true, "the open settings among these are the ones to try");
+  for (const path of writable) {
+    for (const value of byPath[path].choices.values) {
+      const result = await setSetting(path, value, { root, env, scope: "local" });
+      assert.equal(result.effective, value, `${path} = ${value}`);
+      await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"), env);
+    }
+    await unsetSetting(path, { root, env, scope: "local" });
+  }
+
+  // And the offered values are the ones their own validator accepts, while a
+  // value that is not offered is refused there. A list that suggests a value a
+  // run would then reject is worse than no list at all.
+  for (const value of byPath["observability.failureMode"].choices.values) {
+    await createTelemetry({ root, config: { observability: { enabled: false, failureMode: value } } });
+  }
+  await assert.rejects(
+    () => createTelemetry({ root, config: { observability: { enabled: false, failureMode: "sometimes" } } }),
+    /failureMode must be ignore or fail/,
+  );
+  for (const value of byPath["sandbox.network"].choices.values) {
+    createSandbox({ enabled: true, image: "node:24", network: value }, { workspace: root, probe: () => true });
+  }
+  assert.throws(
+    () => createSandbox({ enabled: true, image: "node:24", network: "wifi" }, { workspace: root, probe: () => true }),
+    /network/,
+  );
+});
+
+test("a model id with a dot in it does not fracture the pricing table", async () => {
+  // Reported by driving it through a real browser: choosing 'gpt-5.4'
+  // auto-priced it, and the local settings file came out as
+  //   observability: { pricing: { models: { gpt-5: { "4": {...} } } } }
+  // — every settings path is dot-separated, and 'gpt-5.4' is an external
+  // model id, not a path. observability.pricing.models must stay one leaf.
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-dotted-model-"));
+  await initializeProject(root);
+  const env = { ...process.env, ETNPILOT_CONFIG_HOME: join(root, "config-home") };
+  const file = join(root, ".etnpilot", "etnpilot.yaml");
+
+  const result = await setSetting(
+    "observability.pricing.models",
+    { "gpt-5.4": { inputPerMillion: 2.5, outputPerMillion: 15, cacheReadPerMillion: 0.25 } },
+    { root, env, scope: "local" },
+  );
+  assert.deepEqual(result.effective, { "gpt-5.4": { inputPerMillion: 2.5, outputPerMillion: 15, cacheReadPerMillion: 0.25 } });
+
+  const config = await loadConfig(file, env);
+  assert.deepEqual(config.observability.pricing.models, {
+    "gpt-5.4": { inputPerMillion: 2.5, outputPerMillion: 15, cacheReadPerMillion: 0.25 },
+  });
+  // Not fractured into { "gpt-5": { "4": {...} } }.
+  assert.equal(config.observability.pricing.models["gpt-5"], undefined);
+
+  const described = await describeSettings({ root, env });
+  const row = described.entries.find((entry) => entry.path === "observability.pricing.models");
+  assert.ok(row, "the whole table is one entry, not one per model field");
+  assert.deepEqual(row.value, { "gpt-5.4": { inputPerMillion: 2.5, outputPerMillion: 15, cacheReadPerMillion: 0.25 } });
+  assert.equal(
+    described.entries.some((entry) => entry.path.startsWith("observability.pricing.models.")),
+    false,
+    "no sub-path leaked out of the opaque map",
+  );
+
+  // Adding a second dotted model preserves the first — the read-merge-write
+  // round trip a settings UI does.
+  const merged = { ...row.value, "gpt-4.1": { inputPerMillion: 2, outputPerMillion: 8 } };
+  await setSetting("observability.pricing.models", merged, { root, env, scope: "local" });
+  const again = await loadConfig(file, env);
+  assert.deepEqual(again.observability.pricing.models, merged);
 });

@@ -27,7 +27,12 @@ export async function loadProject(harness, root = process.cwd(), env = process.e
     const prompt = manifest.promptRef
       ? harness.prompts.get(manifest.promptRef)
       : manifest.prompt;
-    harness.registerAgent({ ...manifest, prompt });
+    // An agent that names no provider takes the project's. Repeating one
+    // provider in every manifest is what 'defaultProvider' is there to spare,
+    // and an agent registered without one could not be routed at all.
+    const provider = manifest.provider
+      ?? (manifest.providers?.length ? undefined : config.defaultProvider);
+    harness.registerAgent({ ...manifest, ...(provider ? { provider } : {}), prompt });
   }
   const pluginEntries = runtime.bootstrapPluginsLoaded
     ? (config.plugins ?? []).filter((entry) => !isBootstrapPlugin(entry))
