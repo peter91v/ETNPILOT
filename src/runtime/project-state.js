@@ -243,23 +243,32 @@ export async function readRuns(directory, { limit = 20 } = {}) {
     const content = await readFile(join(directory, file), "utf8").catch(() => "");
     const lines = content.split("\n").filter(Boolean);
     if (lines.length === 0) continue;
-    let terminal;
-    try {
-      terminal = JSON.parse(lines.at(-1));
-    } catch {
-      continue;
+    const parsed = [];
+    for (const line of lines) {
+      try {
+        parsed.push(JSON.parse(line));
+      } catch {
+        // A malformed line is reported by 'etnpilot receipt verify'.
+      }
     }
+    if (parsed.length === 0) continue;
+    // The last line is not the terminal record: a run that stopped before it
+    // could seal leaves an ordinary entry there, and reading that entry's own
+    // status, hash and duration as the run's reports a step's success as the
+    // run's. What is sealed is what carries 'terminal: true', and nothing
+    // else.
+    const sealed = parsed.findLast((entry) => entry.terminal === true);
     runs.push({
-      runId: terminal.runId ?? file.replace(/\.jsonl$/, ""),
-      status: terminal.status ?? "unknown",
-      mode: terminal.mode ?? "execute",
-      terminal: terminal.terminal === true,
+      runId: parsed.find((entry) => typeof entry.runId === "string")?.runId ?? file.replace(/\.jsonl$/, ""),
+      status: sealed?.status ?? "incomplete",
+      mode: sealed?.mode ?? parsed.find((entry) => typeof entry.mode === "string")?.mode ?? "execute",
+      terminal: Boolean(sealed),
       entries: lines.length,
-      hash: terminal.hash,
-      signed: Boolean(terminal.proof),
-      durationMs: terminal.durationMs,
-      branch: terminal.workspace?.branch,
-      sandbox: terminal.workspace?.sandbox?.image,
+      hash: sealed?.hash,
+      signed: Boolean(sealed?.proof),
+      durationMs: sealed?.durationMs,
+      branch: sealed?.workspace?.branch,
+      sandbox: sealed?.workspace?.sandbox?.image,
       approvals: countApprovals(lines),
       receiptFile: file,
     });
@@ -312,7 +321,11 @@ export function describeOutcome(receipt) {
     reasons.push({ kind: "incomplete", text: "the receipt was never sealed: the run stopped before it could finish" });
   }
   return {
-    status: terminal.status ?? summary.status ?? "unknown",
+    // 'incomplete' rather than 'unknown': a receipt with no terminal record
+    // is not a run whose outcome could not be read, it is a run that never
+    // reported one.
+    status: terminal.status ?? summary.status ?? (receipt?.terminal ? "unknown" : "incomplete"),
+    sealed: Boolean(receipt?.terminal),
     steps,
     reasons,
     usage: terminal.observability?.summary,

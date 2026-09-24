@@ -1120,23 +1120,28 @@ function openReceipt(run) {
 function renderRunDetail() {
   const { run, receipt } = openRun;
   const terminal = receipt.terminal ?? {};
+  const sealed = Boolean(receipt.terminal);
+  const status = receipt.outcome?.status ?? run.status;
   const body = [
     pairs([
-      ["Status", run.status, run.status === "succeeded" ? "ok" : "bad"],
+      ["Status", status, status === "succeeded" ? "ok" : status === "incomplete" ? "warn" : "bad"],
       ["Mode", run.mode],
       ["Branch", terminal.workspace?.branch ?? "—"],
       ["Sandbox", terminal.workspace?.sandbox?.image ?? "—"],
       ["Receipt", receipt.file],
       ["Entries", String(receipt.entries.length)],
       ["Signature", run.signed ? "signed" : "unsigned", run.signed ? "ok" : "warn"],
-      ["Hash", run.hash ?? "—", "mono"],
+      // A receipt that was never sealed has no hash of its own; the last
+      // entry's chain hash is not the run's, and showing it as one would be a
+      // claim about evidence that does not exist.
+      ["Hash", sealed ? (run.hash ?? "—") : "—", "mono"],
     ]),
   ];
   // Why it ended, before anything else: a reviewer opening a failed run is
   // asking exactly this.
   const outcome = openRun.receipt.outcome ?? { reasons: [], steps: [] };
   if (outcome.reasons.length > 0) {
-    body.push(el("p", { class: "muted", text: run.status === "succeeded" ? "Worth knowing" : "Why it ended" }));
+    body.push(el("p", { class: "muted", text: status === "succeeded" ? "Worth knowing" : "Why it ended" }));
     for (const reason of outcome.reasons) {
       body.push(el("p", {
         class: reason.kind === "publication" || reason.kind === "blocked" ? "notice" : "notice bad",
@@ -1194,7 +1199,9 @@ function renderRunDetail() {
   }
   if (terminal.error) body.push(detailBlock("Error", terminal.error));
   body.push(el("div", { class: "row" }, [button("Close", { onClick: () => { openRun = undefined; render(); renderPageActions(); } })]));
-  return panel(run.runId, { meta: "sealed receipt", body, open: true });
+  // What the panel says about the receipt has to be what the receipt is: the
+  // header claimed 'sealed' over a note saying it never was.
+  return panel(run.runId, { meta: sealed ? "sealed receipt" : "receipt not sealed", body, open: true });
 }
 
 async function loadWorktrees({ notify = false } = {}) {
