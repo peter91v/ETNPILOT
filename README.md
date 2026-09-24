@@ -38,7 +38,7 @@ the approval inbox.
 npm install
 npm install @github/copilot-sdk
 npm run etnpilot -- init .            # or: init . --template regulated
-npm run etnpilot -- doctor            # verify node, git, sqlite, and the SDK
+npm run etnpilot -- doctor            # node, git, sqlite, and the provider a run would reach
 # Describe at least one agent under .etnpilot/agents/, then:
 git add .etnpilot && git commit -m "Add ETNPilot configuration"
 npm run etnpilot -- content lock --root .

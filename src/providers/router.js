@@ -158,22 +158,28 @@ export class ProviderRouter {
   }
 
   #route(agent) {
-    const exactRules = this.rules.filter((rule) => rule.agent === agent.name);
-    const wildcardRules = this.rules.filter((rule) => rule.agent === "*");
-    const rules = [...exactRules, ...wildcardRules];
-    return {
-      providers: unique([
-        ...rules.flatMap((rule) => rule.providers),
-        ...normalizeProviderList(agent.providers ?? []),
-        ...normalizeProviderList(agent.provider ? [agent.provider] : []),
-        ...this.defaults,
-      ]),
-      requires: unique([
-        ...normalizeStringList(agent.requires ?? [], `Agent '${agent.name}' requires`),
-        ...rules.flatMap((rule) => rule.require),
-      ]),
-    };
+    return routeFor(agent, { rules: this.rules, defaults: this.defaults });
   }
+}
+
+// The route, on its own, so a command that only wants to report it does not
+// have to reimplement the order and drift from it.
+export function routeFor(agent, { rules = [], defaults = [] } = {}) {
+  const exactRules = rules.filter((rule) => rule.agent === agent.name);
+  const wildcardRules = rules.filter((rule) => rule.agent === "*");
+  const matching = [...exactRules, ...wildcardRules];
+  return {
+    providers: unique([
+      ...matching.flatMap((rule) => rule.providers),
+      ...normalizeProviderList(agent.providers ?? []),
+      ...normalizeProviderList(agent.provider ? [agent.provider] : []),
+      ...defaults,
+    ]),
+    requires: unique([
+      ...normalizeStringList(agent.requires ?? [], `Agent '${agent.name}' requires`),
+      ...matching.flatMap((rule) => rule.require),
+    ]),
+  };
 }
 
 function compactAccounting(accounting) {

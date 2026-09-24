@@ -132,6 +132,11 @@ Beide Adapter arbeiten über dieselben vermittelten Werkzeuge (`tools: true`):
 Lesen, Schreiben und Befehle laufen durch denselben Genehmigungsweg wie bei
 Copilot. Nichts geschieht ohne Ihre Zusage.
 
+`etnpilot doctor` sagt, welchen Provider ein Run erreichen würde und ob der
+hier laufen kann — samt der Variable, die zu setzen ist, und dem Befehl, der
+auf einen bereits einsatzfähigen Provider umstellt. `ready: false` heißt: ein
+Run würde jetzt scheitern.
+
 ### Auf Android (Tablet, Telefon)
 
 Für `github-copilot` gibt es **keinen SDK-Build für Android** — `npm install
