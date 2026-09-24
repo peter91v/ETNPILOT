@@ -22,6 +22,7 @@ import { WorktreeManager } from "../git/worktrees.js";
 import { GitLabClient } from "../gitlab/client.js";
 import { latestPipeline } from "../gitlab/pipelines.js";
 import { createGitLabWebhookServer } from "../gitlab/webhook-server.js";
+import { openInBrowser } from "../ui/open-browser.js";
 import { createReviewServer } from "../ui/server.js";
 import { createTuiApp } from "../tui/app.js";
 import { openProjectState, readMergeRequests, readWorktrees } from "../runtime/project-state.js";
@@ -100,7 +101,7 @@ Usage:
   etnpilot content lock [--root directory]
   etnpilot content verify [--root directory]
   etnpilot webhook serve [--root directory] [--host address] [--port number]
-  etnpilot ui [--root directory] [--host address] [--port number]
+  etnpilot ui [--root directory] [--host address] [--port number] [--no-open]
   etnpilot tui [--root directory]
   etnpilot approval list [--status pending|approved|rejected|expired|all] [--limit number]
   etnpilot approval show <id>
@@ -327,6 +328,15 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
       console.log("it and has the token has that same power. An SSH tunnel keeps it on loopback:");
       console.log(`  ssh -N -L ${address.port}:127.0.0.1:${address.port} <user>@<this-machine>`);
     }
+    // The point of this command is to look at the page, so it opens where
+    // there is a person to look: an interactive terminal, unless they said
+    // otherwise. Nothing here can fail the server that is already listening.
+    if (shouldOpenBrowser(values, process.env, process.stdout)) {
+      const opened = await openInBrowser(address.url).catch((error) => ({ opened: false, reason: error.message }));
+      console.log(opened.opened
+        ? `Opened it with '${opened.command}'. Use --no-open to keep it in the terminal.`
+        : `Could not open a browser (${opened.reason}) — copy the link above.`);
+    }
     await waitForShutdown();
     await review.close();
   } else if (command === "approval" && subcommand === "list") {
@@ -547,6 +557,16 @@ async function writeOrPrint(path, document) {
   const { writeFile } = await import("node:fs/promises");
   await writeFile(path, serialized, "utf8");
   console.log(`Wrote ${path}`);
+}
+
+// Opening a browser is for a person at a terminal. A pipe, a service manager,
+// or CI gets the URL and nothing else, and '--open' asks for it anyway.
+export function shouldOpenBrowser(values = {}, env = process.env, stdout = process.stdout) {
+  if (values["no-open"]) return false;
+  if (values.open) return true;
+  if (typeof env.BROWSER === "string" && env.BROWSER.trim().toLowerCase() === "none") return false;
+  if (env.CI !== undefined && env.CI !== "" && env.CI !== "false") return false;
+  return stdout?.isTTY === true;
 }
 
 function ignoreMissing(error) {

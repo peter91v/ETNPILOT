@@ -26,6 +26,18 @@ pre-1.0, so breaking changes may appear in any release.
 - The page also lists the worktrees and the project's merge requests, with the
   same `removeIfClean` behaviour as the other surfaces.
 
+### Added — `etnpilot ui` opens the page
+
+- At a terminal the command opens the review page in a browser, because the
+  link carries a token nobody wants to retype. Not when the output is a pipe,
+  not under `CI`, not with `BROWSER=none`, and not with `--no-open`; `--open`
+  asks for it anyway. `BROWSER` chooses the opener, and `termux-open-url` is
+  tried before `xdg-open`, since a phone is a place this runs.
+- The URL is passed as an argument and never through a shell, the opener is
+  detached so the browser outlives the command and writes nothing into the
+  terminal, and an opener that is missing or fails is reported rather than
+  failing the server that is already listening.
+
 ### Added — four things the surfaces were not saying
 
 - **Settings offer the values they accept.** Where a setting takes one of a

@@ -465,6 +465,7 @@ above everyone else's. See [docs/tui.md](docs/tui.md).
 ```bash
 etnpilot ui --root .
 # ETNPilot review UI: http://127.0.0.1:8788/?token=…
+# Opened it with 'xdg-open'. Use --no-open to keep it in the terminal.
 ```
 
 The same things the terminal interface shows, in a browser: approvals with

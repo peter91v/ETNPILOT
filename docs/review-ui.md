@@ -3,7 +3,15 @@
 ```bash
 etnpilot ui --root .
 # ETNPilot review UI: http://127.0.0.1:8788/?token=…
+# Opened it with 'xdg-open'. Use --no-open to keep it in the terminal.
 ```
+
+At a terminal it opens the page for you, because the link carries a token
+nobody wants to retype. It does not when the output is a pipe, when `CI` is
+set, when `BROWSER` is `none`, or with `--no-open`; `--open` asks for it
+anyway. `BROWSER` names the opener if you have a preference, and on Android
+`termux-open-url` is tried before `xdg-open`. If nothing can open a browser,
+the command says so and keeps serving — the link is still on screen.
 
 A local page for the evidence ETNPilot already produces: approvals waiting for
 a decision, the workflow queue, and finished runs read from their receipt
@@ -118,6 +126,10 @@ the URL it prints; API calls must send it in an `x-etnpilot-token` header,
 which a page on another origin cannot set without a preflight this server
 refuses. The page itself loads nothing from anywhere — no CDN, no fonts, no
 analytics — and says so in its content security policy.
+
+Opening the browser passes that URL to another program as an argument, where
+other processes of the same user can read it. It is on your terminal either
+way; `--no-open` is there for a machine where that difference matters.
 
 **Anyone who has the token can approve operations, change local settings, and
 start runs**, exactly as anyone who can write these files can. Do not forward the URL, and do not expose the
