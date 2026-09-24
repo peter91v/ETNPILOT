@@ -231,3 +231,46 @@ test("a setting that only accepts certain values offers them, and they are accep
     /network/,
   );
 });
+
+test("a model id with a dot in it does not fracture the pricing table", async () => {
+  // Reported by driving it through a real browser: choosing 'gpt-5.4'
+  // auto-priced it, and the local settings file came out as
+  //   observability: { pricing: { models: { gpt-5: { "4": {...} } } } }
+  // — every settings path is dot-separated, and 'gpt-5.4' is an external
+  // model id, not a path. observability.pricing.models must stay one leaf.
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-dotted-model-"));
+  await initializeProject(root);
+  const env = { ...process.env, ETNPILOT_CONFIG_HOME: join(root, "config-home") };
+  const file = join(root, ".etnpilot", "etnpilot.yaml");
+
+  const result = await setSetting(
+    "observability.pricing.models",
+    { "gpt-5.4": { inputPerMillion: 2.5, outputPerMillion: 15, cacheReadPerMillion: 0.25 } },
+    { root, env, scope: "local" },
+  );
+  assert.deepEqual(result.effective, { "gpt-5.4": { inputPerMillion: 2.5, outputPerMillion: 15, cacheReadPerMillion: 0.25 } });
+
+  const config = await loadConfig(file, env);
+  assert.deepEqual(config.observability.pricing.models, {
+    "gpt-5.4": { inputPerMillion: 2.5, outputPerMillion: 15, cacheReadPerMillion: 0.25 },
+  });
+  // Not fractured into { "gpt-5": { "4": {...} } }.
+  assert.equal(config.observability.pricing.models["gpt-5"], undefined);
+
+  const described = await describeSettings({ root, env });
+  const row = described.entries.find((entry) => entry.path === "observability.pricing.models");
+  assert.ok(row, "the whole table is one entry, not one per model field");
+  assert.deepEqual(row.value, { "gpt-5.4": { inputPerMillion: 2.5, outputPerMillion: 15, cacheReadPerMillion: 0.25 } });
+  assert.equal(
+    described.entries.some((entry) => entry.path.startsWith("observability.pricing.models.")),
+    false,
+    "no sub-path leaked out of the opaque map",
+  );
+
+  // Adding a second dotted model preserves the first — the read-merge-write
+  // round trip a settings UI does.
+  const merged = { ...row.value, "gpt-4.1": { inputPerMillion: 2, outputPerMillion: 8 } };
+  await setSetting("observability.pricing.models", merged, { root, env, scope: "local" });
+  const again = await loadConfig(file, env);
+  assert.deepEqual(again.observability.pricing.models, merged);
+});

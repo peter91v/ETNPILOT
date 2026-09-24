@@ -1760,9 +1760,28 @@ function modelValueControl(entry, providerName) {
       // Automatic, and never silent about where the number came from: a
       // price nobody can trace back is not something to spend real money on.
       if (model?.knownPrice) {
+        // A model id is an external string and often has a dot in it
+        // ('gpt-5.4'), and every settings path is itself dot-separated — so
+        // 'observability.pricing.models.gpt-5.4' would split into 'gpt-5'
+        // then '4', not the one key it looks like. The whole map is one
+        // setting for exactly this reason; it is read back and rewritten
+        // whole rather than addressed by a path that could collide with it.
+        const table = (state.settings?.entries ?? []).find((row) => row.path === "observability.pricing.models")?.value ?? {};
         await applySetting(
-          "observability.pricing.models." + chosenId,
-          JSON.stringify({ inputPerMillion: model.knownPrice.inputPerMillion, outputPerMillion: model.knownPrice.outputPerMillion }),
+          "observability.pricing.models",
+          JSON.stringify({
+            ...table,
+            [chosenId]: {
+              inputPerMillion: model.knownPrice.inputPerMillion,
+              outputPerMillion: model.knownPrice.outputPerMillion,
+              // Only where the source actually separated it — writing it
+              // equal to the input rate would claim a discount nobody
+              // published.
+              ...(model.knownPrice.cacheReadPerMillion !== undefined
+                ? { cacheReadPerMillion: model.knownPrice.cacheReadPerMillion }
+                : {}),
+            },
+          }),
           scope,
         );
         toast(

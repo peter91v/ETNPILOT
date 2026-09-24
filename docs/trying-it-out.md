@@ -131,8 +131,13 @@ etnpilot config set observability.pricing.models.gpt-5.inputPerMillion 1.25
 etnpilot config set observability.pricing.models.gpt-5.outputPerMillion 10
 ```
 
-Oder die ganze Tabelle auf einmal, was bei Modellnamen mit Punkt (`gpt-4.1`)
-der einzige Weg ist, weil der Pfad an Punkten getrennt wird:
+Oder die ganze Tabelle auf einmal, was bei Modellnamen mit Punkt (`gpt-5.4`,
+`gpt-4.1`) der einzige Weg ist — jeder Einstellungspfad wird selbst an
+Punkten getrennt, ein Modellname mit Punkt würde als eigener,
+verschachtelter Pfad gelesen (`gpt-5.4` → `gpt-5` → `4`). Deshalb ist
+`observability.pricing.models` als Ganzes ein einziger Eintrag, nie einzeln
+pro Modell aufgespalten — das gilt jetzt für die Einstellungs-Ansicht und
+für den automatischen Preis-Eintrag beim Modellwechsel genauso wie hier:
 
 ```bash
 etnpilot config set observability.pricing.models \
