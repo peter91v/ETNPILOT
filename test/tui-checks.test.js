@@ -213,8 +213,10 @@ async function createProject() {
 }
 
 async function plantSecret(root) {
-  // A key id in the shape the scanner's own AWS rule matches.
-  await writeFile(join(root, "leak.txt"), 'aws_access_key_id = AKIAIOSFODNN7EXAMPLE\n');
+  // A key id in the shape the scanner's own AWS rule matches. It is AWS's own
+  // documentation example, and the marker keeps this repository's own scan
+  // from reporting the fixture — which is what that marker is for.
+  await writeFile(join(root, "leak.txt"), 'aws_access_key_id = AKIAIOSFODNN7EXAMPLE\n'); // etnpilot:allow-secret
   await git(["add", "leak.txt"], { cwd: root });
 }
 

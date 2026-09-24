@@ -144,7 +144,7 @@ function footerKeys({ view, detail, editor, prompt, help, diff, agentMode, agent
   }
   if (agentText && view === "runs") return [["↑↓", "scroll"], ["esc", "back"], ["q", "quit"]];
   if (agentMode && view === "runs") return [["↑↓", "move"], ["enter", "read"], ["esc", "back"], ["q", "quit"]];
-  if (detail && view === "runs") return [["a", "agents"], ["esc", "back"], ["n", "run"], ["q", "quit"]];
+  if (detail && view === "runs") return [["a", "agents"], ["v", "verify"], ["esc", "back"], ["n", "run"], ["q", "quit"]];
   if (diff && view === "worktrees") return [["↑↓", "scroll"], ["esc", "back"], ["q", "quit"]];
   if (detail && view === "worktrees") {
     return [["↑↓", "move"], ["enter", "what changed"], ["esc", "back"], ["x", "remove if clean"], ["q", "quit"]];
@@ -665,7 +665,7 @@ function queueTone(status) {
   return "muted";
 }
 
-function renderRunDetail(state, { style, width, height, cursor, receipt, agentMode = false, agentCursor = 0 }) {
+function renderRunDetail(state, { style, width, height, cursor, receipt, verification, agentMode = false, agentCursor = 0 }) {
   const runs = state.runs ?? [];
   const run = runs[clamp(cursor, runs.length)];
   if (!run) return [style.dim("No runs have been recorded yet.")];
@@ -777,6 +777,20 @@ function renderRunDetail(state, { style, width, height, cursor, receipt, agentMo
   }
   lines.push(style.dim("Receipt"));
   lines.push(`  ${style.muted(run.receiptFile)} · ${run.entries} entries · ${run.signed ? style.ok("signed") : style.warn("unsigned")}`);
+  // Whether it verifies is a different claim from what it says, so it is only
+  // here once it has been checked — and it never reads as 'not checked yet'
+  // and 'checked, and fine' the same way.
+  if (verification === undefined) {
+    lines.push(`  ${style.dim("press 'v' to check its hash chain and signatures")}`);
+  } else if (verification.file !== run.receiptFile) {
+    lines.push(`  ${style.dim("checking…")}`);
+  } else {
+    lines.push(`  ${style.tone(verification.valid ? "verified" : "DOES NOT VERIFY", verification.tone)}`
+      + ` ${style.muted(`${verification.encoding ?? ""}`)}`);
+    for (const piece of wrap(verification.text, width - 4)) {
+      lines.push(`  ${verification.valid ? style.muted(piece) : style.bad(piece)}`);
+    }
+  }
   if (terminal.error) {
     lines.push("", style.dim("Error"));
     for (const piece of wrap(terminal.error, width - 2)) lines.push(`  ${style.bad(piece)}`);
@@ -791,7 +805,7 @@ function renderHelp({ style, width, height, offset = 0 }) {
     ...keys.map(([key, label]) => truncate(`  ${style.accent(pad(key, 10))} ${style.ink(label)}`, columnWidth)),
     "",
   ];
-  const single = sections.flatMap((section) => render(section, width));
+  const single = trimTrailing(sections.flatMap((section) => render(section, width)));
   const rows = single.length <= height ? single : twoColumns(sections, render, width);
   if (rows.length <= height) return rows;
 
@@ -805,20 +819,26 @@ function renderHelp({ style, width, height, offset = 0 }) {
 }
 
 export function helpLength(width, height) {
-  const measure = ([title, keys], columnWidth) => [title, ...keys.map(([key]) => key), ""].length;
-  const single = HELP_SECTIONS.reduce((total, section) => total + measure(section), 0);
+  // Minus one for the blank line the last section in a column does not get.
+  const measure = (sections) => sections.reduce(
+    (total, [title, keys]) => total + keys.length + 2,
+    0,
+  ) - (sections.length > 0 ? 1 : 0);
+  const single = measure(HELP_SECTIONS);
   if (single <= height) return single;
   const half = Math.ceil(HELP_SECTIONS.length / 2);
-  const left = HELP_SECTIONS.slice(0, half).reduce((total, section) => total + measure(section), 0);
-  const right = HELP_SECTIONS.slice(half).reduce((total, section) => total + measure(section), 0);
-  return Math.max(left, right);
+  return Math.max(measure(HELP_SECTIONS.slice(0, half)), measure(HELP_SECTIONS.slice(half)));
 }
 
 function twoColumns(sections, render, width) {
   const columnWidth = Math.floor((width - 2) / 2);
   const half = Math.ceil(sections.length / 2);
-  const left = sections.slice(0, half).flatMap((section) => render(section, columnWidth));
-  const right = sections.slice(half).flatMap((section) => render(section, columnWidth));
+  // The blank line under a section separates it from the next one. The last
+  // section in a column has no next one, and that spare line is the
+  // difference between the whole help fitting and a scrollbar — which was
+  // what adding a seventh view did to it.
+  const left = trimTrailing(sections.slice(0, half).flatMap((section) => render(section, columnWidth)));
+  const right = trimTrailing(sections.slice(half).flatMap((section) => render(section, columnWidth)));
   const rows = [];
   for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
     rows.push(`${pad(left[index] ?? "", columnWidth)}  ${right[index] ?? ""}`);
@@ -826,9 +846,15 @@ function twoColumns(sections, render, width) {
   return rows;
 }
 
+function trimTrailing(rows) {
+  const trimmed = [...rows];
+  while (trimmed.length > 0 && trimmed.at(-1) === "") trimmed.pop();
+  return trimmed;
+}
+
 const HELP_SECTIONS = Object.freeze([
   ["Everywhere", [
-    ["tab / 1-6", "switch view"],
+    ["tab / 1-7", "switch view"],
     ["↑ ↓ / k j", "move the cursor"],
     ["n", "start a run"],
     ["g", "refresh now"],
@@ -840,7 +866,11 @@ const HELP_SECTIONS = Object.freeze([
     ["a / r", "approve once / reject"],
     ["esc", "back to the list"],
   ]],
-  ["Runs", [["enter", "open the receipt"], ["a", "its agents, as a tree — enter reads one"]]],
+  ["Runs", [
+    ["enter", "open the receipt"],
+    ["a", "its agents, as a tree — enter reads one"],
+    ["v", "check its hash chain and signatures"],
+  ]],
   ["Queue", [["c", "request cancellation"], ["R", "resume a failed job"]]],
   ["Worktrees", [
     ["enter", "the files it holds, then one file's diff"],

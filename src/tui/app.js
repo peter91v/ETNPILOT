@@ -232,6 +232,8 @@ export function createTuiApp({
           detail = false;
           worktreeChanges = undefined;
         }
+      } else if (key === "v" && detail && view === "runs") {
+        await verifyOpenReceipt();
       } else if (key === "a" && detail && view === "runs" && !agentMode && agentRows().length > 0) {
         agentMode = true;
         agentCursor = 0;
@@ -481,6 +483,7 @@ export function createTuiApp({
     if (!run) return;
     detail = true;
     receipt = undefined;
+    verification = undefined;
     agentMode = false;
     agentCursor = 0;
     agentText = undefined;
@@ -490,6 +493,22 @@ export function createTuiApp({
     } catch (error) {
       note(error.message);
       detail = false;
+    }
+  }
+
+  // Verifying is asked for, not done on open: it rereads and rehashes the whole
+  // file, and a poll doing that to every run on screen would be the one thing
+  // this interface must not cost.
+  async function verifyOpenReceipt() {
+    const run = selection()[clamp(cursor, selection().length)];
+    if (!run) return;
+    verification = { file: undefined };
+    app.paint();
+    try {
+      verification = await state.verifyReceipt(run.receiptFile);
+    } catch (error) {
+      verification = undefined;
+      note(error.message);
     }
   }
 

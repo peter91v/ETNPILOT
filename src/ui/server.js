@@ -140,6 +140,29 @@ export async function createReviewServer({
         state.startRun({ input: task, agent });
         return send(response, 202, { started: true, task, ...(agent ? { agent } : {}) });
       }
+      // Whether a receipt is what it claims. It rereads and rehashes the whole
+      // file, so it is a route of its own that the page's poll never calls —
+      // a person asks for it, per run.
+      if (request.method === "GET" && url.pathname.startsWith("/api/verify/")) {
+        const file = decodeURIComponent(url.pathname.slice("/api/verify/".length));
+        const report = await state.verifyReceipt(file).catch((error) => {
+          throw error instanceof TypeError ? badRequest(error.message) : error;
+        });
+        return send(response, 200, report);
+      }
+      // The checks this project can run on itself. Listing them is part of the
+      // state; running one is a POST, because it reads the working tree.
+      if (request.method === "GET" && url.pathname === "/api/checks") {
+        return send(response, 200, { checks: state.checks() });
+      }
+      if (request.method === "POST" && url.pathname === "/api/checks/run") {
+        const body = await readJsonBody(request);
+        if (typeof body.id !== "string" || body.id.trim() === "") throw badRequest("A check id is required.");
+        const result = await state.runCheck(body.id.trim()).catch((error) => {
+          throw badRequest(error.message);
+        });
+        return send(response, 200, result);
+      }
       // The file name is never inspected here: readReceipt refuses anything
       // that is not a '*.jsonl' without a path separator, and one check in
       // one place cannot drift from another.

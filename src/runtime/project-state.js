@@ -561,7 +561,53 @@ export async function verifyProjectReceipt(directory, file, { root, config } = {
     ? await loadReceiptVerifiers([resolve(root, configured)]).catch(() => undefined)
     : undefined;
   const report = await verifyReceiptFile(join(directory, file), { ...(verifiers ? { verifiers } : {}) });
-  return { file, ...report, signaturesChecked: Boolean(verifiers) };
+  return {
+    file,
+    ...report,
+    // Which question was actually asked: with no public key configured the
+    // chain is checked and the signatures are not, and a surface that says
+    // 'verified' either way would be claiming the stronger of the two.
+    signaturesChecked: Boolean(verifiers),
+    ...describeVerification(report, { signaturesChecked: Boolean(verifiers) }),
+  };
+}
+
+// A reason code is for a program; this is the sentence a person reads. Every
+// failure here means someone or something changed a sealed record, so it says
+// which line and what kind of change it was, not 'invalid'.
+export function describeVerification(report, { signaturesChecked = false } = {}) {
+  if (report.valid) {
+    const chain = `${report.entries} ${report.entries === 1 ? "entry" : "entries"}, each hashed onto the one before it`;
+    const signatures = signaturesChecked
+      ? report.signed === 0
+        ? "nothing is signed"
+        : `${report.signed} signed${report.unsigned > 0 ? `, ${report.unsigned} not` : ""}`
+      : "signatures were not checked: no public key is configured";
+    return {
+      tone: signaturesChecked && report.unsigned === 0 && report.signed > 0 ? "ok" : "warn",
+      text: `The chain holds: ${chain}. ${signatures[0].toUpperCase()}${signatures.slice(1)}.`
+        + (report.encoding === "mixed" ? " Some entries predate canonical hashing and were checked the old way." : ""),
+    };
+  }
+  const at = report.line === undefined ? "" : ` at line ${report.line}`;
+  const reasons = {
+    "file-read-failed": "The receipt could not be read.",
+    "empty-file": "The receipt file is empty; nothing was ever written to it.",
+    "invalid-json": `The receipt is not readable${at}: that line is not valid JSON.`,
+    "invalid-entry": `The receipt is not readable${at}: that line is not a receipt entry.`,
+    "hash-mismatch": `An entry does not match its own hash${at}: it was changed after it was written.`,
+    "chain-mismatch": `An entry does not follow the one before it${at}: an entry was inserted, removed or reordered.`,
+    "entries-after-terminal": `Something was appended after the run had already ended${at}.`,
+    "signature-required": `An entry${at} carries no signature, and this project requires one.`,
+    "untrusted-key": `An entry${at} is signed with a key this project does not trust${report.keyId ? ` (${report.keyId})` : ""}.`,
+    "invalid-signature": `A signature does not match its entry${at}: the entry or the signature was changed.`,
+    "unsupported-proof": `An entry${at} carries a kind of proof this version cannot check.`,
+    "terminal-receipt-required": "The receipt was never sealed: the run did not record an end.",
+  };
+  return {
+    tone: "bad",
+    text: reasons[report.reason] ?? `The receipt did not verify${at}: ${report.reason}.`,
+  };
 }
 
 function assertReceiptName(file) {
