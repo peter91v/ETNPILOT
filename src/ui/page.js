@@ -645,6 +645,7 @@ export function renderReviewPage(token) {
       <section id="view-runs" class="view" hidden></section>
       <section id="view-worktrees" class="view" hidden></section>
       <section id="view-merges" class="view" hidden></section>
+      <section id="view-checks" class="view" hidden></section>
       <section id="view-settings" class="view" hidden></section>
     </main>
   </div>
@@ -706,6 +707,15 @@ let worktreeDiff;
 let merges;
 let usage;
 let agents;
+// The checks this project can run on itself: the registry, what each one
+// found, and which are in flight. A result stays until that check is run
+// again, and the poll never starts one.
+let checks;
+const checkResults = new Map();
+const checksRunning = new Set();
+// Whether the open run's receipt verifies. Undefined means nobody has asked,
+// which is not the same as 'it is fine'.
+let verification;
 let openRun;
 // Which agent nodes are expanded, in the currently open run. Keyed by runId
 // so opening a different run — or the same one again — starts collapsed.
@@ -768,6 +778,13 @@ const VIEWS = [
     title: "Merge requests",
     description: "What a run published, and what else is queued for the same target — because what lands before ours is what breaks ours.",
     icon: "M7 3v12M7 21a3 3 0 100-6 3 3 0 000 6zM7 6a3 3 0 100-6 3 3 0 000 6zM17 21a3 3 0 100-6 3 3 0 000 6zM17 15V9a4 4 0 00-4-4h-2",
+  },
+  {
+    id: "checks",
+    label: "Checks",
+    title: "Checks",
+    description: "What this project can check about itself. Nothing here runs on its own: 'scan secrets' reads every tracked file, and doctor talks to a secret store.",
+    icon: "M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11",
   },
   {
     id: "settings",
@@ -1128,7 +1145,102 @@ function render() {
   if (view === "runs") renderRuns();
   if (view === "worktrees") renderWorktrees();
   if (view === "merges") renderMerges();
+  if (view === "checks") renderChecks();
   if (view === "settings") renderSettings();
+}
+
+// The same registry the terminal interface lists, over the same read path.
+// Each row says which of four states it is in — never run, running, what it
+// found, or no verdict to give — because three of those look identical on a
+// surface that only knows 'ok'.
+function renderChecks() {
+  const host = $("view-checks");
+  host.replaceChildren();
+  if (checks === undefined) {
+    host.append(panel("Checks", { body: [el("p", { class: "empty", text: "Reading the list…" })] }));
+    void loadChecks();
+    return;
+  }
+  const ran = checks.filter((check) => checkResults.has(check.id)).length;
+  const failing = checks.filter((check) => checkResults.get(check.id)?.ok === false).length;
+  const meta = [
+    checks.length + " checks",
+    ran === 0 ? "none run yet" : ran + " run",
+    failing > 0 ? failing + " failing" : ran > 0 ? "none failing" : "nothing to report",
+  ].join(" · ");
+  const rows = table([
+    { label: "Check", value: (check) => check.title },
+    { label: "Result", value: (check) => checkPill(check) },
+    { label: "What it found", value: (check) => checkResults.get(check.id)?.summary ?? check.about },
+    { label: "Ran", value: (check) => (checkResults.has(check.id) ? when(checkResults.get(check.id).ranAt) : { text: "—" }) },
+    { label: "", value: (check) => button(checksRunning.has(check.id) ? "Running…" : "Run", {
+      class: "btn small",
+      disabled: checksRunning.has(check.id),
+      onClick: () => runChecks([check.id]),
+    }), actions: true },
+  ], checks, "No checks are registered.");
+  const head = el("div", { class: "row" }, [
+    button("Run them all", {
+      class: "btn tonal",
+      disabled: checksRunning.size > 0,
+      onClick: () => runChecks(checks.map((check) => check.id)),
+    }),
+    el("span", { class: "muted", text: "Each one reads the project as it is on disk now." }),
+  ]);
+  host.append(panel("Checks", { meta, body: [head, rows] }));
+  for (const check of checks) {
+    const result = checkResults.get(check.id);
+    if (!result) continue;
+    const body = [el("p", {
+      class: result.ok === false ? "notice bad" : result.ok === true ? "muted" : "notice",
+      text: result.summary,
+    })];
+    if ((result.findings ?? []).length === 0) {
+      body.push(el("p", { class: "empty", text: result.ok === true ? "Nothing to look at." : "It reported no individual findings." }));
+    } else {
+      body.push(table([
+        { label: "", value: (finding) => ({ text: finding.label ?? "", class: finding.tone === "bad" ? "bad" : finding.tone === "warn" ? "warn" : "" }) },
+        { label: "Finding", value: (finding) => finding.text },
+      ], result.findings, "None."));
+    }
+    host.append(panel(check.title, { meta: "ran " + when(result.ranAt).text, body }));
+  }
+}
+
+function checkPill(check) {
+  if (checksRunning.has(check.id)) return pill("running", "warn");
+  const result = checkResults.get(check.id);
+  if (!result) return pill("not run");
+  if (result.ok === true) return pill("ok", "ok");
+  if (result.ok === false) return pill("findings", "bad");
+  return pill("no verdict", "warn");
+}
+
+async function loadChecks() {
+  try {
+    checks = (await api("/api/checks")).checks;
+    render();
+  } catch (error) {
+    fail(error);
+  }
+}
+
+// One at a time and in order, repainting between them: a check walks the
+// working tree, and pretending it is instant would leave the page still.
+async function runChecks(ids) {
+  for (const id of ids) {
+    checksRunning.add(id);
+    render();
+    try {
+      checkResults.set(id, await api("/api/checks/run", { method: "POST", body: JSON.stringify({ id }) }));
+      clearError();
+    } catch (error) {
+      fail(error);
+    } finally {
+      checksRunning.delete(id);
+    }
+    render();
+  }
 }
 
 function renderRuntime() {
@@ -1494,10 +1606,25 @@ function usagePanelBody(summary) {
   ]);
 }
 
+async function verifyOpenReceipt(file) {
+  verification = { file: undefined, pending: true };
+  render();
+  try {
+    verification = await api("/api/verify/" + encodeURIComponent(file));
+    clearError();
+  } catch (error) {
+    verification = undefined;
+    fail(error);
+  }
+  render();
+}
+
 function openReceipt(run) {
   return button(run.runId, { class: "btn link", onClick: async () => {
     try {
       openRun = { file: run.receiptFile, run, receipt: await api("/api/runs/" + encodeURIComponent(run.receiptFile)) };
+      // One run's verdict must never be left attached to another run's file.
+      verification = undefined;
       expandedAgents = new Set();
       clearError();
       render();
@@ -1615,7 +1742,27 @@ function renderRunDetail() {
       : el("p", { class: "warn", text: overrides.length + " changed locally: " + overrides.join(", ") }));
   }
   if (terminal.error) body.push(detailBlock("Error", terminal.error));
-  body.push(el("div", { class: "row" }, [button("Close", { onClick: () => { openRun = undefined; expandedAgents = new Set(); render(); renderPageActions(); } })]));
+  // Whether the receipt is what it claims is a different question from what
+  // it says, so it is asked for rather than assumed — and until it is asked,
+  // the panel offers the button instead of implying either answer.
+  body.push(el("p", { class: "muted", text: "Is this receipt what it claims?" }));
+  if (verification === undefined || verification.file !== receipt.file) {
+    body.push(el("div", { class: "row" }, [
+      button("Verify", {
+        class: "btn tonal",
+        disabled: verification !== undefined && verification.pending === true,
+        onClick: () => verifyOpenReceipt(receipt.file),
+      }),
+      el("span", { class: "muted", text: verification?.pending ? "Checking…" : "Rereads the file and rebuilds its hash chain." }),
+    ]));
+  } else {
+    body.push(el("div", { class: "row" }, [
+      pill(verification.valid ? "verified" : "does not verify", verification.tone),
+      ...(verification.encoding ? [el("span", { class: "muted", text: verification.encoding + " hashing" })] : []),
+    ]));
+    body.push(el("p", { class: verification.valid ? "muted" : "notice bad", text: verification.text }));
+  }
+  body.push(el("div", { class: "row" }, [button("Close", { onClick: () => { openRun = undefined; verification = undefined; expandedAgents = new Set(); render(); renderPageActions(); } })]));
   // What the panel says about the receipt has to be what the receipt is: the
   // header claimed 'sealed' over a note saying it never was.
   const meta = sealed ? "sealed receipt" : status === "running" ? "still running" : "receipt not sealed";

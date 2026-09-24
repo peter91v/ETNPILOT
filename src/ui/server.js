@@ -5,7 +5,9 @@ import { ApprovalStateError } from "../core/approval-inbox.js";
 import { parseSettingValue, SettingsRefused } from "../config/settings.js";
 import { openProjectState } from "../runtime/project-state.js";
 import { WorkflowQueueStateError } from "../workflow/queue.js";
+import { createProject, describeProject } from "../runtime/first-run.js";
 import { renderReviewPage } from "./page.js";
+import { renderSetupPage } from "./setup-page.js";
 
 // A local review surface for the evidence ETNPilot already produces: pending
 // approvals, queued work, and finished runs. It reads the same databases the
@@ -21,8 +23,13 @@ export async function createReviewServer({
   env = process.env,
   token = randomBytes(24).toString("base64url"),
 } = {}) {
-  const state = await openProjectState({ root, env });
-  const { inbox, queue } = state;
+  // A directory with no project in it is not an error to crash on: the page
+  // offers to create one, exactly as the terminal interface does. Until it
+  // exists there is no state to open, and every route that needs one says so
+  // rather than failing on a file nobody has heard of.
+  let state = (await describeProject({ root })).exists
+    ? await openProjectState({ root, env })
+    : undefined;
 
   const server = createServer(async (request, response) => {
     try {
@@ -32,22 +39,36 @@ export async function createReviewServer({
         if (!authorized(url.searchParams.get("token"), token)) {
           return html(response, 401, "<h1>ETNPilot</h1><p>Open the URL printed by <code>etnpilot ui</code>.</p>");
         }
-        return html(response, 200, renderReviewPage(token));
+        return html(response, 200, state
+          ? renderReviewPage(token)
+          : renderSetupPage(token, await describeProject({ root })));
       }
       if (!url.pathname.startsWith("/api/")) return send(response, 404, { error: "not-found" });
       if (!authorized(header(request, "x-etnpilot-token"), token)) {
         return send(response, 401, { error: "unauthorized" });
       }
+      // The only route that works before there is a project, and the only one
+      // that stops working once there is: creating one twice is not a thing
+      // this surface offers.
+      if (request.method === "POST" && url.pathname === "/api/project/create") {
+        if (state) throw badRequest("This directory already has a project.");
+        const body = await readJsonBody(request);
+        const created = await createProject({ root, template: String(body.template ?? "default") })
+          .catch((error) => { throw error instanceof TypeError ? badRequest(error.message) : error; });
+        state = await openProjectState({ root, env });
+        return send(response, 201, created);
+      }
+      if (!state) return send(response, 409, { error: "no-project-here", root });
       if (request.method === "GET" && url.pathname === "/api/state") {
         return send(response, 200, await state.collect());
       }
       if (request.method === "POST" && url.pathname === "/api/approvals/decide") {
         const body = await readJsonBody(request);
-        return send(response, 200, decideApproval(inbox, body));
+        return send(response, 200, decideApproval(state.inbox, body));
       }
       if (request.method === "POST" && url.pathname === "/api/queue/cancel") {
         const body = await readJsonBody(request);
-        return send(response, 200, queue.requestCancel(String(body.id), {
+        return send(response, 200, state.queue.requestCancel(String(body.id), {
           actor: actorName(body, env),
           reason: body.reason ? String(body.reason) : undefined,
         }));
@@ -183,9 +204,11 @@ export async function createReviewServer({
   return {
     server,
     token,
-    state,
-    inbox,
-    queue,
+    // The state is created when the project is, so these read through rather
+    // than being captured once.
+    get state() { return state; },
+    get inbox() { return state?.inbox; },
+    get queue() { return state?.queue; },
     listen({ host = "127.0.0.1", port = 8788 } = {}) {
       return new Promise((resolveListen, reject) => {
         const onError = (error) => {
@@ -214,11 +237,11 @@ export async function createReviewServer({
     async close() {
       // Runs this server started are stopped before the databases they write
       // to are closed, rather than being left working for nobody.
-      state.stopRuns();
+      state?.stopRuns();
       if (server.listening) {
         await new Promise((resolveClose, reject) => server.close((error) => (error ? reject(error) : resolveClose())));
       }
-      state.close();
+      state?.close();
     },
   };
 }
