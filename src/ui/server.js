@@ -284,7 +284,7 @@ function html(response, status, body) {
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",
     // The page loads nothing from anywhere: no CDN, no fonts, no analytics.
-    "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'",
+    "content-security-policy": "default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'",
     "referrer-policy": "no-referrer",
   });
   response.end(body);

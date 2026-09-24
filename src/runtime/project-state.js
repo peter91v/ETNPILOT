@@ -140,6 +140,7 @@ export async function collectState(
 ) {
   return {
     generatedAt: new Date().toISOString(),
+    root,
     settings: root ? await describeSettings({ root, env }).catch(settingsUnreadable) : undefined,
     // What this process started and has not finished, so a surface can say a
     // run is working before it has produced a receipt to read.

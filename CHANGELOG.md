@@ -26,6 +26,25 @@ pre-1.0, so breaking changes may appear in any release.
 - The page also lists the worktrees and the project's merge requests, with the
   same `removeIfClean` behaviour as the other surfaces.
 
+### Changed — the review page follows the GUI draft
+
+- The page is a shell now: a sidebar of views (Overview, Approvals, Queue,
+  Runs, Worktrees, Merge requests, Settings) instead of one long scroll, a top
+  bar that says which project is being reviewed, panels with heads, status
+  pills, stat cards, a command palette on `ctrl` `K`, toasts, and a dialog for
+  starting a run. The view is in the address, so a reload returns to it.
+- Taken from the draft only where something real is behind it. Its screens for
+  features that do not exist are not here, and the page still supports light as
+  well as dark, loads nothing from anywhere, and inserts every agent-controlled
+  value as text.
+
+### Fixed — found by looking, again
+
+- Every grid that holds content now says `minmax(0, 1fr)`: the new inner grid
+  had brought the sideways drag back at 390px.
+- The views no longer render on top of each other — a `display` declaration
+  overrides the `hidden` attribute, so they are told twice.
+
 ### Added — reaching the surfaces from a tablet
 
 - The page is checked at tablet widths (768px, 820px, 1180px) as well as at

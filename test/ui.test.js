@@ -76,7 +76,13 @@ test("the review UI refuses requests without its token", async () => {
     const body = await page.text();
     assert.match(body, /ETNPilot Review/);
     // The page loads nothing from anywhere else.
-    assert.doesNotMatch(body, /https?:\/\/(?!127\.0\.0\.1)/);
+    // Nothing is loaded from anywhere; the SVG namespace is a name, not an
+    // address, and the icon is a data: URI the policy allows.
+    assert.deepEqual(
+      (body.match(/https?:\/\/[^"'\s)]+/g) ?? []).filter((address) => !address.startsWith("http://www.w3.org/2000/svg")),
+      [],
+    );
+    assert.match(page.headers.get("content-security-policy"), /img-src data:/);
     assert.match(address.url, /^http:\/\/127\.0\.0\.1:\d+\/\?token=/);
   } finally {
     await review.close();
@@ -195,18 +201,32 @@ test("a run's receipt is served in full, and only from this project's runs", asy
   }
 });
 
-test("the page's own script parses, and every section it promises is there", async () => {
+test("the page's own script parses, and every view it promises is there", async () => {
   const { renderReviewPage } = await import("../src/ui/page.js");
   const html = renderReviewPage("t0ken");
   for (const section of ["Start a run", "Pending approvals", "Workflow queue", "Runs", "Worktrees", "Merge requests", "Settings"]) {
     assert.match(html, new RegExp(section));
   }
+  // Each view has somewhere to render into, or choosing it shows nothing.
+  for (const view of ["overview", "approvals", "queue", "runs", "worktrees", "merges", "settings"]) {
+    assert.match(html, new RegExp(`id="view-${view}"`), view);
+  }
+  // A view that is not on screen must be told twice: a display declaration
+  // overrides the hidden attribute, which is how they once all stacked up.
+  assert.match(html, /\.view\[hidden\] \{ display: none; \}/);
+  // A grid child is min-width auto, so the grids that hold content say
+  // otherwise — the page has been dragged sideways by one wide table twice.
+  assert.equal((html.match(/grid-template-columns: minmax\(0, 1fr\)/g) ?? []).length >= 3, true);
   // A page whose script does not parse shows nothing at all, and no test that
   // only reads the markup would notice.
   const script = html.slice(html.indexOf("<script>") + "<script>".length, html.lastIndexOf("</script>"));
   assert.doesNotThrow(() => new Function(script), "the inline script must parse");
-  // It still loads nothing from anywhere.
-  assert.doesNotMatch(html, /https?:\/\/(?!127\.0\.0\.1)/);
+  // It still loads nothing from anywhere. The one remaining http URL is the
+  // SVG namespace, which is an identifier rather than an address.
+  const addresses = (html.match(/https?:\/\/[^"'\s)]+/g) ?? [])
+    .filter((address) => !address.startsWith("http://www.w3.org/2000/svg"))
+    .filter((address) => !address.startsWith("http://127.0.0.1"));
+  assert.deepEqual(addresses, []);
 });
 
 test("the worktrees and the merge requests are on the page too", async () => {

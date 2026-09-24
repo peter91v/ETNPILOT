@@ -99,6 +99,16 @@ ein Feld den Fokus hat. Jeder Knopf wurde im Browser gedrückt: entscheiden,
 abbrechen, fortsetzen, Worktree entfernen, Setting speichern und ablehnen
 lassen, Run starten.
 
+**UI-1.6 Der GUI-Entwurf.** Aus dem Entwurf übernommen: die Shell aus Sidebar,
+Topbar und Panels, die Statusanzeigen als Pills, die Kennzahlen-Karten, die
+Befehlspalette auf `ctrl` `K`, Toasts statt einer Statuszeile, der Dialog zum
+Starten eines Runs, die Schublade auf dem Telefon und die Fokus-Ringe. Nicht
+übernommen: die Ansichten für Dinge, die es nicht gibt (Brainstorming, Agenten,
+Plugins, Codegraph, Observability, Repositories, ein CLI-Nachbau) — eine leere
+Seite lehrt das Falsche —, die erfundenen Zahlen, `overflow-x: hidden` auf dem
+`body`, das Fehler versteckt statt behebt, und die Festlegung auf Dunkel. Die
+Sprache bleibt vorerst Englisch wie im ganzen Repository.
+
 ---
 
 ## UI-2 — TUI: die restlichen Befehle

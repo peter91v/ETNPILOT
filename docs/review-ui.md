@@ -10,6 +10,19 @@ a decision, the workflow queue, and finished runs read from their receipt
 files. It is a second window onto the same databases the CLI uses, never a
 second source of truth.
 
+## The shape of it
+
+A sidebar of views rather than one long scroll: Overview, Approvals, Queue,
+Runs, Worktrees, Merge requests, Settings. The view is in the address
+(`#approvals`), so a reload comes back where you were. `ctrl` `K` opens a
+command palette that goes to a view or runs a command; `Escape` closes
+whatever is open. Below 860px the sidebar becomes a drawer, and below 560px the
+labels in the top bar give way to their icons.
+
+The layout follows a GUI draft; what it does not follow is the draft's screens
+for things that do not exist. A surface that shows an empty "Plugins" page
+teaches the wrong thing about what this can do.
+
 ## What it does
 
 - **Pending approvals** with the full command, file, tool arguments, or URL —
@@ -101,9 +114,13 @@ identity asserted by someone else, use the GitLab comment flow in
 ## Looking at it
 
 The page is a single file with no build step, so changing it means rendering it
-and looking: at 1280px and at 390px, in both colour schemes. A page whose
-widest table drags every other section off screen still passes a test that only
-reads its markup — that one did.
+and looking: at 1280px, 820px and 390px, in both colour schemes, and pressing
+every control. Three kinds of fault have come out of that and none of them out
+of a test: a wide table dragging every other section off screen (a grid child
+is `min-width: auto`, so every grid that holds content needs
+`minmax(0, 1fr)`), all seven views rendering at once (a `display` declaration
+overrides the `hidden` attribute), and a poll overwriting the answer to
+something you had just done.
 
 ## Limits
 

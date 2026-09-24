@@ -6,153 +6,401 @@
 // approvals, cancel and resume queue jobs, read a run's receipt, change
 // settings against the same layers, start a run, and list the worktrees and
 // the project's merge requests.
+//
+// The shape — a sidebar of views, a topbar that says where you are, panels,
+// status pills, a command palette and toasts — follows the GUI draft. What it
+// does not follow is the draft's screens for things that do not exist yet: a
+// surface that shows an empty 'Plugins' page teaches the wrong thing.
 export function renderReviewPage(token) {
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0b0f13">
 <title>ETNPilot Review</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230b0f13'/%3E%3Cpath d='M16 18h32v8H25v8h20v8H25v4h23v8H16z' fill='%233ee6c1'/%3E%3C/svg%3E">
 <style>
   :root {
     color-scheme: light dark;
-    --bg: #fbfbfd; --panel: #ffffff; --ink: #14161a; --muted: #5c6370;
-    --line: #e2e5ea; --accent: #2f5fd0; --ok: #1c7c45; --warn: #9a6200; --bad: #b3261e;
+    --bg: #f6f7f9; --surface-0: #eef0f3; --surface-1: #ffffff; --surface-2: #f2f4f7; --surface-3: #e6e9ee;
+    --line: #dde1e7; --line-strong: #c6ccd5;
+    --text: #12171c; --text-soft: #3d474f; --muted: #6b757e;
+    --accent: #0f8f77; --accent-strong: #0b6f5c; --accent-dim: rgba(15, 143, 119, .10);
+    --amber: #9a6200; --amber-dim: rgba(154, 98, 0, .10);
+    --red: #b3261e; --red-dim: rgba(179, 38, 30, .08);
+    --blue: #2f5fd0;
+    --sidebar: 238px; --radius: 10px;
+    --shadow: 0 20px 60px rgba(15, 20, 26, .18);
+    --grid: rgba(15, 20, 26, .028);
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #14161a; --panel: #1c1f25; --ink: #eceff4; --muted: #9aa3b2;
-      --line: #2b3039; --accent: #7ba1f0; --ok: #62c08a; --warn: #e0b060; --bad: #f08a80;
+      --bg: #090c0f; --surface-0: #0d1115; --surface-1: #12171c; --surface-2: #171e24; --surface-3: #1e272e;
+      --line: #263139; --line-strong: #34434c;
+      --text: #edf7f5; --text-soft: #aab8b6; --muted: #71807f;
+      --accent: #3ee6c1; --accent-strong: #19caa7; --accent-dim: rgba(62, 230, 193, .11);
+      --amber: #ffbf69; --amber-dim: rgba(255, 191, 105, .12);
+      --red: #ff6b78; --red-dim: rgba(255, 107, 120, .08);
+      --blue: #75a7ff;
+      --shadow: 0 20px 60px rgba(0, 0, 0, .38);
+      --grid: rgba(255, 255, 255, .018);
     }
   }
   * { box-sizing: border-box; }
+  html { min-width: 320px; background: var(--bg); }
   body {
-    margin: 0; background: var(--bg); color: var(--ink);
-    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    margin: 0; min-height: 100vh; color: var(--text); font: 15px/1.45 var(--sans);
+    background: linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px), var(--bg);
+    background-size: 40px 40px;
   }
-  header {
-    padding: 16px; border-bottom: 1px solid var(--line);
-    display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap;
-    position: sticky; top: 0; background: var(--bg); z-index: 2;
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
   }
-  h1 { font-size: 17px; margin: 0; letter-spacing: -0.01em; }
-  main {
-    padding: 16px; max-width: 980px; margin: 0 auto;
-    display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px;
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
   }
-  /* Without this a wide table stretches the page instead of scrolling inside
-     its own box, and every other section is dragged off screen with it. */
-  section, .card, .row { min-width: 0; }
-  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 10px; }
-  h2 .count { text-transform: none; letter-spacing: 0; color: var(--ink); font-weight: 600; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-bottom: 10px; }
-  .card.open { border-color: var(--accent); scroll-margin-top: 72px; }
-  .row { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
-  .row.tight { gap: 6px; }
-  .grow { flex: 1 1 auto; }
+  .shell { min-height: 100vh; display: grid; grid-template-columns: var(--sidebar) minmax(0, 1fr); }
+
+  /* Sidebar ---------------------------------------------------------- */
+  .sidebar {
+    position: fixed; inset: 0 auto 0 0; z-index: 20; width: var(--sidebar); padding: 18px 14px;
+    display: flex; flex-direction: column; gap: 4px;
+    background: var(--surface-1); border-right: 1px solid var(--line); overflow-y: auto;
+  }
+  .scrim { display: none; }
+  .brand { display: flex; align-items: center; gap: 11px; padding: 3px 8px 18px; }
+  .brand-mark {
+    width: 34px; height: 34px; display: grid; place-items: center; border-radius: 8px;
+    background: var(--accent); color: var(--surface-0); font: 800 14px/1 var(--mono);
+    box-shadow: 0 0 0 4px var(--accent-dim);
+  }
+  .brand-name { font-size: 15px; font-weight: 800; letter-spacing: .015em; }
+  .brand-sub { display: block; color: var(--muted); font: 10px/1.3 var(--mono); letter-spacing: .14em; text-transform: uppercase; }
+  .nav-label { padding: 12px 10px 6px; color: var(--muted); font: 11px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+  .nav-list { display: grid; gap: 4px; }
+  .nav-item {
+    min-height: 42px; width: 100%; padding: 0 11px; display: flex; align-items: center; gap: 11px;
+    color: var(--text-soft); background: transparent; border: 1px solid transparent; border-radius: 8px;
+    cursor: pointer; text-align: left;
+  }
+  .nav-item:hover { color: var(--text); background: var(--surface-2); }
+  .nav-item[aria-current="page"] { color: var(--text); background: var(--accent-dim); border-color: var(--accent-dim); }
+  .nav-item svg { width: 18px; height: 18px; flex: 0 0 auto; }
+  .nav-item[aria-current="page"] svg { color: var(--accent); }
+  .nav-item .count { margin-left: auto; color: var(--muted); font: 11px var(--mono); }
+  .nav-item .count.alert { color: var(--amber); }
+  .sidebar-footer { margin-top: auto; padding-top: 14px; }
+  .runtime-card { padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); }
+  .runtime-line { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; }
+  .runtime-meta { margin: 6px 0 0 16px; color: var(--muted); font: 11px/1.45 var(--mono); overflow-wrap: anywhere; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px var(--accent-dim); flex: 0 0 auto; }
+  .dot.paused { background: var(--amber); box-shadow: 0 0 0 4px var(--amber-dim); }
+  .dot.bad { background: var(--red); box-shadow: 0 0 0 4px var(--red-dim); }
+
+  /* Topbar and page head --------------------------------------------- */
+  .main { grid-column: 2; min-width: 0; }
+  .topbar {
+    min-height: 66px; position: sticky; top: 0; z-index: 12;
+    display: flex; align-items: center; gap: 12px; padding: 10px 20px;
+    background: var(--bg); border-bottom: 1px solid var(--line);
+  }
+  .narrow-only { display: none; }
+  .menu-button { display: none; }
+  .context { min-width: 0; }
+  .eyebrow { margin: 0 0 3px; color: var(--muted); font: 10px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+  .context-title { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 750; }
+  .top-actions { margin-left: auto; display: flex; align-items: center; gap: 9px; }
+  .kbd {
+    padding: 2px 6px; border: 1px solid var(--line-strong); border-radius: 5px;
+    background: var(--surface-0); color: var(--muted); font: 10px var(--mono);
+  }
+  /* A grid child is 'min-width: auto' by default, so one wide table would
+     stretch the whole page rather than scrolling inside its own box. Every
+     grid that holds content needs this, not just the outermost one. */
+  .content { padding: 20px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .content > *, .view, .panel-body > * { min-width: 0; }
+  .page-head { display: flex; align-items: flex-start; gap: 14px; flex-wrap: wrap; }
+  .page-title { margin: 0; font-size: 19px; letter-spacing: -.01em; }
+  .page-description { margin: 4px 0 0; color: var(--muted); font-size: 13px; max-width: 70ch; }
+  .page-actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+
+  /* Cards, panels, pills --------------------------------------------- */
+  .summary-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  .view { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  /* A display declaration overrides the hidden attribute, so the views that
+     are not on screen have to be told again. */
+  .view[hidden] { display: none; }
+  .summary-card {
+    min-height: 88px; padding: 14px 15px; position: relative; overflow: hidden;
+    background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius);
+  }
+  .summary-card::after { content: ""; position: absolute; inset: auto 0 0; height: 2px; background: var(--card-accent, var(--line-strong)); }
+  .summary-label { color: var(--muted); font: 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+  .summary-value { margin-top: 10px; font: 750 23px/1 var(--mono); letter-spacing: -.04em; }
+  .summary-value small { margin-left: 6px; color: var(--muted); font: 11px var(--mono); letter-spacing: 0; }
+  .summary-hint { margin-top: 8px; color: var(--muted); font: 11px/1.4 var(--mono); }
+  .panel { min-width: 0; background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius); }
+  .panel + .panel { margin-top: 12px; }
+  .panel.open { border-color: var(--accent); scroll-margin-top: 84px; }
+  .panel-head { min-height: 52px; padding: 10px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .panel-title { margin: 0; font-size: 14px; letter-spacing: -.01em; }
+  .panel-meta { margin-left: auto; color: var(--muted); font: 11px var(--mono); }
+  .panel-body { padding: 16px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .panel-body > .btn, .view > .btn { justify-self: start; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .grow { flex: 1 1 auto; min-width: 0; }
+  .clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .wrap { overflow-wrap: anywhere; }
   .muted { color: var(--muted); font-size: 13px; }
-  .kind {
-    font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: 0.06em;
-    padding: 2px 7px; border-radius: 999px; border: 1px solid var(--line);
+  .mono { font-family: var(--mono); }
+  .pill {
+    width: max-content; display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px;
+    border: 1px solid var(--line); border-radius: 999px; color: var(--text-soft);
+    background: var(--surface-2); font: 10px var(--mono); text-transform: uppercase; letter-spacing: .04em;
   }
+  .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+  .pill.ok { color: var(--accent-strong); border-color: var(--accent-dim); background: var(--accent-dim); }
+  .pill.ok::before { background: var(--accent-strong); }
+  .pill.warn { color: var(--amber); border-color: var(--amber-dim); background: var(--amber-dim); }
+  .pill.warn::before { background: var(--amber); }
+  .pill.bad { color: var(--red); border-color: var(--red-dim); background: var(--red-dim); }
+  .pill.bad::before { background: var(--red); }
+  .ok { color: var(--accent-strong); } .warn { color: var(--amber); } .bad { color: var(--red); }
+  @media (prefers-color-scheme: dark) { .ok, .pill.ok { color: var(--accent); } }
+  .empty { color: var(--muted); font-size: 14px; }
+  .notice { border-left: 3px solid var(--amber); padding: 6px 0 6px 10px; margin: 0; font-size: 13px; }
+  .notice.bad { border-color: var(--red); }
   pre {
-    background: color-mix(in srgb, var(--ink) 6%, transparent);
-    border: 1px solid var(--line); border-radius: 8px; padding: 10px; overflow-x: auto;
-    font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    margin: 10px 0 0; white-space: pre-wrap; word-break: break-word;
+    background: var(--surface-0); border: 1px solid var(--line); border-radius: 8px; padding: 10px;
+    overflow-x: auto; font: 13px/1.5 var(--mono); margin: 0; white-space: pre-wrap; word-break: break-word;
   }
-  button {
-    font: inherit; padding: 6px 13px; border-radius: 7px; border: 1px solid var(--line);
-    background: var(--panel); color: var(--ink); cursor: pointer;
-  }
-  button:hover { border-color: var(--accent); }
-  button:disabled { opacity: 0.5; cursor: not-allowed; }
-  button.approve { border-color: var(--ok); color: var(--ok); }
-  button.reject { border-color: var(--bad); color: var(--bad); }
-  button.small { padding: 3px 9px; font-size: 13px; }
-  button.link {
-    border: 0; padding: 0; background: none; color: var(--accent);
-    text-align: left; text-decoration: underline; cursor: pointer;
-  }
-  input, select {
-    font: inherit; padding: 6px 9px; border-radius: 7px;
-    border: 1px solid var(--line); background: var(--bg); color: var(--ink); min-width: 0;
-  }
-  input.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
-  label.check { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--muted); }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
-  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
-  td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
-  td.actions { white-space: nowrap; }
-  tr.selected td { background: color-mix(in srgb, var(--accent) 12%, transparent); }
-  .scroll { overflow-x: auto; max-width: 100%; }
-  .ok { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); }
-  .empty { color: var(--muted); font-size: 14px; padding: 6px 0; }
-  .notice { border-left: 3px solid var(--warn); padding: 4px 0 4px 10px; margin: 0 0 10px; font-size: 13px; }
-  .notice.bad { border-color: var(--bad); }
-  .field { display: grid; gap: 4px; }
-  .field .label { font-size: 12px; color: var(--muted); }
-  .pair { display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px; font-size: 13px; }
-  .pair dt { color: var(--muted); }
+  .pair { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 6px 12px; font-size: 13px; margin: 0; }
+  .pair dt { color: var(--muted); font: 11px var(--mono); text-transform: uppercase; letter-spacing: .06em; padding-top: 2px; }
   .pair dd { margin: 0; word-break: break-word; }
-  #error { color: var(--bad); font-size: 13px; }
-  /* A finger is not a mouse pointer. On a touch screen every control is big
-     enough to hit without aiming, which is what makes the page usable on a
-     tablet rather than merely readable. */
-  @media (pointer: coarse) {
-    button, input, select { min-height: 40px; }
-    button.small { padding: 8px 14px; }
-    button.link { min-height: 32px; padding: 6px 0; }
-    th, td { padding: 10px; }
-    label.check { min-height: 40px; }
-    input[type="checkbox"] { width: 20px; height: 20px; }
+
+  /* Controls ---------------------------------------------------------- */
+  .btn {
+    min-height: 36px; padding: 0 13px; display: inline-flex; align-items: center; gap: 7px;
+    border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-1);
+    color: var(--text); cursor: pointer; font-size: 13px; font-weight: 650;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--surface-0); }
+  .btn.primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
+  .btn.danger { color: var(--red); border-color: var(--red); }
+  .btn.small { min-height: 30px; padding: 0 10px; font-size: 12px; }
+  .btn.icon { width: 36px; padding: 0; justify-content: center; }
+  .btn.link {
+    min-height: 0; padding: 0; border: 0; background: none; color: var(--accent-strong);
+    text-decoration: underline; font-weight: 650;
+  }
+  @media (prefers-color-scheme: dark) { .btn.link { color: var(--accent); } }
+  input, select {
+    min-height: 36px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 8px;
+    background: var(--surface-0); color: var(--text); min-width: 0;
+  }
+  input[type="checkbox"] { min-height: 0; width: 16px; height: 16px; }
+  label.check { display: inline-flex; gap: 7px; align-items: center; color: var(--muted); font-size: 13px; }
+  .field { display: grid; gap: 6px; }
+  .field label { color: var(--text-soft); font-size: 12px; font-weight: 700; }
+
+  /* Tables ------------------------------------------------------------ */
+  .scroll { overflow-x: auto; max-width: 100%; }
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    padding: 10px 12px; color: var(--muted); background: var(--surface-0); border-bottom: 1px solid var(--line);
+    text-align: left; font: 10px var(--mono); letter-spacing: .08em; text-transform: uppercase; white-space: nowrap;
+  }
+  td { padding: 11px 12px; border-bottom: 1px solid var(--line); color: var(--text-soft); font-size: 13px; vertical-align: middle; }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr.selected { background: var(--accent-dim); }
+  td.mono { font-family: var(--mono); font-size: 12px; }
+  td.actions { white-space: nowrap; text-align: right; }
+  td.actions .btn + .btn { margin-left: 6px; }
+
+  /* Modal, command palette, toasts ------------------------------------ */
+  .backdrop {
+    position: fixed; inset: 0; z-index: 50; display: none; place-items: center; padding: 20px;
+    background: rgba(2, 5, 7, .55);
+  }
+  .backdrop.open { display: grid; }
+  .modal {
+    width: min(560px, 100%); overflow: hidden; background: var(--surface-1);
+    border: 1px solid var(--line-strong); border-radius: 12px; box-shadow: var(--shadow);
+  }
+  .modal-head { min-height: 56px; padding: 10px 17px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--line); }
+  .modal-title { margin: 0; font-size: 16px; }
+  .modal-body { padding: 17px; display: grid; gap: 14px; }
+  .modal-footer { padding: 13px 17px; display: flex; justify-content: flex-end; gap: 8px; background: var(--surface-0); border-top: 1px solid var(--line); }
+  .palette { width: min(620px, 100%); align-self: start; margin-top: min(14vh, 120px); }
+  .palette-search { padding: 12px; border-bottom: 1px solid var(--line); }
+  .palette-search input { width: 100%; }
+  .palette-list { padding: 7px; display: grid; gap: 3px; max-height: 50vh; overflow-y: auto; }
+  .palette-option {
+    min-height: 42px; padding: 0 10px; display: flex; align-items: center; gap: 10px; width: 100%;
+    color: var(--text-soft); background: transparent; border: 0; border-radius: 7px; cursor: pointer; text-align: left;
+  }
+  .palette-option:hover, .palette-option.active { color: var(--text); background: var(--surface-2); }
+  .palette-option .hint { margin-left: auto; color: var(--muted); font: 10px var(--mono); }
+  .toast-region { position: fixed; z-index: 80; right: 20px; bottom: 20px; display: grid; gap: 8px; max-width: min(420px, calc(100vw - 40px)); }
+  .toast {
+    padding: 11px 14px; background: var(--surface-1); border: 1px solid var(--line-strong);
+    border-left: 3px solid var(--accent); border-radius: 9px; box-shadow: var(--shadow); font-size: 13px;
+  }
+  .toast.warn { border-left-color: var(--amber); }
+  .toast.bad { border-left-color: var(--red); }
+
+  /* Responsive --------------------------------------------------------- */
+  @media (max-width: 1080px) { .summary-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 860px) {
+    .shell { display: block; }
+    .sidebar { transform: translateX(-102%); transition: transform .22s ease; box-shadow: var(--shadow); }
+    .sidebar.open { transform: translateX(0); }
+    .scrim {
+      position: fixed; inset: 0; z-index: 19; display: block; visibility: hidden; border: 0; padding: 0;
+      background: rgba(2, 5, 7, .55); opacity: 0; transition: opacity .22s ease, visibility .22s ease;
+    }
+    .scrim.open { visibility: visible; opacity: 1; }
+    .main { grid-column: auto; }
+    .menu-button { display: inline-flex; }
+    .content { padding: 16px; }
+    .pair { grid-template-columns: 1fr; gap: 2px; }
+    .pair dd { margin-bottom: 8px; }
   }
   @media (max-width: 560px) {
-    .pair { grid-template-columns: 1fr; gap: 2px; }
-    .pair dd { margin-bottom: 6px; }
-    th, td { padding: 6px; }
+    .summary-strip { grid-template-columns: 1fr; }
+    .topbar { padding: 8px 12px; gap: 8px; }
+    /* At this width the labels are what overflows, not the controls: the
+       search button becomes its icon and the primary action its verb. */
+    #open-palette span:not(.narrow-only), #open-palette .kbd { display: none; }
+    #open-palette { width: 40px; padding: 0; justify-content: center; }
+    .narrow-only { display: inline; }
+    .wide-only { display: none; }
+    .content { padding: 12px; }
+    .toast-region { left: 12px; right: 12px; bottom: 12px; max-width: none; }
+    .backdrop { padding: 10px; align-items: end; }
+    .modal { max-height: calc(100vh - 20px); overflow-y: auto; }
+    .palette { margin-top: 40px; }
   }
+  /* A finger is not a mouse pointer: on a touch screen every control is big
+     enough to hit without aiming, which is what makes this usable on a tablet
+     rather than merely readable. */
+  @media (pointer: coarse) {
+    .btn, input, select { min-height: 42px; }
+    .btn.small { min-height: 38px; padding: 0 12px; }
+    .btn.link { min-height: 32px; padding: 4px 0; }
+    .nav-item, .palette-option { min-height: 48px; }
+    th, td { padding: 12px; }
+    input[type="checkbox"] { width: 20px; height: 20px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
 <body>
-<header>
-  <h1>ETNPilot Review</h1>
-  <span class="grow muted" id="status">loading…</span>
-  <span id="error"></span>
-</header>
-<main>
-  <section>
-    <h2>Start a run</h2>
-    <div id="start"></div>
-  </section>
-  <section>
-    <h2>Pending approvals <span class="count" id="approvals-count"></span></h2>
-    <div id="approvals"></div>
-  </section>
-  <section>
-    <h2>Workflow queue</h2>
-    <div id="queue"></div>
-  </section>
-  <section>
-    <h2>Runs</h2>
-    <div id="runs"></div>
-    <div id="run-detail"></div>
-  </section>
-  <section>
-    <h2>Worktrees</h2>
-    <div id="worktrees"></div>
-  </section>
-  <section>
-    <h2>Merge requests</h2>
-    <div id="merges"></div>
-  </section>
-  <section>
-    <h2>Settings</h2>
-    <div id="settings"></div>
-    <div id="setting-editor"></div>
-  </section>
-</main>
+<div class="shell">
+  <aside class="sidebar" id="sidebar" aria-label="Views">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">E</span>
+      <span>
+        <span class="brand-name">ETNPilot</span>
+        <span class="brand-sub">Review</span>
+      </span>
+    </div>
+    <p class="nav-label" id="nav-label">Surface</p>
+    <nav class="nav-list" id="nav" aria-labelledby="nav-label"></nav>
+    <div class="sidebar-footer">
+      <div class="runtime-card">
+        <div class="runtime-line"><span class="dot" id="runtime-dot"></span> <span id="runtime-state">reading…</span></div>
+        <p class="runtime-meta" id="runtime-meta"></p>
+      </div>
+    </div>
+  </aside>
+  <button class="scrim" id="scrim" aria-label="Close the view list" tabindex="-1"></button>
+
+  <div class="main">
+    <header class="topbar">
+      <button class="btn icon menu-button" id="menu" aria-label="Open the view list" aria-expanded="false">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <div class="context">
+        <p class="eyebrow">Project</p>
+        <h1 class="context-title" id="context-title">…</h1>
+      </div>
+      <div class="top-actions">
+        <button class="btn" id="open-palette" aria-label="Open the command palette">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <span>Commands</span>
+          <span class="kbd">ctrl K</span>
+        </button>
+        <button class="btn primary" id="open-run" aria-label="Start a run">
+          <span class="wide-only">Start a run</span><span class="narrow-only">Run</span>
+        </button>
+      </div>
+    </header>
+
+    <main class="content">
+      <div class="page-head">
+        <div class="grow">
+          <h2 class="page-title" id="page-title">Overview</h2>
+          <p class="page-description" id="page-description"></p>
+        </div>
+        <div class="page-actions" id="page-actions"></div>
+      </div>
+      <p class="notice bad" id="error" hidden></p>
+      <section id="view-overview" class="view"></section>
+      <section id="view-approvals" class="view" hidden></section>
+      <section id="view-queue" class="view" hidden></section>
+      <section id="view-runs" class="view" hidden></section>
+      <section id="view-worktrees" class="view" hidden></section>
+      <section id="view-merges" class="view" hidden></section>
+      <section id="view-settings" class="view" hidden></section>
+    </main>
+  </div>
+</div>
+
+<div class="backdrop" id="run-modal" role="dialog" aria-modal="true" aria-labelledby="run-modal-title">
+  <div class="modal">
+    <div class="modal-head">
+      <h2 class="modal-title" id="run-modal-title">Start a run</h2>
+      <button class="btn icon" style="margin-left:auto" data-close="run-modal" aria-label="Close">✕</button>
+    </div>
+    <form id="run-form">
+      <div class="modal-body">
+        <div class="field">
+          <label for="run-task">Task</label>
+          <input id="run-task" placeholder="what the run should do" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="run-agent">Agent</label>
+          <input id="run-agent" placeholder="leave empty for the project's own workflow" autocomplete="off">
+        </div>
+        <p class="muted" id="run-hint"></p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn" data-close="run-modal">Cancel</button>
+        <button type="submit" class="btn primary" id="run-submit">Start</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="backdrop" id="palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="modal palette">
+    <div class="palette-search">
+      <input id="palette-input" placeholder="Go to a view, or run a command…" autocomplete="off" aria-label="Search commands">
+    </div>
+    <div class="palette-list" id="palette-list" role="listbox" aria-label="Commands"></div>
+  </div>
+</div>
+
+<div class="toast-region" id="toasts" role="status" aria-live="polite"></div>
 <script>
 const TOKEN = ${JSON.stringify(token)};
 const $ = (id) => document.getElementById(id);
@@ -160,12 +408,69 @@ const $ = (id) => document.getElementById(id);
 // What the page is showing and what the person is in the middle of doing. The
 // poll below never throws either of these away.
 let state;
+let worktrees;
+let merges;
 let openRun;
 let openSetting;
+let view = "overview";
 let scope = "local";
 let settingsFilter = "";
 let changedOnly = false;
 let settingsLimit = 25;
+let paletteIndex = 0;
+let lastFocus;
+
+const VIEWS = [
+  {
+    id: "overview",
+    label: "Overview",
+    title: "Overview",
+    description: "What is waiting for you, what is running, and how the last runs ended.",
+    icon: "M4 13h6V4H4zM14 20h6v-9h-6zM4 20h6v-4H4zM14 8h6V4h-6z",
+  },
+  {
+    id: "approvals",
+    label: "Approvals",
+    title: "Pending approvals",
+    description: "The whole command, file, tool arguments or URL, and the rule that stopped it. A reviewer can only approve what they can read.",
+    icon: "M9 12l2 2 4-4M12 3l7 4v5c0 4.4-3 8.3-7 9-4-0.7-7-4.6-7-9V7z",
+  },
+  {
+    id: "queue",
+    label: "Queue",
+    title: "Workflow queue",
+    description: "Durable jobs with their attempts. Cancel and resume are offered only where the queue would accept them.",
+    icon: "M4 6h16M4 12h16M4 18h10",
+  },
+  {
+    id: "runs",
+    label: "Runs",
+    title: "Runs",
+    description: "Read from their receipt files, so this is what was sealed rather than a summary kept somewhere else.",
+    icon: "M5 12l4 4L19 6M5 20h14",
+  },
+  {
+    id: "worktrees",
+    label: "Worktrees",
+    title: "Worktrees",
+    description: "Where a run's changes physically are. Removing one never discards unsaved work.",
+    icon: "M6 3v12a3 3 0 003 3h6M6 21a3 3 0 100-6 3 3 0 000 6zM18 9a3 3 0 100-6 3 3 0 000 6zM18 21a3 3 0 100-6 3 3 0 000 6z",
+  },
+  {
+    id: "merges",
+    label: "Merge requests",
+    title: "Merge requests",
+    description: "What a run published, and what else is queued for the same target — because what lands before ours is what breaks ours.",
+    icon: "M7 3v12M7 21a3 3 0 100-6 3 3 0 000 6zM7 6a3 3 0 100-6 3 3 0 000 6zM17 21a3 3 0 100-6 3 3 0 000 6zM17 15V9a4 4 0 00-4-4h-2",
+  },
+  {
+    id: "settings",
+    label: "Settings",
+    title: "Settings",
+    description: "The same layers the CLI and the terminal interface use. Nothing changed here is ever committed.",
+    icon: "M12 15a3 3 0 100-6 3 3 0 000 6zM4 12h2m12 0h2M12 4v2m0 12v2M6.3 6.3l1.4 1.4m8.6 8.6l1.4 1.4m0-11.4l-1.4 1.4M7.7 16.3l-1.4 1.4",
+  },
+];
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -187,19 +492,51 @@ function el(tag, options = {}, children = []) {
   return node;
 }
 
-function button(text, { class: className = "small", onClick, title, disabled = false }) {
-  const node = el("button", { class: className, text, attrs: title ? { title } : {} });
+function icon(path) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "1.8");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("aria-hidden", "true");
+  const shape = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  shape.setAttribute("d", path);
+  svg.append(shape);
+  return svg;
+}
+
+function button(text, { class: className = "btn small", onClick, title, disabled = false } = {}) {
+  const node = el("button", { class: className, text, attrs: { type: "button", ...(title ? { title } : {}) } });
   node.disabled = disabled;
   if (onClick) node.addEventListener("click", onClick);
   return node;
 }
 
+function panel(title, { meta, body = [], open = false } = {}) {
+  const head = el("div", { class: "panel-head" }, [el("h3", { class: "panel-title", text: title })]);
+  if (meta !== undefined) head.append(meta instanceof Node ? meta : el("span", { class: "panel-meta", text: meta }));
+  return el("section", { class: open ? "panel open" : "panel" }, [head, el("div", { class: "panel-body" }, body)]);
+}
+
+function pill(text, tone = "") {
+  return el("span", { class: tone ? "pill " + tone : "pill", text });
+}
+
+function toast(message, tone = "ok") {
+  const node = el("div", { class: tone === "ok" ? "toast" : "toast " + tone, text: message });
+  $("toasts").append(node);
+  setTimeout(() => node.remove(), 6000);
+}
+
 function fail(error) {
-  $("error").textContent = error.message;
+  const box = $("error");
+  box.textContent = error.message;
+  box.hidden = false;
 }
 
 function clearError() {
-  $("error").textContent = "";
+  $("error").hidden = true;
 }
 
 // Timestamps are read by a person deciding now, so they are shown as a
@@ -225,7 +562,7 @@ function timeSpan(label, iso) {
 }
 
 function detailBlock(label, value) {
-  return el("div", {}, [el("div", { class: "muted", text: label }), el("pre", { text: value })]);
+  return el("div", {}, [el("div", { class: "muted mono", text: label }), el("pre", { text: value })]);
 }
 
 function pairs(rows) {
@@ -247,182 +584,293 @@ function describeValue(value) {
 // whole value is in the tooltip.
 function shortValue(value, limit = 70) {
   const text = describeValue(value);
-  return text.length <= limit
-    ? { text }
-    : { text: text.slice(0, limit) + "…", title: text };
+  return text.length <= limit ? { text } : { text: text.slice(0, limit) + "…", title: text };
 }
 
 function table(columns, rows, emptyText, options = {}) {
   if (rows.length === 0) return el("p", { class: "empty", text: emptyText });
   const head = el("tr", {}, columns.map((column) => el("th", { text: column.label })));
-  const body = rows.map((row) => {
-    const cells = columns.map((column) => {
-      const value = column.value(row);
-      if (value instanceof Node) return el("td", { class: "actions" }, [value]);
-      if (Array.isArray(value)) return el("td", { class: "actions" }, value);
-      return el("td", {
-        class: column.mono ? "mono" : (value.class ?? ""),
-        text: value.text ?? value,
-        attrs: value.title ? { title: value.title } : {},
-      });
+  const body = rows.map((row) => el("tr", { class: options.selected?.(row) ? "selected" : "" }, columns.map((column) => {
+    const value = column.value(row);
+    if (value instanceof Node) return el("td", { class: "actions" }, [value]);
+    if (Array.isArray(value)) return el("td", { class: "actions" }, value);
+    return el("td", {
+      class: column.mono ? "mono" : (value.class ?? ""),
+      text: value.text ?? value,
+      attrs: value.title ? { title: value.title } : {},
     });
-    const line = el("tr", { class: options.selected?.(row) ? "selected" : "" }, cells);
-    return line;
-  });
+  })));
   return el("div", { class: "scroll" }, [el("table", {}, [el("thead", {}, [head]), el("tbody", {}, body)])]);
 }
 
-// ------------------------------------------------------------- start a run
-
-function renderStart() {
-  const host = $("start");
-  host.replaceChildren();
-  const task = el("input", { class: "grow", attrs: { placeholder: "what the run should do", "aria-label": "task" } });
-  const agent = el("input", { attrs: { placeholder: "agent (optional)", "aria-label": "agent" } });
-  const steps = (state?.settings?.entries ?? []).find((entry) => entry.path === "workflow.steps");
-  const start = button("Start", { class: "", onClick: async () => {
-    if (task.value.trim() === "") { fail(new Error("A run needs a task to work on.")); return; }
-    start.disabled = true;
-    try {
-      const started = await api("/api/runs/start", {
-        method: "POST",
-        body: JSON.stringify({ task: task.value, agent: agent.value }),
-      });
-      task.value = "";
-      clearError();
-      note("Started: " + started.task + ". Whatever it needs approved appears above.");
-      await refresh({ force: true });
-    } catch (error) {
-      fail(error);
-    } finally {
-      start.disabled = false;
-    }
-  } });
-  const card = el("div", { class: "card" }, [
-    el("div", { class: "row" }, [task, agent, start]),
-    el("p", {
-      class: "muted",
-      text: "An empty agent runs what the project runs by itself"
-        + (steps?.value ? ": " + describeValue(steps.value) : "")
-        + ". The run works in its own worktree and asks this page for anything it needs approved.",
-    }),
+function summaryCard(label, value, { hint, unit, accent } = {}) {
+  return el("article", { class: "summary-card", attrs: accent ? { style: "--card-accent: var(--" + accent + ")" } : {} }, [
+    el("div", { class: "summary-label", text: label }),
+    el("div", { class: "summary-value", text: String(value) }, unit ? [el("small", { text: unit })] : []),
+    ...(hint ? [el("div", { class: "summary-hint", text: hint })] : []),
   ]);
-  const active = state?.active ?? [];
-  for (const run of active) {
-    card.append(el("p", { class: "row tight" }, [
-      el("span", { class: "kind warn", text: "running" }),
-      el("span", { class: "grow", text: run.task }),
-      timeSpan("started", run.startedAt),
-    ]));
+}
+
+async function act(call, message) {
+  try {
+    await call();
+    clearError();
+    if (message) toast(message);
+    await refresh({ force: true });
+  } catch (error) {
+    fail(error);
+    toast(error.message, "bad");
   }
-  for (const failure of state?.recentRunErrors ?? []) {
-    card.append(el("p", { class: "notice bad", text: failure.task + " — " + failure.error }));
+}
+
+// ------------------------------------------------------------- navigation
+
+function renderNav() {
+  const nav = $("nav");
+  nav.replaceChildren();
+  for (const entry of VIEWS) {
+    const count = navCount(entry.id);
+    const node = el("button", {
+      class: "nav-item",
+      attrs: { type: "button", ...(entry.id === view ? { "aria-current": "page" } : {}) },
+    }, [
+      icon(entry.icon),
+      el("span", { text: entry.label }),
+      ...(count === undefined ? [] : [el("span", { class: count.alert ? "count alert" : "count", text: String(count.value) })]),
+    ]);
+    node.addEventListener("click", () => show(entry.id));
+    nav.append(node);
   }
-  host.append(card);
 }
 
-let noteUntil = 0;
-function note(text) {
-  $("status").textContent = text;
-  noteUntil = Date.now() + 8000;
-  setTimeout(() => { if (Date.now() >= noteUntil) $("status").textContent = statusText(); }, 8000);
+function navCount(id) {
+  if (!state) return undefined;
+  const some = (value, alert = false) => (value > 0 ? { value, alert } : undefined);
+  if (id === "approvals") {
+    const pending = state.approvals.pending.length;
+    return some(pending, true);
+  }
+  if (id === "queue") return some((state.queue.jobs ?? []).length);
+  if (id === "runs") return some(state.runs.length);
+  if (id === "worktrees") return some(worktrees?.entries?.length ?? 0);
+  if (id === "merges") return some(merges?.entries?.length ?? 0);
+  if (id === "settings") {
+    const refusals = (state.settings?.refusals ?? []).length;
+    if (refusals > 0) return { value: refusals, alert: true };
+    return some(state.settings?.overrides?.length ?? 0);
+  }
+  return undefined;
 }
 
-function showStatus(text) {
-  if (Date.now() < noteUntil) return;
-  $("status").textContent = text;
+function show(next) {
+  const entry = VIEWS.find((candidate) => candidate.id === next) ?? VIEWS[0];
+  view = entry.id;
+  if (location.hash !== "#" + view) history.replaceState(null, "", "#" + view);
+  $("page-title").textContent = entry.title;
+  $("page-description").textContent = entry.description;
+  for (const candidate of VIEWS) $("view-" + candidate.id).hidden = candidate.id !== view;
+  closeSidebar();
+  renderNav();
+  renderPageActions();
+  render();
+  // These two are read on demand: one runs 'git status' per worktree, the
+  // other crosses the network, so neither belongs in the poll.
+  if (view === "worktrees" && worktrees === undefined) void loadWorktrees();
+  if (view === "merges" && merges === undefined) void loadMerges();
 }
 
-// ------------------------------------------------------------- approvals
-
-function renderApprovals(list) {
-  const host = $("approvals");
+function renderPageActions() {
+  const host = $("page-actions");
   host.replaceChildren();
-  $("approvals-count").textContent = list.length > 0 ? String(list.length) : "";
+  if (view === "worktrees") host.append(button("Read again", { class: "btn", onClick: () => loadWorktrees({ notify: true }) }));
+  if (view === "merges") host.append(button("Ask GitLab", { class: "btn", onClick: () => loadMerges({ notify: true }) }));
+  if (view === "runs" && openRun) host.append(button("Close the receipt", { class: "btn", onClick: () => { openRun = undefined; render(); } }));
+  host.append(button("Refresh", { class: "btn", onClick: () => refresh({ force: true }) }));
+}
+
+function openSidebar() {
+  $("sidebar").classList.add("open");
+  $("scrim").classList.add("open");
+  $("menu").setAttribute("aria-expanded", "true");
+}
+
+function closeSidebar() {
+  $("sidebar").classList.remove("open");
+  $("scrim").classList.remove("open");
+  $("menu").setAttribute("aria-expanded", "false");
+}
+
+// ------------------------------------------------------------- the views
+
+function render() {
+  if (!state) return;
+  renderNav();
+  renderRuntime();
+  if (view === "overview") renderOverview();
+  if (view === "approvals") renderApprovals();
+  if (view === "queue") renderQueue();
+  if (view === "runs") renderRuns();
+  if (view === "worktrees") renderWorktrees();
+  if (view === "merges") renderMerges();
+  if (view === "settings") renderSettings();
+}
+
+function renderRuntime() {
+  const running = (state?.active ?? []).length;
+  const refused = state?.settings?.refusals?.length ?? 0;
+  const dot = $("runtime-dot");
+  dot.className = refused > 0 ? "dot bad" : running > 0 ? "dot" : holding ? "dot paused" : "dot";
+  $("runtime-state").textContent = refused > 0
+    ? refused + (refused === 1 ? " setting refused" : " settings refused")
+    : running > 0
+      ? running + (running === 1 ? " run working" : " runs working")
+      : holding ? "holding while you type" : "watching";
+  $("runtime-meta").textContent = state
+    ? "updated " + new Date(state.generatedAt).toLocaleTimeString() + " · polls every 5s"
+    : "";
+}
+
+function renderOverview() {
+  const host = $("view-overview");
+  host.replaceChildren();
+  const pending = state.approvals.pending;
+  const counts = state.queue.counts ?? {};
+  const queued = Object.values(counts).reduce((total, value) => total + value, 0);
+  const signed = state.runs.filter((run) => run.signed).length;
+  host.append(el("div", { class: "summary-strip" }, [
+    summaryCard("Waiting for you", pending.length, {
+      accent: pending.length > 0 ? "amber" : "accent",
+      hint: pending.length > 0 ? "oldest " + when(pending.at(-1).createdAt).text : "nothing pending",
+    }),
+    summaryCard("Queue", queued, {
+      accent: "blue",
+      hint: Object.entries(counts).filter(([, total]) => total > 0).map(([status, total]) => total + " " + status).join(", ") || "empty",
+    }),
+    summaryCard("Runs", state.runs.length, { accent: "accent", hint: signed + (signed === 1 ? " signed receipt" : " signed receipts") }),
+    summaryCard("Working now", (state.active ?? []).length, {
+      accent: "amber",
+      hint: (state.active ?? [])[0]?.task ?? "nothing started here",
+    }),
+  ]));
+
+  const decisions = panel("Needs your decision", {
+    meta: pending.length > 0 ? pending.length + " open" : "clear",
+    body: pending.length === 0
+      ? [el("p", { class: "empty", text: "Nothing is waiting. A run that needs you will appear here." })]
+      : [
+          ...pending.slice(0, 4).map((approval) => el("div", { class: "row" }, [
+            pill(approval.operationKind, "warn"),
+            el("span", { class: "grow mono clip", text: subject(approval), attrs: { title: subject(approval) } }),
+            timeSpan("asked", approval.createdAt),
+          ])),
+          button("Decide them", { class: "btn primary", onClick: () => show("approvals") }),
+        ],
+  });
+
+  const runs = panel("Recent runs", {
+    meta: state.runs.length + " on disk",
+    body: [table([
+      { label: "Run", value: (run) => run.runId, mono: true },
+      { label: "Status", value: (run) => ({ text: run.status, class: run.status === "succeeded" ? "ok" : "bad" }) },
+      { label: "Took", value: (run) => run.durationMs === undefined ? "—" : (run.durationMs / 1000).toFixed(1) + "s" },
+      { label: "Receipt", value: (run) => run.signed ? "signed" : "unsigned" },
+    ], state.runs.slice(0, 5), "No runs have been recorded yet.")],
+  });
+
+  host.append(decisions, runs);
+
+  for (const failure of state.recentRunErrors ?? []) {
+    host.append(el("p", { class: "notice bad", text: failure.task + " — " + failure.error }));
+  }
+  if ((state.settings?.refusals ?? []).length > 0) {
+    host.append(el("p", { class: "notice bad", text: (state.settings.refusals.length === 1
+      ? "1 local setting is refused; a run will not start until it is gone."
+      : state.settings.refusals.length + " local settings are refused; a run will not start until they are gone.") }));
+  }
+}
+
+function subject(approval) {
+  const details = approval.details ?? {};
+  return details.command ?? details.url ?? details.file ?? details.tool ?? "(no detail recorded)";
+}
+
+function renderApprovals() {
+  const host = $("view-approvals");
+  host.replaceChildren();
+  const list = state.approvals.pending;
   if (list.length === 0) {
-    host.append(el("p", { class: "empty", text: "Nothing is waiting for a decision." }));
+    host.append(panel("Nothing is waiting", { body: [el("p", { class: "empty", text: "Runs continue until one of them needs a decision." })] }));
     return;
   }
   for (const approval of list) {
     const details = approval.details ?? {};
     const actor = el("input", { attrs: { placeholder: "your name", "aria-label": "reviewer" } });
     const reason = el("input", { class: "grow", attrs: { placeholder: "reason (optional)", "aria-label": "reason" } });
-    const decide = async (decision) => {
-      try {
-        await api("/api/approvals/decide", {
-          method: "POST",
-          body: JSON.stringify({ id: approval.id, decision, actor: actor.value, reason: reason.value }),
-        });
-        clearError();
-        await refresh({ force: true });
-      } catch (error) {
-        fail(error);
-      }
-    };
-    const card = el("div", { class: "card" }, [
-      el("div", { class: "row" }, [
-        el("span", { class: "kind", text: approval.operationKind }),
-        el("span", { class: "grow muted", text: "agent " + (approval.agent ?? "unknown") + " · run " + (approval.runId ?? "—") }),
-        timeSpan("expires", approval.expiresAt),
-      ]),
-    ]);
-    if (details.command) card.append(detailBlock("Command", details.command));
-    if (details.file) card.append(detailBlock("File", details.file));
-    if (details.url) card.append(detailBlock("URL", details.url));
-    if (details.tool) card.append(detailBlock("Tool", details.tool));
-    if (details.arguments) card.append(detailBlock("Arguments", details.arguments));
+    const decide = (decision) => act(
+      () => api("/api/approvals/decide", {
+        method: "POST",
+        body: JSON.stringify({ id: approval.id, decision, actor: actor.value, reason: reason.value }),
+      }),
+      approval.operationKind + " " + (decision === "approve" ? "approved" : "rejected") + " — recorded in the receipt.",
+    );
+    const body = [];
+    if (details.command) body.push(detailBlock("Command", details.command));
+    if (details.file) body.push(detailBlock("File", details.file));
+    if (details.url) body.push(detailBlock("URL", details.url));
+    if (details.tool) body.push(detailBlock("Tool", details.tool));
+    if (details.arguments) body.push(detailBlock("Arguments", details.arguments));
     if (details.truncated) {
-      card.append(el("p", { class: "muted", text: "Truncated for display; see 'etnpilot approval show " + approval.id + "'." }));
+      body.push(el("p", { class: "muted", text: "Truncated for display; see 'etnpilot approval show " + approval.id + "'." }));
     }
     if (details.redacted) {
-      card.append(el("p", { class: "muted", text: "Credential-looking text was masked by approval.inbox.redactSecrets." }));
+      body.push(el("p", { class: "muted", text: "Credential-looking text was masked by approval.inbox.redactSecrets." }));
     }
     // Why the run is asking at all: the rule that stopped the operation,
     // recorded with the approval and shown wherever it is answered.
     if (approval.policy) {
       const effect = approval.policy.effect ?? "human";
-      card.append(el("p", { class: "muted" }, [
-        el("span", { class: effect === "deny" ? "bad" : effect === "allow" ? "ok" : "warn", text: effect }),
-        el("span", { text: " ← " + (approval.policy.rule ? "rule '" + approval.policy.rule + "'" : "the section default") }),
+      body.push(el("p", { class: "row" }, [
+        pill(effect, effect === "deny" ? "bad" : effect === "allow" ? "ok" : "warn"),
+        el("span", { class: "muted", text: "← " + (approval.policy.rule ? "rule '" + approval.policy.rule + "'" : "the section default") }),
       ]));
     }
-    const approve = el("button", { class: "approve", text: "Approve once" });
-    const reject = el("button", { class: "reject", text: "Reject" });
-    approve.addEventListener("click", () => decide("approve"));
-    reject.addEventListener("click", () => decide("reject"));
-    card.append(el("div", { class: "row", }, [actor, reason, approve, reject]));
-    // The fingerprint is for recognising the same operation again, so a
-    // readable prefix is enough; the full value is in the tooltip.
+    const approve = button("Approve once", { class: "btn primary", onClick: () => decide("approve") });
+    const reject = button("Reject", { class: "btn danger", onClick: () => decide("reject") });
+    body.push(el("div", { class: "row" }, [actor, reason, approve, reject]));
     const fingerprint = details.fingerprint ?? "";
-    card.append(el("p", {
-      class: "muted",
+    body.push(el("p", {
+      class: "muted mono",
       text: "fingerprint " + (fingerprint ? fingerprint.slice(0, 16) + "…" : "—"),
       attrs: { title: fingerprint },
     }));
+    const meta = el("span", { class: "panel-meta" }, [
+      el("span", { text: "agent " + (approval.agent ?? "unknown") + " · run " + (approval.runId ?? "—") + " · " }),
+      el("span", { text: when(approval.expiresAt).text, attrs: { title: when(approval.expiresAt).title } }),
+    ]);
+    const card = panel(approval.operationKind.toUpperCase(), { meta, body });
     host.append(card);
   }
 }
 
-// ----------------------------------------------------------------- queue
-
 const RESUMABLE = ["failed", "canceled", "orphaned"];
 const CANCELABLE = ["queued", "retry_scheduled", "running", "cancel_requested"];
 
-function renderQueue(queue) {
-  const host = $("queue");
+function renderQueue() {
+  const host = $("view-queue");
   host.replaceChildren();
-  const counts = Object.entries(queue.counts ?? {}).map(([status, total]) => status + " " + total).join(" · ");
-  host.append(el("p", { class: "muted", text: counts || "empty" }));
-  host.append(table([
-    { label: "Job", value: (job) => job.id.slice(0, 8), mono: true },
-    { label: "Kind", value: (job) => job.kind },
-    { label: "Status", value: (job) => ({ text: job.status, class: queueClass(job.status) }) },
-    { label: "Attempts", value: (job) => String(job.attempts ?? 0) },
-    { label: "Updated", value: (job) => when(job.updatedAt).text },
-    // A button is only offered where the queue would accept it, so nothing on
-    // screen teaches an action that cannot happen.
-    { label: "", value: (job) => jobActions(job) },
-  ], queue.jobs ?? [], "No jobs have been queued."));
+  const counts = state.queue.counts ?? {};
+  const summary = Object.entries(counts).map(([status, total]) => status + " " + total).join(" · ");
+  host.append(panel("Jobs", {
+    meta: summary || "empty",
+    body: [table([
+      { label: "Job", value: (job) => job.id.slice(0, 8), mono: true },
+      { label: "Kind", value: (job) => job.kind },
+      { label: "Status", value: (job) => pill(job.status, queueTone(job.status)) },
+      { label: "Attempts", value: (job) => (job.attempts ?? 0) + " of " + (job.maxAttempts ?? 1) },
+      { label: "Updated", value: (job) => when(job.updatedAt).text },
+      { label: "", value: (job) => jobActions(job) },
+    ], state.queue.jobs ?? [], "No jobs have been queued.")],
+  }));
 }
 
 function jobActions(job) {
@@ -448,49 +896,40 @@ function jobActions(job) {
   return actions;
 }
 
-async function act(call, message) {
-  try {
-    await call();
-    clearError();
-    if (message) note(message);
-    await refresh({ force: true });
-  } catch (error) {
-    fail(error);
-  }
-}
-
-function queueClass(status) {
+function queueTone(status) {
   if (status === "succeeded") return "ok";
   if (status === "failed" || status === "orphaned") return "bad";
   if (status === "running") return "warn";
   return "";
 }
 
-// ------------------------------------------------------------------ runs
-
-function renderRuns(runs) {
-  const host = $("runs");
+function renderRuns() {
+  const host = $("view-runs");
   host.replaceChildren();
-  host.append(table([
-    { label: "Run", value: (run) => openReceipt(run), mono: true },
-    { label: "Status", value: (run) => ({ text: run.status, class: run.status === "succeeded" ? "ok" : "bad" }) },
-    { label: "Mode", value: (run) => run.mode },
-    { label: "Sealed", value: (run) => ({ text: run.terminal ? "yes" : "no", class: run.terminal ? "ok" : "warn" }) },
-    { label: "Signed", value: (run) => run.signed ? "yes" : "no" },
-    { label: "Approvals", value: (run) => String(run.approvals) },
-    { label: "Duration", value: (run) => run.durationMs === undefined ? "—" : (run.durationMs / 1000).toFixed(1) + "s" },
-    { label: "Receipt", value: (run) => (run.hash ?? "—").slice(0, 12), mono: true },
-  ], runs, "No runs have been recorded yet.", { selected: (run) => run.receiptFile === openRun?.file }));
+  host.append(panel("All runs", {
+    meta: state.runs.length + " on disk",
+    body: [table([
+      { label: "Run", value: (run) => openReceipt(run), mono: true },
+      { label: "Status", value: (run) => pill(run.status, run.status === "succeeded" ? "ok" : "bad") },
+      { label: "Mode", value: (run) => run.mode },
+      { label: "Sealed", value: (run) => ({ text: run.terminal ? "yes" : "no", class: run.terminal ? "ok" : "warn" }) },
+      { label: "Signed", value: (run) => run.signed ? "yes" : "no" },
+      { label: "Approvals", value: (run) => String(run.approvals) },
+      { label: "Took", value: (run) => run.durationMs === undefined ? "—" : (run.durationMs / 1000).toFixed(1) + "s" },
+      { label: "Receipt", value: (run) => (run.hash ?? "—").slice(0, 12), mono: true },
+    ], state.runs, "No runs have been recorded yet.", { selected: (run) => run.receiptFile === openRun?.file })],
+  }));
+  if (openRun) host.append(renderRunDetail());
 }
 
 function openReceipt(run) {
-  return button(run.runId, { class: "link", onClick: async () => {
+  return button(run.runId, { class: "btn link", onClick: async () => {
     try {
       openRun = { file: run.receiptFile, run, receipt: await api("/api/runs/" + encodeURIComponent(run.receiptFile)) };
       clearError();
-      renderRuns(state.runs);
-      renderRunDetail();
-      $("run-detail").scrollIntoView({ block: "nearest" });
+      render();
+      renderPageActions();
+      $("view-runs").querySelector(".panel.open")?.scrollIntoView({ block: "nearest" });
     } catch (error) {
       fail(error);
     }
@@ -501,18 +940,11 @@ function openReceipt(run) {
 // the merge rehearsal, who decided each approval, and which settings layers
 // were in effect.
 function renderRunDetail() {
-  const host = $("run-detail");
-  host.replaceChildren();
-  if (!openRun) return;
   const { run, receipt } = openRun;
   const terminal = receipt.terminal ?? {};
-  const card = el("div", { class: "card open" }, [
-    el("div", { class: "row" }, [
-      el("span", { class: "kind", text: run.status }),
-      el("span", { class: "grow mono", text: run.runId }),
-      button("Close", { onClick: () => { openRun = undefined; renderRuns(state.runs); renderRunDetail(); } }),
-    ]),
+  const body = [
     pairs([
+      ["Status", run.status, run.status === "succeeded" ? "ok" : "bad"],
       ["Mode", run.mode],
       ["Branch", terminal.workspace?.branch ?? "—"],
       ["Sandbox", terminal.workspace?.sandbox?.image ?? "—"],
@@ -521,27 +953,24 @@ function renderRunDetail() {
       ["Signature", run.signed ? "signed" : "unsigned", run.signed ? "ok" : "warn"],
       ["Hash", run.hash ?? "—", "mono"],
     ]),
-  ]);
-
+  ];
   const rehearsal = terminal.git?.mergeRehearsal;
   if (rehearsal) {
-    card.append(el("p", { class: "muted", text: "Merge rehearsal" }));
-    card.append(rehearsal.clean
-      ? el("p", { class: "ok", text: "clean into " + (rehearsal.targetBranch ?? "the target branch") })
-      : el("p", { class: "bad", text: "conflicts: " + (rehearsal.conflicts ?? []).join(", ") }));
+    body.push(el("div", { class: "row" }, [
+      el("span", { class: "muted", text: "Merge rehearsal" }),
+      rehearsal.clean
+        ? pill("clean into " + (rehearsal.targetBranch ?? "the target branch"), "ok")
+        : pill("conflicts: " + (rehearsal.conflicts ?? []).join(", "), "bad"),
+    ]));
   }
   const train = terminal.git?.mergeTrain;
-  if (train?.conflicts?.length > 0) {
-    card.append(el("p", { class: "muted", text: "Would collide with" }));
-    for (const collision of train.conflicts) {
-      card.append(el("p", { class: "warn", text: "!" + collision.iid + " " + collision.title + " — " + (collision.files ?? []).join(", ") }));
-    }
+  for (const collision of train?.conflicts ?? []) {
+    body.push(el("p", { class: "notice", text: "Would collide with !" + collision.iid + " " + collision.title + " — " + (collision.files ?? []).join(", ") }));
   }
-
   const approvals = receipt.entries.flatMap((entry) => entry.approvals ?? []);
   if (approvals.length > 0) {
-    card.append(el("p", { class: "muted", text: "Approvals (" + approvals.length + ")" }));
-    card.append(table([
+    body.push(el("p", { class: "muted", text: "Approvals (" + approvals.length + ")" }));
+    body.push(table([
       { label: "Operation", value: (approval) => String(approval.operationKind ?? "—") },
       { label: "Decision", value: (approval) => ({
         text: String(approval.decision ?? "—"),
@@ -551,66 +980,69 @@ function renderRunDetail() {
       { label: "At", value: (approval) => when(approval.at ?? approval.evidence?.decidedAt).text },
     ], approvals, "None."));
   }
-
   // Which settings were in effect is evidence, so it belongs next to the run
   // rather than only in the file.
   if (terminal.settings) {
     const overrides = terminal.settings.overrides ?? [];
-    card.append(el("p", { class: "muted", text: "Settings in effect" }));
-    card.append(el("p", { text: (terminal.settings.layers ?? []).map((layer) => layer.source).join(" → ") }));
-    card.append(overrides.length === 0
+    body.push(el("p", { class: "muted", text: "Settings in effect" }));
+    body.push(el("p", { class: "mono", text: (terminal.settings.layers ?? []).map((layer) => layer.source).join(" → ") }));
+    body.push(overrides.length === 0
       ? el("p", { class: "ok", text: "the committed default, unchanged" })
       : el("p", { class: "warn", text: overrides.length + " changed locally: " + overrides.join(", ") }));
   }
-  if (terminal.error) card.append(detailBlock("Error", terminal.error));
-  host.append(card);
+  if (terminal.error) body.push(detailBlock("Error", terminal.error));
+  body.push(el("div", { class: "row" }, [button("Close", { onClick: () => { openRun = undefined; render(); renderPageActions(); } })]));
+  return panel(run.runId, { meta: "sealed receipt", body, open: true });
 }
 
-// ------------------------------------------------------------- worktrees
-
-async function loadWorktrees() {
-  const host = $("worktrees");
+async function loadWorktrees({ notify = false } = {}) {
   try {
-    renderWorktrees(await api("/api/worktrees"));
+    worktrees = await api("/api/worktrees");
     clearError();
+    if (notify) toast("The worktrees were read again.");
   } catch (error) {
-    host.replaceChildren(el("p", { class: "notice bad", text: error.message }));
+    worktrees = { available: false, error: error.message, entries: [] };
   }
+  renderNav();
+  if (view === "worktrees") renderWorktrees();
 }
 
-function renderWorktrees(worktrees) {
-  const host = $("worktrees");
+function renderWorktrees() {
+  const host = $("view-worktrees");
   host.replaceChildren();
-  const reread = button("Read again", { onClick: loadWorktrees });
+  if (worktrees === undefined) {
+    host.append(panel("Worktrees", { body: [el("p", { class: "empty", text: "Reading the worktrees…" })] }));
+    return;
+  }
   if (worktrees.available === false) {
-    host.append(el("p", { class: "notice bad", text: worktrees.error ?? "The worktrees could not be listed." }));
-    host.append(el("p", { class: "muted", text: "A project outside a git checkout has none; 'etnpilot run' needs one." }));
-    host.append(reread);
+    host.append(panel("Worktrees", { body: [
+      el("p", { class: "notice bad", text: worktrees.error ?? "The worktrees could not be listed." }),
+      el("p", { class: "muted", text: "A project outside a git checkout has none; 'etnpilot run' needs one." }),
+    ] }));
     return;
   }
   const entries = worktrees.entries ?? [];
-  host.append(el("div", { class: "row" }, [
-    el("span", { class: "grow muted", text: entries.length + (entries.length === 1 ? " worktree · " : " worktrees · ")
+  host.append(panel("On disk", {
+    meta: entries.length + (entries.length === 1 ? " worktree · " : " worktrees · ")
       + (worktrees.managed ?? 0) + " from runs · "
-      + (worktrees.unsaved > 0 ? worktrees.unsaved + " with unsaved work" : "nothing unsaved") }),
-    reread,
-  ]));
-  host.append(table([
-    { label: "Worktree", value: (entry) => entry.name, mono: true },
-    { label: "Branch", value: (entry) => entry.branch ?? (entry.detached ? "(detached)" : "—"), mono: true },
-    { label: "Head", value: (entry) => (entry.head ?? "").slice(0, 8), mono: true },
-    { label: "From", value: (entry) => entry.main ? "checkout" : entry.managed ? "a run" : "elsewhere" },
-    { label: "State", value: (entry) => worktreeState(entry) },
-    { label: "", value: (entry) => worktreeActions(entry) },
-  ], entries, "No worktrees are registered."));
+      + (worktrees.unsaved > 0 ? worktrees.unsaved + " with unsaved work" : "nothing unsaved"),
+    body: [table([
+      { label: "Worktree", value: (entry) => entry.name, mono: true },
+      { label: "Branch", value: (entry) => entry.branch ?? (entry.detached ? "(detached)" : "—"), mono: true },
+      { label: "Head", value: (entry) => (entry.head ?? "").slice(0, 8), mono: true },
+      { label: "From", value: (entry) => entry.main ? "checkout" : entry.managed ? "a run" : "elsewhere" },
+      { label: "State", value: (entry) => worktreeState(entry) },
+      { label: "", value: (entry) => worktreeActions(entry) },
+    ], entries, "No worktrees are registered.")],
+  }));
 }
 
 function worktreeState(entry) {
-  if (entry.locked !== undefined) return { text: "locked", class: "warn" };
-  if (entry.prunable !== undefined) return { text: "prunable", class: "bad" };
-  if (entry.readable === false) return { text: "missing", class: "bad" };
-  if (entry.blocking > 0) return { text: entry.blocking + " unsaved", class: "warn" };
-  return { text: "clean", class: "ok" };
+  if (entry.locked !== undefined) return pill("locked", "warn");
+  if (entry.prunable !== undefined) return pill("prunable", "bad");
+  if (entry.readable === false) return pill("missing", "bad");
+  if (entry.blocking > 0) return pill(entry.blocking + " unsaved", "warn");
+  return pill("clean", "ok");
 }
 
 function worktreeActions(entry) {
@@ -621,9 +1053,9 @@ function worktreeActions(entry) {
     try {
       const removal = await api("/api/worktrees/remove", { method: "POST", body: JSON.stringify({ name: entry.name }) });
       clearError();
-      note(removal.removed
+      toast(removal.removed
         ? entry.name + " is gone; its branch " + (entry.branch ?? "") + " still exists."
-        : entry.name + " keeps unsaved work — nothing was removed.");
+        : entry.name + " keeps unsaved work — nothing was removed.", removal.removed ? "ok" : "warn");
       await loadWorktrees();
     } catch (error) {
       fail(error);
@@ -631,90 +1063,98 @@ function worktreeActions(entry) {
   } })];
 }
 
-// --------------------------------------------------------- merge requests
-
-async function loadMerges() {
+async function loadMerges({ notify = false } = {}) {
   try {
-    renderMerges(await api("/api/merges"));
+    merges = await api("/api/merges");
     clearError();
+    if (notify) toast("GitLab answered.");
   } catch (error) {
-    $("merges").replaceChildren(el("p", { class: "notice bad", text: error.message }));
+    merges = { configured: true, available: false, error: error.message, entries: [] };
   }
+  renderNav();
+  if (view === "merges") renderMerges();
 }
 
-function renderMerges(merges) {
-  const host = $("merges");
+function renderMerges() {
+  const host = $("view-merges");
   host.replaceChildren();
-  const reread = button("Ask GitLab", { onClick: loadMerges });
+  if (merges === undefined) {
+    host.append(panel("Merge requests", { body: [el("p", { class: "empty", text: "Asking GitLab…" })] }));
+    return;
+  }
   if (merges.configured === false) {
-    host.append(el("p", { class: "muted", text: merges.reason ?? "No GitLab project is configured." }));
-    host.append(el("p", { class: "muted", text: "Everything else here works without it." }));
+    host.append(panel("Merge requests", { body: [
+      el("p", { class: "muted", text: merges.reason ?? "No GitLab project is configured." }),
+      el("p", { class: "muted", text: "Everything else here works without it." }),
+    ] }));
     return;
   }
   if (merges.available === false) {
-    host.append(el("p", { class: "notice bad", text: merges.error ?? "GitLab did not answer." }));
-    host.append(el("p", { class: "muted", text: "This is the only part of the page that needs the network and a token." }));
-    host.append(reread);
+    host.append(panel("Merge requests", { body: [
+      el("p", { class: "notice bad", text: merges.error ?? "GitLab did not answer." }),
+      el("p", { class: "muted", text: "This is the only part of the page that needs the network and a token." }),
+    ] }));
     return;
   }
   const entries = [...(merges.entries ?? [])].sort((left, right) =>
     Number(right.own) - Number(left.own) || right.iid - left.iid);
-  host.append(el("div", { class: "row" }, [
-    el("span", { class: "grow muted", text: merges.project + " · " + entries.length + " " + (merges.state ?? "opened")
+  host.append(panel("Open merge requests", {
+    meta: merges.project + " · " + entries.length + " " + (merges.state ?? "opened")
       + " · " + (merges.ours > 0 ? merges.ours + " ours" : "none of them ours")
-      + " · target " + (merges.targetBranch ?? "main") }),
-    reread,
-  ]));
-  host.append(table([
-    { label: "MR", value: (entry) => "!" + entry.iid, mono: true },
-    { label: "Title", value: (entry) => entry.title },
-    { label: "Branch", value: (entry) => entry.sourceBranch, mono: true },
-    { label: "Whose", value: (entry) => ({ text: entry.own ? "ours" : (entry.author || "someone"), class: entry.own ? "ok" : "" }) },
-    { label: "Merge", value: (entry) => mergeState(entry) },
-    { label: "Updated", value: (entry) => when(entry.updatedAt).text },
-    { label: "", value: (entry) => entry.webUrl
-      ? [el("a", { text: "open", attrs: { href: entry.webUrl, rel: "noreferrer noopener", target: "_blank" } })]
-      : [] },
-  ], entries, "Nothing is open. A published run appears here as a draft."));
+      + " · target " + (merges.targetBranch ?? "main"),
+    body: [table([
+      { label: "MR", value: (entry) => "!" + entry.iid, mono: true },
+      { label: "Title", value: (entry) => entry.title },
+      { label: "Branch", value: (entry) => entry.sourceBranch, mono: true },
+      { label: "Whose", value: (entry) => entry.own ? pill("ours", "ok") : el("span", { class: "muted", text: entry.author || "someone" }) },
+      { label: "Merge", value: (entry) => mergeState(entry) },
+      { label: "Updated", value: (entry) => when(entry.updatedAt).text },
+      { label: "", value: (entry) => entry.webUrl
+        ? [el("a", { class: "btn small", text: "open", attrs: { href: entry.webUrl, rel: "noreferrer noopener", target: "_blank" } })]
+        : [] },
+    ], entries, "Nothing is open. A published run appears here as a draft.")],
+  }));
 }
 
 function mergeState(entry) {
-  if (entry.hasConflicts) return { text: "conflicts", class: "bad" };
-  if (entry.state && entry.state !== "opened") return { text: entry.state, class: entry.state === "merged" ? "ok" : "bad" };
+  if (entry.hasConflicts) return pill("conflicts", "bad");
+  if (entry.state && entry.state !== "opened") return pill(entry.state, entry.state === "merged" ? "ok" : "bad");
   const status = (entry.mergeStatus ?? "").replaceAll("_", " ");
-  if (entry.draft) return { text: status && status !== "mergeable" ? "draft · " + status : "draft", class: "warn" };
-  return { text: status || "open", class: status === "mergeable" ? "ok" : "" };
+  if (entry.draft) return pill(status && status !== "mergeable" ? "draft · " + status : "draft", "warn");
+  return pill(status || "open", status === "mergeable" ? "ok" : "");
 }
 
-// -------------------------------------------------------------- settings
-
-function renderSettings(settings) {
-  const host = $("settings");
+function renderSettings() {
+  const host = $("view-settings");
   host.replaceChildren();
+  const settings = state.settings;
   if (!settings) return;
   if (settings.error) {
-    host.append(el("p", { class: "notice bad", text: "The local settings file was refused: " + settings.error }));
-    host.append(el("p", { class: "muted", text: "Fix the file, or remove the setting with 'etnpilot config unset'." }));
+    host.append(panel("Settings", { body: [
+      el("p", { class: "notice bad", text: "The local settings file was refused: " + settings.error }),
+      el("p", { class: "muted", text: "Fix the file, or remove the setting with 'etnpilot config unset'." }),
+    ] }));
     return;
   }
+  const body = [];
   // A refused local setting stops the next run. Saying so above the list is
   // the difference between a warning and a surprise an hour later.
   for (const refusal of settings.refusals ?? []) {
-    host.append(el("p", { class: "notice bad", text: refusal.path + " — " + refusal.reason }));
+    body.push(el("p", { class: "notice bad", text: refusal.path + " — " + refusal.reason }));
   }
   if ((settings.refusals ?? []).length > 0) {
-    host.append(el("p", { class: "muted", text: "A run will not start until those are gone." }));
+    body.push(el("p", { class: "muted", text: "A run will not start until those are gone." }));
   }
 
   const filter = el("input", { attrs: { placeholder: "filter by path", "aria-label": "filter settings", value: settingsFilter } });
   filter.addEventListener("input", () => {
     settingsFilter = filter.value;
     settingsLimit = 25;
-    renderSettings(state.settings);
+    renderSettings();
   });
   const only = el("input", { attrs: { type: "checkbox", "aria-label": "only changed" } });
   only.checked = changedOnly;
-  only.addEventListener("change", () => { changedOnly = only.checked; renderSettings(state.settings); });
+  only.addEventListener("change", () => { changedOnly = only.checked; renderSettings(); });
   const picker = el("select", { attrs: { "aria-label": "where changes are written" } }, [
     el("option", { text: "write to this project", attrs: { value: "local" } }),
     el("option", { text: "write to ~/.config", attrs: { value: "global" } }),
@@ -722,9 +1162,9 @@ function renderSettings(settings) {
   picker.value = scope;
   picker.addEventListener("change", () => {
     scope = picker.value;
-    if (openSetting) { openSetting.scope = scope; renderSettingEditor(); }
+    if (openSetting) { openSetting.scope = scope; renderSettings(); }
   });
-  host.append(el("div", { class: "row" }, [
+  body.push(el("div", { class: "row" }, [
     filter,
     el("label", { class: "check" }, [only, el("span", { text: "only changed" })]),
     el("span", { class: "grow muted", text: (settings.overrides ?? []).length + " changed locally" }),
@@ -735,24 +1175,25 @@ function renderSettings(settings) {
     .filter((entry) => entry.path.toLowerCase().includes(settingsFilter.trim().toLowerCase()))
     .filter((entry) => !changedOnly || entry.source !== "project");
   const entries = matching.slice(0, settingsLimit);
-  host.append(table([
+  body.push(table([
     { label: "Setting", value: (entry) => editSetting(entry), mono: true },
     { label: "Value", value: (entry) => shortValue(entry.value), mono: true },
     { label: "From", value: (entry) => ({ text: sourceLabel(entry.source), class: entry.source === "project" ? "" : "warn" }) },
     { label: "Change", value: (entry) => ({ text: entry.mode, class: entry.mode === "locked" ? "bad" : entry.mode === "stricter-only" ? "warn" : "" }) },
   ], entries, "Nothing matches that filter.", { selected: (entry) => entry.path === openSetting?.entry.path }));
   if (matching.length > entries.length) {
-    const more = el("div", { class: "row" }, [
+    body.push(el("div", { class: "row" }, [
       el("span", { class: "grow muted", text: "Showing " + entries.length + " of " + matching.length + " — filter to narrow them down." }),
-      button("Show all " + matching.length, { onClick: () => { settingsLimit = matching.length; renderSettings(state.settings); } }),
-    ]);
-    host.append(more);
+      button("Show all " + matching.length, { onClick: () => { settingsLimit = matching.length; renderSettings(); } }),
+    ]));
   }
-  host.append(el("p", {
+  body.push(el("p", {
     class: "muted",
     text: "Nothing changed here is ever committed: it is written to "
       + (scope === "global" ? "~/.config/etnpilot/config.yaml, for every project." : ".etnpilot/etnpilot.local.yaml, for this project."),
   }));
+  host.append(panel("Effective values", { meta: (settings.entries ?? []).length + " in effect", body }));
+  if (openSetting) host.append(renderSettingEditor());
 }
 
 function sourceLabel(source) {
@@ -762,39 +1203,36 @@ function sourceLabel(source) {
 }
 
 function editSetting(entry) {
-  return button(entry.path, { class: "link", onClick: () => {
+  return button(entry.path, { class: "btn link", onClick: () => {
     if (entry.mode === "locked") {
       // A locked setting does not open at all, and says why.
-      fail(new Error(entry.path + " is locked by the committed default; it can only change there."));
+      toast(entry.path + " is locked by the committed default; it can only change there.", "warn");
       return;
     }
     clearError();
     openSetting = { entry, value: describeValue(entry.value), scope };
-    renderSettings(state.settings);
-    renderSettingEditor();
+    renderSettings();
   } });
 }
 
 function renderSettingEditor() {
-  const host = $("setting-editor");
-  host.replaceChildren();
-  if (!openSetting) return;
   const { entry } = openSetting;
   const value = el("input", { class: "grow mono", attrs: { "aria-label": "value as YAML", value: openSetting.value } });
   value.addEventListener("input", () => { openSetting.value = value.value; });
   const message = el("p", { class: "muted", text: entry.mode + " · default " + describeValue(entry.defaultValue)
     + " · writing " + (openSetting.scope === "global" ? "~/.config, for every project" : "this project, locally") });
-  const close = () => { openSetting = undefined; renderSettings(state.settings); renderSettingEditor(); };
-  const save = button("Save", { class: "", onClick: async () => {
+  const close = () => { openSetting = undefined; renderSettings(); };
+  const save = button("Save", { class: "btn primary", onClick: async () => {
     try {
       const result = await api("/api/settings/set", {
         method: "POST",
         body: JSON.stringify({ path: entry.path, value: openSetting.value, scope: openSetting.scope }),
       });
       clearError();
-      note(result.restartRequired
+      toast(result.restartRequired
         ? result.path + " is saved, but this server already opened that file — restart to use it."
-        : result.path + " is now " + describeValue(result.effective) + " — " + result.scope + ", and never committed.");
+        : result.path + " is now " + describeValue(result.effective) + " — " + result.scope + ", and never committed.",
+        result.restartRequired ? "warn" : "ok");
       close();
       await refresh({ force: true });
     } catch (error) {
@@ -803,14 +1241,14 @@ function renderSettingEditor() {
       message.textContent = error.message;
     }
   } });
-  const reset = button("Back to the default", { onClick: async () => {
+  const reset = button("Back to the default", { class: "btn", onClick: async () => {
     try {
       const result = await api("/api/settings/unset", {
         method: "POST",
         body: JSON.stringify({ path: entry.path, scope: entry.source === "user-global" ? "global" : openSetting.scope }),
       });
       clearError();
-      note(result.path + " is back to the committed default: " + describeValue(result.effective) + ".");
+      toast(result.path + " is back to the committed default: " + describeValue(result.effective) + ".");
       close();
       await refresh({ force: true });
     } catch (error) {
@@ -819,59 +1257,200 @@ function renderSettingEditor() {
     }
   } });
   const atDefault = entry.source === "project";
-  host.append(el("div", { class: "card open" }, [
-    el("div", { class: "row" }, [el("span", { class: "grow mono", text: entry.path }), button("Cancel", { onClick: close })]),
-    el("div", { class: "row" }, atDefault
-      ? [value, save, el("span", { class: "muted", text: "already the committed default" })]
-      : [value, save, reset]),
-    message,
-    el("p", { class: "muted", text: "The value is YAML, so 4, true and ['read'] all mean what they look like." }),
-  ]));
+  return panel(entry.path, {
+    meta: "YAML, so 4, true and ['read'] all mean what they look like",
+    open: true,
+    body: [
+      el("div", { class: "row" }, atDefault
+        ? [value, save, el("span", { class: "muted", text: "already the committed default" })]
+        : [value, save, reset]),
+      message,
+      el("div", { class: "row" }, [button("Cancel", { onClick: close })]),
+    ],
+  });
+}
+
+// --------------------------------------------------------- start a run
+
+function openModal(id) {
+  lastFocus = document.activeElement;
+  $(id).classList.add("open");
+  document.body.style.overflow = "hidden";
+  setTimeout(() => $(id).querySelector("input, button")?.focus(), 20);
+}
+
+function closeModal(id) {
+  $(id).classList.remove("open");
+  document.body.style.overflow = "";
+  lastFocus?.focus?.();
+}
+
+function prepareRunModal() {
+  const steps = (state?.settings?.entries ?? []).find((entry) => entry.path === "workflow.steps");
+  $("run-hint").textContent = "An empty agent runs what the project runs by itself"
+    + (steps?.value ? ": " + describeValue(steps.value) : "")
+    + ". The run works in its own worktree and asks this page for anything it needs approved.";
+}
+
+async function startRun(event) {
+  event.preventDefault();
+  const task = $("run-task").value.trim();
+  if (task === "") {
+    toast("A run needs a task to work on.", "warn");
+    return;
+  }
+  const submit = $("run-submit");
+  submit.disabled = true;
+  try {
+    const started = await api("/api/runs/start", {
+      method: "POST",
+      body: JSON.stringify({ task, agent: $("run-agent").value }),
+    });
+    $("run-task").value = "";
+    clearError();
+    closeModal("run-modal");
+    toast("Started: " + started.task + ". Whatever it needs approved appears under Approvals.");
+    await refresh({ force: true });
+  } catch (error) {
+    fail(error);
+    toast(error.message, "bad");
+  } finally {
+    submit.disabled = false;
+  }
+}
+
+// ------------------------------------------------------ command palette
+
+function paletteCommands() {
+  const commands = VIEWS.map((entry) => ({
+    label: "Go to " + entry.label,
+    hint: entry.id,
+    run: () => show(entry.id),
+  }));
+  commands.push(
+    { label: "Start a run", hint: "run", run: () => { prepareRunModal(); openModal("run-modal"); } },
+    { label: "Refresh now", hint: "state", run: () => refresh({ force: true }) },
+    { label: "Read the worktrees again", hint: "git", run: () => loadWorktrees({ notify: true }) },
+    { label: "Ask GitLab for merge requests", hint: "gitlab", run: () => loadMerges({ notify: true }) },
+    { label: "Show only changed settings", hint: "settings", run: () => {
+      changedOnly = true;
+      show("settings");
+    } },
+  );
+  const query = $("palette-input").value.trim().toLowerCase();
+  return query === "" ? commands : commands.filter((command) => (command.label + " " + command.hint).toLowerCase().includes(query));
+}
+
+function renderPalette() {
+  const host = $("palette-list");
+  host.replaceChildren();
+  const commands = paletteCommands();
+  if (commands.length === 0) {
+    host.append(el("p", { class: "empty", text: "No command matches." }));
+    return;
+  }
+  paletteIndex = Math.min(paletteIndex, commands.length - 1);
+  commands.forEach((command, index) => {
+    const node = el("button", {
+      class: index === paletteIndex ? "palette-option active" : "palette-option",
+      attrs: { type: "button", role: "option" },
+    }, [el("span", { text: command.label }), el("span", { class: "hint", text: command.hint })]);
+    node.addEventListener("click", () => {
+      closeModal("palette");
+      command.run();
+    });
+    host.append(node);
+  });
+}
+
+function paletteKey(event) {
+  const commands = paletteCommands();
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    paletteIndex = Math.min(commands.length - 1, paletteIndex + 1);
+    renderPalette();
+  } else if (event.key === "ArrowUp") {
+    event.preventDefault();
+    paletteIndex = Math.max(0, paletteIndex - 1);
+    renderPalette();
+  } else if (event.key === "Enter") {
+    event.preventDefault();
+    const command = commands[paletteIndex];
+    closeModal("palette");
+    command?.run();
+  }
 }
 
 // --------------------------------------------------------------- the poll
 
-function statusText() {
-  if (!state) return "loading…";
-  const running = (state.active ?? []).length;
-  return "updated " + new Date(state.generatedAt).toLocaleTimeString()
-    + (running > 0 ? " · " + running + " running" : "");
-}
+let holding = false;
 
 // Typing must not be thrown away by the poll. While a field has focus or an
-// editor is open, the page keeps what is on screen and says it is holding.
+// editor or dialog is open, the page keeps what is on screen and says so.
 function busy() {
   const active = document.activeElement;
   const typing = active && (active.tagName === "INPUT" || active.tagName === "SELECT");
-  return Boolean(typing || openSetting);
+  return Boolean(typing || openSetting || document.querySelector(".backdrop.open"));
 }
 
 async function refresh({ force = false } = {}) {
   if (busy() && !force) {
-    showStatus(statusText() + " · holding while you type");
+    holding = true;
+    renderRuntime();
     return;
   }
+  holding = false;
   try {
     state = await api("/api/state");
-    renderStart();
-    renderApprovals(state.approvals.pending);
-    renderQueue(state.queue);
-    renderRuns(state.runs);
-    renderSettings(state.settings);
-    renderSettingEditor();
-    if (openRun) {
-      // A receipt is sealed: what was read stays valid, so it is not refetched.
-      renderRunDetail();
-    }
-    showStatus(statusText());
+    const root = state.root ?? "";
+    const title = $("context-title");
+    title.textContent = root.split("/").filter(Boolean).at(-1) ?? "this project";
+    title.title = root;
+    render();
+    clearError();
   } catch (error) {
     fail(error);
   }
 }
 
+$("menu").addEventListener("click", () => ($("sidebar").classList.contains("open") ? closeSidebar() : openSidebar()));
+$("scrim").addEventListener("click", closeSidebar);
+$("open-run").addEventListener("click", () => { prepareRunModal(); openModal("run-modal"); });
+$("run-form").addEventListener("submit", startRun);
+$("open-palette").addEventListener("click", () => {
+  $("palette-input").value = "";
+  paletteIndex = 0;
+  renderPalette();
+  openModal("palette");
+});
+$("palette-input").addEventListener("input", () => { paletteIndex = 0; renderPalette(); });
+$("palette-input").addEventListener("keydown", paletteKey);
+for (const node of document.querySelectorAll("[data-close]")) {
+  node.addEventListener("click", () => closeModal(node.dataset.close));
+}
+for (const backdrop of document.querySelectorAll(".backdrop")) {
+  backdrop.addEventListener("mousedown", (event) => { if (event.target === backdrop) closeModal(backdrop.id); });
+}
+document.addEventListener("keydown", (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+    event.preventDefault();
+    $("palette-input").value = "";
+    paletteIndex = 0;
+    renderPalette();
+    openModal("palette");
+    return;
+  }
+  if (event.key === "Escape") {
+    const open = document.querySelector(".backdrop.open");
+    if (open) closeModal(open.id);
+    else closeSidebar();
+  }
+});
+window.addEventListener("hashchange", () => show(location.hash.slice(1)));
+
+renderNav();
+show(location.hash.slice(1) || "overview");
 refresh();
-loadWorktrees();
-loadMerges();
 setInterval(refresh, 5000);
 </script>
 </body>
