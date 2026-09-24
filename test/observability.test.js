@@ -122,3 +122,68 @@ test("observability rejects unknown settings and invalid trace context", async (
   assert.throws(() => telemetry.startSpan("invalid", { parentSpanId: "123" }), /parentSpanId/);
   assert.throws(() => telemetry.startSpan("invalid", { kind: 6 }), /Span kind/);
 });
+
+test("a cost that cannot be worked out names the model whose rate is missing", async () => {
+  // Reported: 'ESTIMATED COST — not priced — set observability.pricing to see
+  // it', after setting it. The rate is applied when the call happens, so it
+  // never reaches a call already on disk, and the card repeated the same
+  // sentence either way. Naming the model says which rate is missing; saying
+  // the calls predate it says why setting one changed nothing.
+  const directory = await mkdtemp(join(tmpdir(), "etnpilot-pricing-"));
+  const path = join(directory, "telemetry.jsonl");
+  const unpriced = new Telemetry({
+    enabled: true,
+    file: path,
+    serviceName: "s",
+    environment: "test",
+    pricing: { currency: "USD", models: {} },
+  });
+  for (const model of ["gpt-5", "gpt-5", "claude-opus-5"]) {
+    const accounting = unpriced.recordProviderUsage({
+      workflowRunId: "w",
+      provider: "p",
+      model,
+      usage: { inputTokens: 10, outputTokens: 2 },
+    });
+    await unpriced.startSpan("gen_ai.invoke_agent", { attributes: { "etnpilot.workflow.run_id": "w" } })
+      .end({ attributes: telemetryProviderAttributes(accounting) });
+  }
+  await unpriced.flush();
+
+  const before = await summarizeTelemetryFile(path);
+  assert.equal(before.estimatedCost, undefined);
+  assert.equal(before.unpricedInvocations, 3);
+  // Most-used model first, so the rate worth setting is the one named first.
+  assert.deepEqual(before.unpricedModels, [
+    { model: "gpt-5", calls: 2 },
+    { model: "claude-opus-5", calls: 1 },
+  ]);
+
+  // Now a rate exists, and one more call is made with it.
+  const priced = new Telemetry({
+    enabled: true,
+    file: path,
+    serviceName: "s",
+    environment: "test",
+    pricing: { currency: "USD", models: { "gpt-5": { inputPerMillion: 1, outputPerMillion: 2 } } },
+  });
+  const accounting = priced.recordProviderUsage({
+    workflowRunId: "w",
+    provider: "p",
+    model: "gpt-5",
+    usage: { inputTokens: 1000, outputTokens: 1000 },
+  });
+  await priced.startSpan("gen_ai.invoke_agent", { attributes: { "etnpilot.workflow.run_id": "w" } })
+    .end({ attributes: telemetryProviderAttributes(accounting) });
+  await priced.flush();
+
+  const after = await summarizeTelemetryFile(path);
+  assert.equal(after.pricedInvocations, 1);
+  assert.equal(after.unpricedInvocations, 3);
+  // The earlier gpt-5 calls are marked as predating the rate, rather than as
+  // a rate still to be set.
+  assert.deepEqual(after.unpricedModels, [
+    { model: "gpt-5", calls: 2, pricedSince: true },
+    { model: "claude-opus-5", calls: 1 },
+  ]);
+});

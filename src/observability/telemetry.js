@@ -164,6 +164,11 @@ export async function summarizeTelemetryFile(path, { workflowRunId } = {}) {
     throw error;
   });
   const summary = emptySummary();
+  // Which models went without a rate. 'not priced' with no model named leaves
+  // someone setting a rate for a model the runs never used, and the card says
+  // the same thing afterwards.
+  const unpriced = new Map();
+  const priced = new Set();
   let spans = 0;
   for (const line of content.split("\n").filter(Boolean)) {
     const payload = JSON.parse(line);
@@ -179,17 +184,37 @@ export async function summarizeTelemetryFile(path, { workflowRunId } = {}) {
           summary.cacheReadTokens += attributes["gen_ai.usage.cache_read.input_tokens"] ?? 0;
           summary.cacheWriteTokens += attributes["gen_ai.usage.cache_creation.input_tokens"] ?? 0;
           summary.providerUnits += attributes["etnpilot.provider.usage_units"] ?? 0;
+          const model = attributes["gen_ai.request.model"] ?? "unknown";
           if (attributes["etnpilot.cost.estimated"] !== undefined) {
             summary.estimatedCost = (summary.estimatedCost ?? 0) + attributes["etnpilot.cost.estimated"];
             summary.pricedInvocations += 1;
-          } else summary.unpricedInvocations += 1;
+            priced.add(model);
+          } else {
+            summary.unpricedInvocations += 1;
+            unpriced.set(model, (unpriced.get(model) ?? 0) + 1);
+          }
           summary.invocations += 1;
           summary.currency ??= attributes["etnpilot.cost.currency"];
         }
       }
     }
   }
-  return { version: TELEMETRY_VERSION, spans, workflowRunId, ...summary };
+  return {
+    version: TELEMETRY_VERSION,
+    spans,
+    workflowRunId,
+    ...summary,
+    // A cost is recorded when the call happens, so a rate set afterwards
+    // never reaches a call already on disk. Naming the models says which rate
+    // is missing, and how many calls predate the one that exists.
+    ...(unpriced.size > 0
+      ? {
+        unpricedModels: [...unpriced]
+          .map(([model, calls]) => ({ model, calls, ...(priced.has(model) ? { pricedSince: true } : {}) }))
+          .sort((left, right) => right.calls - left.calls),
+      }
+      : {}),
+  };
 }
 
 function normalizeConfig(config = {}) {

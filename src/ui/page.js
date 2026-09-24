@@ -901,7 +901,7 @@ function usageCards() {
     summaryCard("Provider calls", described.invocations.toLocaleString(), { accent: "accent", hint: "across every run on disk" }),
     summaryCard("Estimated cost", described.cost ?? "not priced", {
       accent: "amber",
-      hint: described.cost ? "from observability.pricing" : "set observability.pricing to see it",
+      hint: pricingHint(described),
     }),
   ];
 }
@@ -1082,7 +1082,22 @@ function describeUsage(summary) {
     invocations: summary.invocations ?? 0,
     cost,
     unpriced: summary.unpricedInvocations ?? 0,
+    unpricedModels: summary.unpricedModels ?? [],
   };
+}
+
+// A cost is written into the receipt when the call happens, so a rate added
+// afterwards never reaches a call already on disk. Saying only 'not priced'
+// sends someone to set a rate they may already have set.
+function pricingHint(described) {
+  const models = described.unpricedModels;
+  if (models.length === 0) return described.cost ? "from observability.pricing" : "set observability.pricing to see it";
+  const named = models.slice(0, 2).map((row) => "'" + row.model + "'").join(", ");
+  const more = models.length > 2 ? " and " + (models.length - 2) + " more" : "";
+  const calls = described.unpriced + (described.unpriced === 1 ? " call has" : " calls have");
+  return models.every((row) => row.pricedSince)
+    ? calls + " no cost: they ran before the rate for " + named + " was set"
+    : calls + " no rate: set observability.pricing.models for " + named + more;
 }
 
 function usagePanelBody(summary) {
@@ -1094,7 +1109,8 @@ function usagePanelBody(summary) {
       ["Tokens", described.tokens.toLocaleString() + " (" + described.input.toLocaleString() + " in, " + described.output.toLocaleString() + " out)"],
       ["Cached", described.cached > 0 ? described.cached.toLocaleString() + " read from cache" : "none"],
       ["Provider calls", String(described.invocations)],
-      ["Estimated cost", described.cost ?? "not priced — set observability.pricing to see it"],
+      ["Estimated cost", described.cost ? described.cost : "not priced"],
+      ...(described.unpricedModels.length > 0 || !described.cost ? [["", pricingHint(described)]] : []),
       ...(described.unpriced > 0 && described.cost ? [["Unpriced calls", String(described.unpriced)]] : []),
     ]),
   ]);

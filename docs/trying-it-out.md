@@ -119,6 +119,19 @@ etnpilot config set observability.pricing.models \
   '{gpt-5: {inputPerMillion: 1.25, outputPerMillion: 10, cacheReadPerMillion: 0.125}}'
 ```
 
+**Preise gelten ab dem nächsten Run.** Der Betrag wird beim Aufruf berechnet
+und im Receipt festgehalten — ein später gesetzter Satz erreicht keinen
+Aufruf, der schon auf der Platte liegt. Die Karte sagt jetzt, welcher Fall
+vorliegt:
+
+```
+1 call has no rate: set observability.pricing.models for 'gpt-5'
+4 calls have no cost: they ran before the rate for 'gpt-5' was set
+```
+
+Die erste Zeile heißt: Satz fehlt. Die zweite: Satz ist da, diese Aufrufe sind
+älter — der nächste Run zeigt Kosten.
+
 Der Schlüssel ist der **Modellname, den der Provider zurückmeldet** — derselbe,
 der im Receipt unter `usage.model` steht. `"*"` gilt für alles, was sonst
 keinen Satz hat. `currency` ist ein dreistelliger Code, Standard `USD`.
