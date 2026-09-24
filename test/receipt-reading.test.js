@@ -230,3 +230,55 @@ test("a rehearsal that never ran is not a rehearsal that found conflicts", async
   assert.match(screen, /could not read from remote/);
   assert.equal(/\bconflicts\b/.test(screen), false, "a fetch that failed found no conflict");
 });
+
+test("a run says where its files are and what it did to them", async () => {
+  // Asked: 'the task was to create test.txt and I cannot find the file'. A run
+  // in a worktree writes it there, uncommitted, and the checkout shows
+  // nothing. 'BRANCH etnpilot/run-…' does not tell anyone where to look.
+  const directory = await runsDirectory({
+    "20260101000004-eeee.jsonl": [
+      {
+        runId: "agent-1",
+        result: { toolCalls: [{ tool: "write_file", ok: true }, { tool: "read_file", ok: false, error: "Denied by policy." }] },
+      },
+      {
+        type: "workflow",
+        terminal: true,
+        runId: "20260101000004-eeee",
+        status: "succeeded",
+        workspace: {
+          name: "run-20260101000004-eeee",
+          branch: "etnpilot/run-20260101000004-eeee",
+          path: "/repo/.etnpilot/worktrees/run-20260101000004-eeee",
+          managed: true,
+        },
+        summary: { status: "succeeded", steps: { agent: { status: "succeeded" } } },
+      },
+    ],
+  });
+  const receipt = await readReceipt(directory, "20260101000004-eeee.jsonl");
+
+  assert.equal(receipt.outcome.workspace.path, "/repo/.etnpilot/worktrees/run-20260101000004-eeee");
+  assert.deepEqual(receipt.outcome.tools, [
+    { tool: "write_file", ok: 1, failed: 0 },
+    { tool: "read_file", ok: 0, failed: 1, error: "Denied by policy." },
+  ]);
+  // A refusal inside a run that ended 'succeeded' is not swallowed: the model
+  // finishing its turn is not the same as the work being done.
+  assert.equal(receipt.outcome.status, "succeeded");
+  assert.match(
+    receipt.outcome.reasons.map((reason) => reason.text).join("\n"),
+    /read_file did not succeed: Denied by policy\./,
+  );
+
+  // The terminal says both, beside each other.
+  const { renderApp } = await import("../src/tui/render.js");
+  const screen = renderApp(
+    { runs: [{ runId: "20260101000004-eeee", status: "succeeded", mode: "execute", receiptFile: "20260101000004-eeee.jsonl" }] },
+    { view: "runs", detail: true, color: false, receipt, width: 100, height: 46 },
+  ).join("\n");
+  assert.match(screen, /Workspace/);
+  assert.match(screen, /\/repo\/\.etnpilot\/worktrees\/run-20260101000004-eeee/);
+  assert.match(screen, /write_file\s+1 ran/);
+  assert.match(screen, /read_file\s+0 ran\s+1 refused/);
+});

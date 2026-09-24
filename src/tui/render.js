@@ -554,7 +554,17 @@ function renderRunDetail(state, { style, width, height, cursor, receipt }) {
     lines.push(`  ${style.ink(`${usage.invocations} provider calls`)} ${style.muted(cost)}`);
     lines.push("");
   }
+  if (outcome.tools) {
+    lines.push(style.dim("Tools it used"));
+    for (const row of outcome.tools) {
+      const refused = row.failed > 0 ? style.bad(`${row.failed} refused`) : style.muted("none refused");
+      lines.push(`  ${style.ink(pad(row.tool, 14))} ${style.muted(`${row.ok} ran`)} ${refused} ${style.muted(row.error ?? "")}`);
+    }
+    lines.push("");
+  }
   field("Branch", terminal.workspace?.branch);
+  // Where the files are: a worktree run leaves them there, not in the checkout.
+  field("Workspace", terminal.workspace?.path);
   field("Sandbox", terminal.workspace?.sandbox?.image);
   const rehearsal = outcome.rehearsal;
   if (rehearsal) {

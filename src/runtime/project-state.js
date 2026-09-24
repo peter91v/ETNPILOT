@@ -339,6 +339,19 @@ export function describeOutcome(receipt, { running = false } = {}) {
         + (approval.evidence?.reason ? `: ${approval.evidence.reason}` : ""),
     });
   }
+  // What the run actually did with its tools. A run can be told to write a
+  // file, have the write refused, and still end 'succeeded' because the model
+  // finished its turn — the receipt records the refusal, so it is said here
+  // rather than left for someone to notice by the file not being there.
+  // Chat providers record 'toolCalls'; the scripted provider records the same
+  // shape under 'steps', because its steps are the tools it ran.
+  const toolCalls = receipt?.entries?.flatMap((entry) => entry.result?.toolCalls ?? entry.result?.steps ?? []) ?? [];
+  for (const call of toolCalls.filter((call) => call.ok === false)) {
+    reasons.push({
+      kind: "tool",
+      text: `${call.tool ?? "a tool"} did not succeed: ${call.error ?? "no reason recorded"}`,
+    });
+  }
   if (terminal.content?.verificationError) {
     reasons.push({ kind: "content", text: `content verification: ${terminal.content.verificationError}` });
   }
@@ -369,9 +382,30 @@ export function describeOutcome(receipt, { running = false } = {}) {
     steps,
     reasons,
     usage: terminal.observability?.summary,
+    // Where the work is. A run in a worktree leaves its files there and not in
+    // the checkout, and 'BRANCH etnpilot/run-…' does not tell anyone where to
+    // look for them.
+    ...(terminal.workspace ? { workspace: terminal.workspace } : {}),
+    ...(toolCalls.length > 0 ? { tools: summarizeToolCalls(toolCalls) } : {}),
     ...(terminal.git?.mergeRehearsal ? { rehearsal: describeRehearsal(terminal.git.mergeRehearsal) } : {}),
     ...(terminal.cleanup ? { cleanup: terminal.cleanup } : {}),
   };
+}
+
+// One row per tool, so 'it wrote three files and one was refused' is readable
+// without counting lines.
+function summarizeToolCalls(calls) {
+  const byTool = new Map();
+  for (const call of calls) {
+    const name = call.tool ?? "unknown";
+    const row = byTool.get(name) ?? { tool: name, ok: 0, failed: 0 };
+    if (call.ok === false) {
+      row.failed += 1;
+      if (call.error && !row.error) row.error = call.error;
+    } else row.ok += 1;
+    byTool.set(name, row);
+  }
+  return [...byTool.values()];
 }
 
 const REHEARSAL_REASONS = Object.freeze({

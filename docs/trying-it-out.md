@@ -78,6 +78,58 @@ Ohne `--approvals inbox` fragt der Run das Terminal, in dem er läuft — und oh
 interaktives Terminal lehnt er **jede** Anfrage ab. Das ist sicher, aber im
 Hintergrund unbrauchbar.
 
+## Wo landen die Dateien?
+
+Ein Run arbeitet standardmäßig in einem **eigenen Worktree**, nicht im
+Checkout: `.etnpilot/worktrees/run-<id>/`, auf dem Branch
+`etnpilot/run-<id>`. Geschrieben wird dort, und ohne `--publish` wird nichts
+committet — im Hauptverzeichnis sehen Sie deshalb nichts.
+
+```bash
+etnpilot receipt show          # 'workspace.path' sagt, wo; 'tools', was es tat
+etnpilot worktree list         # alle Worktrees mit ihren Branches
+ls .etnpilot/worktrees/run-<id>/
+```
+
+In der Oberfläche: **Worktrees** zeigt die geänderten Dateien und ihren Diff;
+die Run-Karte nennt Branch und Workspace-Pfad.
+
+Wer lieber direkt im Checkout arbeitet:
+
+```bash
+etnpilot config set workspace.mode in-place    # bleibt lokal
+```
+
+## Kosten anzeigen
+
+Ohne Preise zählt ETNPilot nur Tokens; „not priced" heißt, dass kein Satz für
+das Modell hinterlegt ist. Preise stehen unter `observability.pricing` und
+sind lokal setzbar — in Währung **pro einer Million Tokens**:
+
+```bash
+etnpilot config set observability.pricing.models.gpt-5.inputPerMillion 1.25
+etnpilot config set observability.pricing.models.gpt-5.outputPerMillion 10
+```
+
+Oder die ganze Tabelle auf einmal, was bei Modellnamen mit Punkt (`gpt-4.1`)
+der einzige Weg ist, weil der Pfad an Punkten getrennt wird:
+
+```bash
+etnpilot config set observability.pricing.models \
+  '{gpt-5: {inputPerMillion: 1.25, outputPerMillion: 10, cacheReadPerMillion: 0.125}}'
+```
+
+Der Schlüssel ist der **Modellname, den der Provider zurückmeldet** — derselbe,
+der im Receipt unter `usage.model` steht. `"*"` gilt für alles, was sonst
+keinen Satz hat. `currency` ist ein dreistelliger Code, Standard `USD`.
+Zwischengespeicherte Eingabe-Tokens werden mit `cacheReadPerMillion`
+abgerechnet und von den Eingabe-Tokens abgezogen.
+
+```bash
+etnpilot config set observability.pricing.currency EUR
+etnpilot config set observability.pricing.models '{"*": {inputPerMillion: 1, outputPerMillion: 5}}'
+```
+
 ## Das Receipt öffnen
 
 Jeder Run schreibt eine Datei unter `.etnpilot/state/runs/`. Drei Wege führen

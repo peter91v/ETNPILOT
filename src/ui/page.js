@@ -1127,6 +1127,9 @@ function renderRunDetail() {
       ["Status", status, status === "succeeded" ? "ok" : status === "incomplete" || status === "running" ? "warn" : "bad"],
       ["Mode", run.mode],
       ["Branch", terminal.workspace?.branch ?? "—"],
+      // Where the files are. A run in a worktree writes them there, uncommitted
+      // unless it published, and the checkout shows nothing.
+      ["Workspace", terminal.workspace?.path ?? (terminal.workspace?.managed === false ? "the checkout itself" : "—"), "mono"],
       ["Sandbox", terminal.workspace?.sandbox?.image ?? "—"],
       ["Receipt", receipt.file],
       ["Entries", String(receipt.entries.length)],
@@ -1159,6 +1162,17 @@ function renderRunDetail() {
       { label: "Took", value: (step) => stepDuration(step) },
       { label: "Error", value: (step) => ({ text: step.error ?? "", class: "bad" }) },
     ], outcome.steps, "None recorded."));
+  }
+  // What it did, not only that it succeeded: a run told to write a file that
+  // wrote none is a run whose 'succeeded' needs reading twice.
+  if (outcome.tools) {
+    body.push(el("p", { class: "muted", text: "Tools it used" }));
+    body.push(table([
+      { label: "Tool", value: (row) => row.tool, mono: true },
+      { label: "Ran", value: (row) => String(row.ok) },
+      { label: "Refused", value: (row) => ({ text: String(row.failed), class: row.failed > 0 ? "bad" : "" }) },
+      { label: "First reason", value: (row) => ({ text: row.error ?? "", class: "bad" }) },
+    ], outcome.tools, "None."));
   }
   if (outcome.usage) body.push(usagePanelBody(outcome.usage));
   // Clean, conflicting, or never attempted: three answers, and the reader
