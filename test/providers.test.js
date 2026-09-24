@@ -391,3 +391,102 @@ test("a refused models request keeps the server's own message", async () => {
     },
   );
 });
+
+test("a server that needs a request field of its own gets it, and cannot break the call", async () => {
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-openai-body-"));
+  const bodies = [];
+  const provider = createOpenAICompatibleProvider({
+    baseUrl: "https://api.openai.example/v1",
+    apiKey: "sk-test",
+    model: "gpt-5.6-luna",
+    tools: true,
+    workingDirectory: root,
+    reasoningEffort: "none",
+    requestBody: { service_tier: "flex" },
+    fetchImpl: async (_url, options) => {
+      bodies.push(JSON.parse(options.body));
+      return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), { status: 200 });
+    },
+  });
+
+  const result = await provider.invoke({ agent: { prompt: "System" }, input: "hello", instructions: [] });
+  assert.equal(result.text, "ok");
+  const [body] = bodies;
+  // The configured fields reach the wire under the API's own names.
+  assert.equal(body.reasoning_effort, "none");
+  assert.equal(body.service_tier, "flex");
+  // What the adapter needs to work is still its own: the tools are declared
+  // and the model is the configured one, whatever the passthrough contains.
+  assert.equal(body.model, "gpt-5.6-luna");
+  assert.equal(body.tools.length > 0, true);
+  assert.equal(body.tool_choice, "auto");
+
+  // A passthrough that would overwrite the mechanics is refused at
+  // construction, where the config can still be fixed — not on the call,
+  // where it would look like the server's fault.
+  for (const key of ["model", "messages", "tools", "tool_choice", "stream"]) {
+    assert.throws(
+      () => createOpenAICompatibleProvider({
+        baseUrl: "https://api.openai.example/v1",
+        apiKey: "sk-test",
+        requestBody: { [key]: "anything" },
+      }),
+      new RegExp(`requestBody must not set '${key}'`),
+    );
+  }
+  assert.throws(
+    () => createOpenAICompatibleProvider({ baseUrl: "https://x/v1", apiKey: "k", requestBody: [] }),
+    /requestBody must be a mapping/,
+  );
+  assert.throws(
+    () => createOpenAICompatibleProvider({ baseUrl: "https://x/v1", apiKey: "k", reasoningEffort: 3 }),
+    /reasoningEffort must be a string/,
+  );
+});
+
+test("a reasoning model that refuses function tools names the setting that fixes it", async () => {
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-openai-reasoning-"));
+  const refusal = () => new Response(JSON.stringify({ error: { message:
+    "Function tools with reasoning_effort are not supported for gpt-5.6-luna in /v1/chat/completions."
+    + " To use function tools, use /v1/responses or set reasoning_effort to 'none'.",
+  } }), { status: 400 });
+  const options = {
+    name: "openai",
+    baseUrl: "https://api.openai.example/v1",
+    apiKey: "sk-test",
+    model: "gpt-5.6-luna",
+    tools: true,
+    workingDirectory: root,
+    fetchImpl: async () => refusal(),
+  };
+  const invoke = (provider) => provider.invoke({ agent: { prompt: "System" }, input: "hello", instructions: [] });
+
+  await assert.rejects(() => invoke(createOpenAICompatibleProvider(options)), (error) => {
+    assert.equal(error.code, "http_400");
+    // The server's own words stay first; the advice is added, not substituted.
+    assert.match(error.message, /set reasoning_effort to 'none'/);
+    assert.match(error.message, /this provider sends no reasoning_effort/i);
+    assert.match(error.message, /providers\.openai\.reasoningEffort/);
+    return true;
+  });
+
+  // Once it is set, repeating the advice would send someone in a circle: the
+  // server is refusing something else now, and only its message says what.
+  await assert.rejects(
+    () => invoke(createOpenAICompatibleProvider({ ...options, reasoningEffort: "none" })),
+    (error) => {
+      assert.equal(/providers\.openai\.reasoningEffort/.test(error.message), false);
+      return true;
+    },
+  );
+
+  // A 400 with no tools in the request is a different problem, and advice
+  // about tools would be a wrong guess.
+  await assert.rejects(
+    () => invoke(createOpenAICompatibleProvider({ ...options, tools: false })),
+    (error) => {
+      assert.equal(/providers\.openai\.reasoningEffort/.test(error.message), false);
+      return true;
+    },
+  );
+});

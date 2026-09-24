@@ -15,6 +15,14 @@ export function createOpenAICompatibleProvider({
   maxToolIterations = DEFAULT_MAX_TOOL_ITERATIONS,
   fetchImpl = globalThis.fetch,
   toolsImpl,
+  // Fields this adapter never sets itself but a particular server needs.
+  // 'reasoningEffort' is the one people hit first: a reasoning model applies
+  // its own default, and OpenAI rejects that default together with function
+  // tools on /v1/chat/completions ("set reasoning_effort to 'none'"). It is a
+  // real behavioural choice — 'none' turns the model's reasoning off — so it
+  // is configured, never guessed at here.
+  reasoningEffort,
+  requestBody,
   // Which environment variable and which secret this provider was wired to,
   // so a message about a missing key names the one to set rather than the
   // adapter's generic default.
@@ -27,6 +35,10 @@ export function createOpenAICompatibleProvider({
   if (!Number.isInteger(maxToolIterations) || maxToolIterations < 1) {
     throw new TypeError("maxToolIterations must be a positive integer.");
   }
+  if (reasoningEffort !== undefined && typeof reasoningEffort !== "string") {
+    throw new TypeError("reasoningEffort must be a string, such as 'none', 'low', 'medium' or 'high'.");
+  }
+  const extraBody = normalizeExtraBody(requestBody, reasoningEffort);
   const endpoint = `${baseUrl.replace(/\/$/, "")}/chat/completions`;
   // A model server on this machine needs no key; a hosted one always does,
   // and a 401 says less about a missing key than this does.
@@ -61,11 +73,17 @@ export function createOpenAICompatibleProvider({
           apiKey,
           fetchImpl,
           context,
+          name,
+          // The configured fields go in first: what this adapter needs to
+          // work — the model, the conversation, the tool declarations — is
+          // never overwritten by a passthrough.
           body: {
+            ...extraBody,
             model: context.agent.model ?? model,
             messages,
             ...(workspaceTools ? { tools: toolSchema(workspaceTools.definitions), tool_choice: "auto" } : {}),
           },
+          reasoningEffortConfigured: extraBody.reasoning_effort !== undefined,
         });
         addUsage(usage, payload.usage);
         responseModel = payload.model ?? responseModel;
@@ -106,7 +124,31 @@ export function createOpenAICompatibleProvider({
   };
 }
 
-async function request({ endpoint, apiKey, fetchImpl, context, body }) {
+// Only these may be passed through: everything else in the body is either
+// this adapter's own mechanics or a shape it would then have to parse.
+const RESERVED_BODY_KEYS = Object.freeze(["model", "messages", "tools", "tool_choice", "stream"]);
+
+function normalizeExtraBody(requestBody, reasoningEffort) {
+  const body = {};
+  if (requestBody !== undefined) {
+    if (!requestBody || typeof requestBody !== "object" || Array.isArray(requestBody)) {
+      throw new TypeError("requestBody must be a mapping of request fields.");
+    }
+    for (const key of RESERVED_BODY_KEYS) {
+      if (key in requestBody) {
+        throw new TypeError(
+          `requestBody must not set '${key}': it is this provider's own`
+          + (key === "model" ? " field — use 'model' on the provider or the agent." : " mechanics."),
+        );
+      }
+    }
+    Object.assign(body, structuredClone(requestBody));
+  }
+  if (reasoningEffort !== undefined) body.reasoning_effort = reasoningEffort;
+  return body;
+}
+
+async function request({ endpoint, apiKey, fetchImpl, context, body, name, reasoningEffortConfigured }) {
   let response;
   try {
     response = await fetchImpl(endpoint, {
@@ -141,7 +183,8 @@ async function request({ endpoint, apiKey, fetchImpl, context, body }) {
     // code alone, and the status alone tells them apart for nobody.
     const detail = await errorDetail(response);
     throw new ProviderError(
-      `Provider request failed (${response.status})${detail ? `: ${detail}` : "."}`,
+      `Provider request failed (${response.status})${detail ? `: ${detail}` : "."}`
+      + reasoningEffortAdvice({ status: response.status, detail, body, name, reasoningEffortConfigured }),
       {
         code: `http_${response.status}`,
         retryable,
@@ -151,6 +194,22 @@ async function request({ endpoint, apiKey, fetchImpl, context, body }) {
     );
   }
   return response.json();
+}
+
+// A 400 that names 'reasoning_effort' next to function tools is the one
+// provider rejection with a single configurable answer, and the server states
+// it in its own terms rather than this project's. Naming the setting turns a
+// dead end into one command — but only when it is not already set, because
+// repeating advice that was taken sends people in a circle.
+function reasoningEffortAdvice({ status, detail, body, name, reasoningEffortConfigured }) {
+  if (status !== 400 || reasoningEffortConfigured) return "";
+  if (!/reasoning_effort/i.test(detail ?? "")) return "";
+  if (!Array.isArray(body?.tools) || body.tools.length === 0) return "";
+  return `\nThis provider sends no reasoning_effort, so that is the server's own default for`
+    + ` '${body.model}'. To keep the workspace tools, set 'providers.${name}.reasoningEffort'`
+    + ` to 'none' (etnpilot config set providers.${name}.reasoningEffort none — that stays local),`
+    + ` which turns this model's reasoning off. The other route the server names,`
+    + ` /v1/responses, is a different API shape this adapter does not speak.`;
 }
 
 // Every id this endpoint returns, including embedding, image, audio and

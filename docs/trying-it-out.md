@@ -335,3 +335,34 @@ Ein Modellserver auf diesem Rechner braucht keinen Schlüssel: bei einer
 Loopback-`baseUrl` verlangt der OpenAI-kompatible Adapter keinen. Erreicht ein
 Modell Ihr Konto nicht, antwortet die API selbst — und der Fehler wiederholt,
 was sie gesagt hat, statt nur „(404)".
+
+### Wenn ein Reasoning-Modell die Tools ablehnt
+
+Manche neueren OpenAI-Modelle setzen von sich aus ein `reasoning_effort` — und
+genau diese Voreinstellung lehnt der Server zusammen mit Function-Tools auf
+`/v1/chat/completions` ab:
+
+```
+Provider request failed (400): Function tools with reasoning_effort are not
+supported for gpt-5.6-luna in /v1/chat/completions. To use function tools, use
+/v1/responses or set reasoning_effort to 'none'.
+```
+
+ETNPilot schickt selbst kein `reasoning_effort`, kann es aber setzen. Der
+Fehler nennt die Einstellung inzwischen mit:
+
+```bash
+etnpilot config set providers.openai.reasoningEffort none
+```
+
+Das bleibt lokal und wird nie committet. Es ist eine echte Entscheidung, keine
+Formalität: `none` schaltet das Reasoning dieses Modells ab. Der zweite Weg,
+den der Server nennt — `/v1/responses` — ist eine andere API-Form, die dieser
+Adapter nicht spricht; wer das Reasoning braucht, wählt bis dahin ein Modell,
+das Tools auf `/v1/chat/completions` erlaubt.
+
+Braucht Ihr Endpunkt noch andere Felder im Request, gibt es dafür
+`providers.<name>.requestBody` — eine Abbildung, die unverändert mitgeschickt
+wird. `model`, `messages`, `tools`, `tool_choice` und `stream` sind davon
+ausgenommen: das ist die Mechanik des Adapters, und eine Konfiguration, die sie
+überschreibt, wird beim Start abgelehnt statt mitten im Lauf.
