@@ -37,7 +37,6 @@ export function createTuiApp({
   let worktrees;
   let worktreesReadAt = 0;
   let merges;
-  const active = new Set();
   let messageTimer;
   let timer;
   let stopped = false;
@@ -59,7 +58,9 @@ export function createTuiApp({
     get receipt() { return receipt; },
     get worktrees() { return worktrees; },
     get merges() { return merges; },
-    get active() { return [...active]; },
+    // What is running is tracked in the shared state, because the page needs
+    // the same answer; this is a view of it, not a second copy.
+    get active() { return snapshot.active ?? []; },
 
     async refresh() {
       snapshot = await state.collect();
@@ -90,7 +91,7 @@ export function createTuiApp({
         receipt,
         worktrees,
         merges,
-        active: [...active],
+        active: snapshot.active ?? [],
         project: state.config?.git?.project ?? "",
       });
     },
@@ -205,7 +206,7 @@ export function createTuiApp({
       clearTimeout(messageTimer);
       // Quitting must not leave a run half-finished in a worktree nobody is
       // watching: each one is asked to stop, and its receipt records why.
-      for (const run of active) run.controller.abort();
+      state.stopRuns();
       input.off("data", onData);
       output.off?.("resize", app.paint);
       if (input.isTTY) {
@@ -412,29 +413,21 @@ export function createTuiApp({
       prompt = { ...prompt, error: "A run needs a task to work on." };
       return;
     }
-    const controller = new AbortController();
-    const run = { input: buffer.trim(), agent: agent.trim() || undefined, startedAt: now(), controller };
+    const task = buffer.trim();
     let started;
     try {
-      started = state.startRun({ input: run.input, agent: run.agent, signal: controller.signal });
+      started = state.startRun({ input: task, agent: agent.trim() || undefined });
     } catch (error) {
       prompt = { ...prompt, error: error.message };
       return;
     }
     prompt = undefined;
-    active.add(run);
-    note(`Started: ${run.input}. Its approvals will appear here.`);
+    note(`Started: ${task}. Its approvals will appear here.`);
     // The run proceeds while the screen keeps painting; it is not awaited, or
     // the interface would freeze exactly when it is needed to answer a request.
     void started.then(
-      (result) => {
-        active.delete(run);
-        note(`${shortId(result.runId, { kind: "run" })} ${result.summary?.status ?? result.status}.`);
-      },
-      (error) => {
-        active.delete(run);
-        note(`The run failed: ${error.message}`);
-      },
+      (result) => note(`${shortId(result.runId, { kind: "run" })} ${result.summary?.status ?? result.status}.`),
+      (error) => note(`The run failed: ${error.message}`),
     ).then(() => app.refresh()).then(app.paint, report);
     await app.refresh();
   }

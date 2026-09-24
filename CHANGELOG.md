@@ -6,6 +6,38 @@ pre-1.0, so breaking changes may appear in any release.
 
 ## [Unreleased]
 
+### Added — roadmap UI-1: the page does what the TUI does
+
+- The review page resumes queue jobs, opens a run's receipt (branch, sandbox,
+  merge rehearsal and its collisions, every approval with who decided it, and
+  the settings layers that were in effect), lists and changes settings against
+  the same layers as the CLI and the TUI, and starts runs whose approvals come
+  back to the same page.
+- `POST /api/runs/start` answers `202` rather than holding the request for the
+  whole run. What is running and what a run failed with are part of the state
+  the page polls (`active`, `recentRunErrors`), and closing the server stops
+  the runs it started.
+- Runs started from a surface are tracked in `project-state.js` rather than in
+  each surface, so the TUI and the page cannot disagree about what is running.
+- A refusal is an answer: `SettingsRefused` and the queue's and inbox's state
+  errors are `409` with `{ error, path, reason }`, unparsable YAML is `400`,
+  and a receipt name that is not this project's is refused before anything is
+  read.
+- The page also lists the worktrees and the project's merge requests, with the
+  same `removeIfClean` behaviour as the other surfaces.
+
+### Fixed — the page, from looking at it
+
+- A wide table no longer stretches the whole page: grid children are
+  `min-width: auto` by default, so one settings row dragged every section off
+  screen at both 1280px and 390px.
+- The settings list says when it is cut ("Showing 25 of 122") instead of
+  running to 122 rows, and long values are shortened with the whole value in
+  the tooltip.
+- The five-second poll holds still while a field has focus, so it no longer
+  throws away a half-typed reason, and it no longer overwrites the answer to
+  something you just did.
+
 ### Added — roadmap UI-2.3 and UI-2.5
 
 - The TUI shows the worktrees (`5`): which branch each holds, which ones a run

@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { createReviewServer } from "../src/ui/server.js";
 import { ApprovalInbox } from "../src/core/approval-inbox.js";
 import { JsonlReceiptStore } from "../src/core/receipt-store.js";
+import { WorkflowQueue } from "../src/workflow/queue.js";
 
 test("the review UI serves state and records decisions", async () => {
   const root = await createProject();
@@ -111,8 +112,129 @@ async function createProject() {
     type: "agent",
     runId: "run-9",
     status: "succeeded",
-    approvals: [{ operationKind: "write", decision: "approve-once", at: new Date().toISOString() }],
+    approvals: [{
+      operationKind: "write",
+      decision: "approve-once",
+      at: new Date().toISOString(),
+      evidence: { decidedBy: "ui:maintainer" },
+    }],
   });
-  await store.append({ type: "workflow", terminal: true, runId: "run-9", status: "succeeded", durationMs: 1200 });
+  await store.append({
+    type: "workflow",
+    terminal: true,
+    runId: "run-9",
+    status: "succeeded",
+    durationMs: 1200,
+    workspace: { branch: "etnpilot/run-9", sandbox: { image: "node:24-bookworm-slim" } },
+    git: { mergeRehearsal: { clean: true, targetBranch: "main" } },
+    settings: { layers: [{ source: "project" }, { source: "user-local" }], overrides: ["queue.workers"] },
+  });
   return root;
+}
+
+test("a failed queue job is resumed from the page, and an unknown one is a conflict", async () => {
+  const root = await createProject();
+  const queue = new WorkflowQueue(join(root, ".etnpilot", "state", "workflows.sqlite"));
+  const { job } = queue.enqueue({ kind: "gitlab-issue", payload: { issue: 7 }, maxAttempts: 1 });
+  const claimed = queue.claim("worker-1");
+  queue.fail(claimed.id, "worker-1", new Error("checks failed"));
+  assert.equal(queue.get(job.id).status, "failed");
+  queue.close();
+
+  const review = await createReviewServer({ root });
+  try {
+    const call = await caller(review);
+    const resumed = await (await call("/api/queue/resume", { method: "POST", body: JSON.stringify({ id: job.id }) })).json();
+    assert.equal(resumed.status, "queued");
+    assert.equal(resumed.attempts, 0);
+    assert.equal(review.queue.get(job.id).status, "queued");
+
+    // A job that cannot be resumed, and one that does not exist, are both
+    // answered as conflicts rather than as a server fault.
+    const again = await call("/api/queue/resume", { method: "POST", body: JSON.stringify({ id: job.id }) });
+    assert.equal(again.status, 409);
+    const unknown = await call("/api/queue/resume", { method: "POST", body: JSON.stringify({ id: "nope" }) });
+    assert.equal(unknown.status, 409);
+    assert.match((await unknown.json()).error, /Unknown workflow job/);
+    assert.equal((await call("/api/queue/resume", { method: "POST", body: JSON.stringify({}) })).status, 400);
+  } finally {
+    await review.close();
+  }
+});
+
+test("a run's receipt is served in full, and only from this project's runs", async () => {
+  const root = await createProject();
+  const review = await createReviewServer({ root });
+  try {
+    const call = await caller(review);
+    const state = await (await call("/api/state")).json();
+    const file = state.runs[0].receiptFile;
+
+    const receipt = await (await call(`/api/runs/${encodeURIComponent(file)}`)).json();
+    assert.equal(receipt.file, file);
+    assert.equal(receipt.entries.length, 2);
+    assert.equal(receipt.terminal.status, "succeeded");
+    // The evidence a reviewer came for: the branch, the rehearsal, who decided
+    // an approval, and which settings were in effect.
+    assert.equal(receipt.terminal.workspace.branch, "etnpilot/run-9");
+    assert.deepEqual(receipt.terminal.settings.overrides, ["queue.workers"]);
+    assert.equal(receipt.entries[0].approvals[0].evidence.decidedBy, "ui:maintainer");
+
+    // A name that is not a receipt file in this project never reaches the
+    // disk. An escape written plainly is resolved away by URL parsing before
+    // any route sees it, so it is refused as 404; one that survives parsing is
+    // refused by readReceipt as 400. Either way nothing outside is read.
+    assert.equal((await call("/api/runs/../../etc/passwd")).status, 404);
+    for (const bad of ["..%2F..%2Fetc%2Fpasswd", "notes.txt", "runs%2F..%2F..%2Fetc%2Fpasswd"]) {
+      const response = await call(`/api/runs/${bad}`);
+      assert.equal(response.status, 400, bad);
+    }
+    assert.equal((await call("/api/runs/20200101000000-absent.jsonl")).status, 404);
+  } finally {
+    await review.close();
+  }
+});
+
+test("the page's own script parses, and every section it promises is there", async () => {
+  const { renderReviewPage } = await import("../src/ui/page.js");
+  const html = renderReviewPage("t0ken");
+  for (const section of ["Start a run", "Pending approvals", "Workflow queue", "Runs", "Worktrees", "Merge requests", "Settings"]) {
+    assert.match(html, new RegExp(section));
+  }
+  // A page whose script does not parse shows nothing at all, and no test that
+  // only reads the markup would notice.
+  const script = html.slice(html.indexOf("<script>") + "<script>".length, html.lastIndexOf("</script>"));
+  assert.doesNotThrow(() => new Function(script), "the inline script must parse");
+  // It still loads nothing from anywhere.
+  assert.doesNotMatch(html, /https?:\/\/(?!127\.0\.0\.1)/);
+});
+
+test("the worktrees and the merge requests are on the page too", async () => {
+  const root = await createProject();
+  const review = await createReviewServer({ root });
+  try {
+    const call = await caller(review);
+    // The fixture project is not a git checkout, so the answer says that
+    // rather than looking like a project with no worktrees.
+    const worktrees = await (await call("/api/worktrees")).json();
+    assert.equal(worktrees.available, false);
+    assert.match(worktrees.error, /not a git repository/);
+    assert.equal((await call("/api/worktrees/remove", { method: "POST", body: JSON.stringify({ name: "../escape" }) })).status, 400);
+
+    const merges = await (await call("/api/merges")).json();
+    assert.equal(merges.configured, false);
+    assert.match(merges.reason, /git\.project/);
+  } finally {
+    await review.close();
+  }
+});
+
+// One authenticated caller, since every test needs the same two headers.
+async function caller(review) {
+  const address = await review.listen({ port: 0 });
+  const base = `http://127.0.0.1:${address.port}`;
+  return (path, options = {}) => fetch(base + path, {
+    ...options,
+    headers: { "x-etnpilot-token": review.token, ...(options.body ? { "content-type": "application/json" } : {}) },
+  });
 }

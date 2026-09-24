@@ -35,67 +35,75 @@ Lesepfad, keine zweite Wahrheit.
 | Fähigkeit | CLI | TUI | Web | App |
 | --- | :-: | :-: | :-: | :-: |
 | Approvals listen und entscheiden | ✅ | ✅ | ✅ | — |
-| Approval im Volltext + auslösende Regel | ✅ | ✅ | teilw. | — |
+| Approval im Volltext + auslösende Regel | ✅ | ✅ | ✅ | — |
 | Queue listen / abbrechen | ✅ | ✅ | ✅ | — |
-| Queue fortsetzen (`resume`) | ✅ | ✅ | ✗ | — |
+| Queue fortsetzen (`resume`) | ✅ | ✅ | ✅ | — |
 | Runs listen | ✗ | ✅ | ✅ | — |
-| Receipt eines Runs im Detail | teilw. | ✅ | ✗ | — |
-| Run starten | ✅ | ✅ | ✗ | — |
-| Settings listen / diff | ✅ | ✅ | ✗ | — |
-| Settings ändern (lokal/global) | ✅ | ✅ | ✗ | — |
+| Receipt eines Runs im Detail | teilw. | ✅ | ✅ | — |
+| Run starten | ✅ | ✅ | ✅ | — |
+| Settings listen / diff | ✅ | ✅ | ✅ | — |
+| Settings ändern (lokal/global) | ✅ | ✅ | ✅ | — |
 | `policy check` | ✅ | ✗ | ✗ | — |
 | `receipt verify`, `replay`, `attest` | ✅ | ✗ | ✗ | — |
 | `deps check`, `sbom`, `scan secrets` | ✅ | ✗ | ✗ | — |
 | `graph *`, `content lock/verify` | ✅ | ✗ | ✗ | — |
 | `doctor`, `telemetry summary` | ✅ | ✗ | ✗ | — |
 | `init` | ✅ | ✗ | ✗ | — |
-| Worktrees listen, mit ungespeicherter Arbeit | ✅ | ✅ | ✗ | — |
-| Worktree entfernen (nur wenn sauber) | ✅ | ✅ | ✗ | — |
-| Eigene Merge Requests listen | ✅ | ✅ | ✗ | — |
+| Worktrees listen, mit ungespeicherter Arbeit | ✅ | ✅ | ✅ | — |
+| Worktree entfernen (nur wenn sauber) | ✅ | ✅ | ✅ | — |
+| Eigene Merge Requests listen | ✅ | ✅ | ✅ | — |
 
 Die App existiert als Code **gar nicht** — nur als Artboards im Design-Canvas
 (`https://claude.ai/artifact/Rr65iXmq1fgRSZMKMwD1YH`).
 
 ---
 
-## UI-1 — Web auf TUI-Niveau
+## UI-1 — Web auf TUI-Niveau — erledigt
 
-Die größte Lücke. Reihenfolge einhalten: jeder Schritt ist für sich
-abschließbar und testbar.
+War die größte Lücke. Die Seite kann jetzt, was die TUI kann; jeder Schritt hat
+Tests in `test/ui.test.js`, `test/ui-settings.test.js` und `test/ui-run.test.js`.
 
-### UI-1.1 Queue fortsetzen
-- `src/ui/server.js`: `POST /api/queue/resume`, Body `{ id, force? }` → `state.resumeJob(id, { force })`.
-- `src/ui/page.js`: Knopf „Resume" in der Queue-Zeile, sichtbar nur bei `failed` / `orphaned`.
-- **Fertig wenn:** `test/ui.test.js` zeigt, dass ein `failed` Job wieder `pending` ist und ein unbekannter Job 409 statt 500 liefert.
+**UI-1.1 Queue fortsetzen.** `POST /api/queue/resume` mit `{ id, force? }`.
+Cancel und Resume stehen nur an Jobs, die die Queue auch annimmt — Resume also
+an `failed`, `canceled`, `orphaned`, und bei `orphaned` als „Resume anyway",
+weil das wie `--force` eine zweite, ausdrückliche Entscheidung ist. Ein Job im
+falschen Zustand und ein unbekannter Job sind 409, kein 500.
 
-### UI-1.2 Receipt eines Runs
-- `src/ui/server.js`: `GET /api/runs/:file` → `state.readReceipt(file)`. **Den Dateinamen nicht selbst prüfen** — `readReceipt` weist alles ab, was kein `*.jsonl` ohne Pfadtrenner ist.
-- `src/ui/page.js`: Klick auf eine Run-Zeile öffnet ein Panel mit Branch, Sandbox, Merge-Rehearsal samt Konflikten, Approvals mit Entscheider, `settings.layers` / `settings.overrides`, Receipt-Datei, Signaturstatus.
-- **Fertig wenn:** `test/ui.test.js` prüft `../../etc/passwd` → 400, und dass `settings.overrides` im Panel steht.
+**UI-1.2 Receipt eines Runs.** `GET /api/runs/:file`; der Dateiname wird hier
+nicht geprüft, das macht `readReceipt`. Ein Klick auf eine Run-Zeile öffnet
+Branch, Sandbox, Merge-Rehearsal samt Kollisionen aus dem Merge-Train,
+Approvals mit Entscheider, `settings.layers` und `overrides`, Datei und
+Signaturstatus. Ein Name mit Pfadtrenner ist 400, ein Weg, den schon die
+URL-Auflösung wegkürzt, 404 — beides, bevor irgendetwas gelesen wird.
 
-### UI-1.3 Settings-Seite
-- `src/ui/server.js`: `GET /api/settings` → `describeSettings`; `POST /api/settings/set` `{ path, value, scope }`; `POST /api/settings/unset` `{ path, scope }`.
-- `SettingsRefused` → **HTTP 409** mit `{ error, path, reason }`, nie 500.
-- `src/ui/page.js`: vierter Abschnitt „Settings". Pro Zeile Pfad, Wert, Herkunft (`committed` / `local` / `global`), Modus. `locked` ist nicht editierbar und sagt warum. Eingabe ist YAML, wie in CLI und TUI.
-- Umschalter lokal ↔ global, Filterfeld, „nur geänderte".
-- Abgelehnte lokale Settings (`describeSettings().refusals`) **über** der Liste anzeigen, mit dem Satz, dass ein Run damit nicht startet.
-- **Fertig wenn:** `test/ui-settings.test.js` deckt ab: offen ändern, `stricter-only` verengen, Verweiterung → 409, `locked` → 409, `unset` → Default, `refusals` erscheinen im `/api/settings`-Body.
+**UI-1.3 Settings-Seite.** `GET /api/settings`, `POST /api/settings/set|unset`.
+`SettingsRefused` ist **409** mit `{ error, path, reason }`, nie 500; die
+Ablehnung erscheint im Editor, wo die Änderung gemacht wurde, und die Eingabe
+bleibt stehen. Kaputtes YAML ist 400. `locked` öffnet gar nicht erst und sagt
+warum. Filter, Umschalter lokal ↔ global, „nur geänderte", und die abgelehnten
+lokalen Settings über der Liste, mit dem Satz, dass ein Run damit nicht startet.
 
-### UI-1.4 Run starten
-- `src/ui/server.js`: `POST /api/runs/start` `{ task, agent? }` → `state.startRun(...)`. **Nicht auf den Run warten** — sofort `202` mit `{ started: true, task }` antworten, das Promise im Serverprozess halten und Fehler in einen Puffer schreiben, den `/api/state` mitliefert (`activeRuns`, `recentRunErrors`).
-- `openProjectState` bekommt dafür eine Liste laufender Runs; `collect()` gibt sie als `active: [{ task, startedAt }]` zurück (die TUI hält das heute selbst in `src/tui/app.js` — beim Umzug dort entfernen, nicht doppeln).
-- Beim Schließen des Servers jeden laufenden Run abbrechen, wie `app.stop()` es tut.
-- **Fertig wenn:** `test/ui.test.js` startet einen Run mit Stub-Provider, sieht dessen Approval über `/api/state`, entscheidet es über `/api/approvals/decide`, und der Run endet `succeeded`.
+**UI-1.4 Run starten.** `POST /api/runs/start` antwortet sofort mit `202`; der
+Run wird nicht abgewartet. Das Tracking liegt jetzt in `project-state.js` statt
+doppelt in der TUI: `collect()` liefert `active` und `recentRunErrors`, und wer
+die Oberfläche schließt, bricht ab, was sie gestartet hat — die TUI über
+`app.stop()`, der Server über `close()`, beide über `state.stopRuns()`.
 
-### UI-1.5 Die Seite ansehen
-- Chromium-Screenshot bei 1280px **und** 390px, beide Farbschemata.
-- **Fertig wenn:** jeder Knopf, den die Seite zeigt, etwas tut; keine Zahl widerspricht den Zeilen darunter; nichts wird ohne Hinweis abgeschnitten.
+**UI-1.5 Die Seite ansehen.** Chromium bei 1280px und 390px, beide
+Farbschemata. Drei Dinge, die kein Test zeigte: eine breite Tabelle zog die
+Seite auf 2537px auseinander (Grid-Kinder sind `min-width: auto`), die
+Settings-Liste war 122 Zeilen lang, und der 5-Sekunden-Poll überschrieb die
+Rückmeldung einer Änderung. Jetzt: `overflow 0px` in allen vier Kombinationen,
+eine Liste, die sagt „Showing 25 of 122", und ein Poll, der stillhält, solange
+ein Feld den Fokus hat. Jeder Knopf wurde im Browser gedrückt: entscheiden,
+abbrechen, fortsetzen, Worktree entfernen, Setting speichern und ablehnen
+lassen, Run starten.
 
 ---
 
 ## UI-2 — TUI: die restlichen Befehle
 
-Neue Ansicht `tools` (Taste `5`), Liste von Prüfungen, `enter` führt aus,
+Neue Ansicht `tools` (Taste `7`), Liste von Prüfungen, `enter` führt aus,
 Ergebnis im Panel. Alles bereits vorhandene Funktionen, nur ohne CLI.
 
 ### UI-2.1 Prüfungen

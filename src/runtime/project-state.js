@@ -31,13 +31,23 @@ export async function openProjectState({ root = process.cwd(), env = process.env
   const runsDirectory = join(projectRoot, ".etnpilot", "state", "runs");
 
   let current = config;
+  // Runs started from a surface are tracked here rather than in each surface:
+  // the TUI and the page both need to say what is running, and closing either
+  // one must stop what it started rather than stranding it.
+  const running = new Set();
+  const runErrors = [];
   return {
     root: projectRoot,
     get config() { return current; },
     inbox,
     queue,
     runsDirectory,
-    collect: (options) => collectState({ inbox, queue, runsDirectory, root: projectRoot, env }, options),
+    collect: (options) => collectState(
+      { inbox, queue, runsDirectory, root: projectRoot, env, running, runErrors },
+      options,
+    ),
+    settings: () => describeSettings({ root: projectRoot, env }),
+    get active() { return [...running].map(presentRun); },
     decide: (id, decision, options) => inbox.decide(id, decision, options),
     cancelJob: (id, options) => queue.requestCancel(id, options),
     resumeJob: (id, options) => queue.resume(id, options),
@@ -50,21 +60,50 @@ export async function openProjectState({ root = process.cwd(), env = process.env
       if (inboxConfig.enabled === false) {
         throw new Error("approval.inbox.enabled is false, so a run started here would have nobody to ask.");
       }
-      return runProject({
+      const task = String(input).trim();
+      // The run owns a controller of its own, so 'stop everything' works even
+      // for a caller that passed no signal — a browser tab cannot pass one.
+      const controller = new AbortController();
+      if (signal) {
+        if (signal.aborted) controller.abort();
+        else signal.addEventListener("abort", () => controller.abort(), { once: true });
+      }
+      const record = { task, agent, startedAt: new Date().toISOString(), controller };
+      const started = runProject({
         root: projectRoot,
         env,
-        input: String(input).trim(),
+        input: task,
         agent,
-        signal,
+        signal: controller.signal,
         dryRun,
         providerFactories,
         approvalHandler: createInboxApprovalHandler({
           inbox,
           timeoutMs: inboxConfig.timeoutMs ?? 24 * 60 * 60_000,
           pollIntervalMs: inboxConfig.pollIntervalMs ?? 500,
-          signal,
+          signal: controller.signal,
         }),
       });
+      running.add(record);
+      // A surface that does not await the run — the page answers 202 and moves
+      // on — must still learn that it failed, so the reason is kept here.
+      started.then(
+        () => running.delete(record),
+        (error) => {
+          running.delete(record);
+          runErrors.unshift({ task, at: new Date().toISOString(), error: error.message });
+          runErrors.length = Math.min(runErrors.length, 5);
+        },
+      );
+      return started;
+    },
+    // Whoever closes the surface stops what that surface started; a run left
+    // working in a worktree nobody watches is worse than one that says why it
+    // stopped, which its receipt records.
+    stopRuns() {
+      const stopped = [...running].map(presentRun);
+      for (const record of running) record.controller.abort();
+      return stopped;
     },
     // Receipts are read on demand rather than in every poll: a detail view is
     // opened now and then, and the files grow with the run.
@@ -88,16 +127,24 @@ export async function openProjectState({ root = process.cwd(), env = process.env
       return { ...result, restartRequired: HELD_OPEN.includes(path) };
     },
     close() {
+      for (const record of running) record.controller.abort();
       inbox.close();
       queue.close();
     },
   };
 }
 
-export async function collectState({ inbox, queue, runsDirectory, root, env }, { runLimit = 20 } = {}) {
+export async function collectState(
+  { inbox, queue, runsDirectory, root, env, running = new Set(), runErrors = [] },
+  { runLimit = 20 } = {},
+) {
   return {
     generatedAt: new Date().toISOString(),
     settings: root ? await describeSettings({ root, env }).catch(settingsUnreadable) : undefined,
+    // What this process started and has not finished, so a surface can say a
+    // run is working before it has produced a receipt to read.
+    active: [...running].map(presentRun),
+    recentRunErrors: [...runErrors],
     approvals: {
       pending: inbox.list({ status: "pending", limit: 50 }),
       recent: inbox.list({ status: "all", limit: 20 }),
@@ -105,6 +152,10 @@ export async function collectState({ inbox, queue, runsDirectory, root, env }, {
     queue: { counts: queue.counts(), jobs: queue.list({ status: "all", limit: 20 }) },
     runs: await readRuns(runsDirectory, { limit: runLimit }),
   };
+}
+
+function presentRun(record) {
+  return { task: record.task, agent: record.agent, startedAt: record.startedAt };
 }
 
 // A local settings file that the loader refuses must not black out the rest of

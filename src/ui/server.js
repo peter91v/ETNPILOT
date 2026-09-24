@@ -1,7 +1,9 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { ApprovalStateError } from "../core/approval-inbox.js";
+import { parseSettingValue, SettingsRefused } from "../config/settings.js";
 import { openProjectState } from "../runtime/project-state.js";
+import { WorkflowQueueStateError } from "../workflow/queue.js";
 import { renderReviewPage } from "./page.js";
 
 // A local review surface for the evidence ETNPilot already produces: pending
@@ -49,16 +51,80 @@ export async function createReviewServer({
           reason: body.reason ? String(body.reason) : undefined,
         }));
       }
+      if (request.method === "POST" && url.pathname === "/api/queue/resume") {
+        const body = await readJsonBody(request);
+        if (!body.id) throw badRequest("A workflow job id is required.");
+        return send(response, 200, state.resumeJob(String(body.id), { force: body.force === true }));
+      }
+      // Read on demand, never in the poll: one runs 'git status' per worktree,
+      // the other crosses the network to GitLab.
+      if (request.method === "GET" && url.pathname === "/api/worktrees") {
+        return send(response, 200, await state.worktrees());
+      }
+      if (request.method === "POST" && url.pathname === "/api/worktrees/remove") {
+        const body = await readJsonBody(request);
+        if (typeof body.name !== "string" || body.name.trim() === "") throw badRequest("A worktree name is required.");
+        const removal = await state.removeWorktree(body.name.trim()).catch((error) => {
+          throw error instanceof TypeError ? badRequest(error.message) : error;
+        });
+        return send(response, 200, removal);
+      }
+      if (request.method === "GET" && url.pathname === "/api/merges") {
+        const status = url.searchParams.get("status");
+        return send(response, 200, await state.mergeRequests(status ? { state: status } : undefined));
+      }
+      if (request.method === "GET" && url.pathname === "/api/settings") {
+        return send(response, 200, await state.settings());
+      }
+      if (request.method === "POST" && url.pathname === "/api/settings/set") {
+        const body = await readJsonBody(request);
+        if (typeof body.path !== "string" || body.path.trim() === "") throw badRequest("A setting path is required.");
+        // The value arrives as the YAML a person typed, exactly as in the CLI
+        // and the TUI, so '4', 'true' and '["read"]' mean what they look like.
+        let value;
+        try {
+          value = typeof body.value === "string" ? parseSettingValue(body.value) : body.value;
+        } catch (error) {
+          throw badRequest(`That is not valid YAML: ${error.message}`);
+        }
+        return send(response, 200, await state.setSetting(body.path.trim(), value, { scope: scopeName(body) }));
+      }
+      if (request.method === "POST" && url.pathname === "/api/settings/unset") {
+        const body = await readJsonBody(request);
+        if (typeof body.path !== "string" || body.path.trim() === "") throw badRequest("A setting path is required.");
+        return send(response, 200, await state.unsetSetting(body.path.trim(), { scope: scopeName(body) }));
+      }
+      // A run is not awaited: the answer says it started, and everything the
+      // run then needs appears in this same page's approvals.
+      if (request.method === "POST" && url.pathname === "/api/runs/start") {
+        const body = await readJsonBody(request);
+        const task = typeof body.task === "string" ? body.task.trim() : "";
+        if (task === "") throw badRequest("A run needs a task to work on.");
+        const agent = typeof body.agent === "string" && body.agent.trim() !== "" ? body.agent.trim() : undefined;
+        state.startRun({ input: task, agent });
+        return send(response, 202, { started: true, task, ...(agent ? { agent } : {}) });
+      }
+      // The file name is never inspected here: readReceipt refuses anything
+      // that is not a '*.jsonl' without a path separator, and one check in
+      // one place cannot drift from another.
+      if (request.method === "GET" && url.pathname.startsWith("/api/runs/")) {
+        const file = decodeURIComponent(url.pathname.slice("/api/runs/".length));
+        const receipt = await state.readReceipt(file).catch((error) => {
+          // A name readReceipt refuses is a bad request, not a server fault.
+          throw error instanceof TypeError ? badRequest(error.message) : error;
+        });
+        return send(response, 200, receipt);
+      }
       return send(response, 404, { error: "not-found" });
     } catch (error) {
-      const status = error.statusCode ?? (error instanceof ApprovalStateError ? 409 : 500);
-      return send(response, status, { error: error.message });
+      return send(response, statusFor(error), errorBody(error));
     }
   });
 
   return {
     server,
     token,
+    state,
     inbox,
     queue,
     listen({ host = "127.0.0.1", port = 8788 } = {}) {
@@ -78,11 +144,33 @@ export async function createReviewServer({
       });
     },
     async close() {
+      // Runs this server started are stopped before the databases they write
+      // to are closed, rather than being left working for nobody.
+      state.stopRuns();
       if (server.listening) {
         await new Promise((resolveClose, reject) => server.close((error) => (error ? reject(error) : resolveClose())));
       }
       state.close();
     },
+  };
+}
+
+// A refusal is an answer, not a crash: the state errors these modules raise
+// are conflicts and bad requests, and the page shows them where the action
+// was taken rather than as 'request failed (500)'.
+function statusFor(error) {
+  if (error.statusCode) return error.statusCode;
+  if (error instanceof ApprovalStateError || error instanceof WorkflowQueueStateError) return 409;
+  if (error instanceof SettingsRefused) return 409;
+  if (error.code === "ENOENT") return 404;
+  return 500;
+}
+
+function errorBody(error) {
+  return {
+    error: error.message,
+    ...(error.path ? { path: error.path } : {}),
+    ...(error.reason ? { reason: error.reason } : {}),
   };
 }
 
@@ -94,6 +182,12 @@ function decideApproval(inbox, body) {
     actor: actorName(body, process.env),
     reason: body.reason ? String(body.reason) : undefined,
   });
+}
+
+function scopeName(body) {
+  const scope = body.scope === undefined ? "local" : String(body.scope);
+  if (scope !== "local" && scope !== "global") throw badRequest("scope must be 'local' or 'global'.");
+  return scope;
 }
 
 function actorName(body, env) {

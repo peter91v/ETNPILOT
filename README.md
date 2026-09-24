@@ -467,9 +467,12 @@ etnpilot ui --root .
 # ETNPilot review UI: http://127.0.0.1:8788/?token=…
 ```
 
-Pending approvals with their full command, the workflow queue, and finished
-runs read from their receipts. It binds to localhost, requires the token it
-prints, and loads nothing from anywhere. See [docs/review-ui.md](docs/review-ui.md).
+The same things the terminal interface shows, in a browser: approvals with
+their full command and the rule that stopped them, the queue with cancel and
+resume, a run's sealed receipt, the worktrees, the project's merge requests,
+the settings with their layers, and a box to start a run whose approvals come
+back to the same page. It binds to localhost, requires the token it prints, and
+loads nothing from anywhere. See [docs/review-ui.md](docs/review-ui.md).
 
 ## Sandboxed execution
 
