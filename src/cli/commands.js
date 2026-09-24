@@ -26,7 +26,7 @@ import { createGitLabWebhookServer } from "../gitlab/webhook-server.js";
 import { openInBrowser } from "../ui/open-browser.js";
 import { createReviewServer } from "../ui/server.js";
 import { createTuiApp } from "../tui/app.js";
-import { openProjectState, readMergeRequests, readWorktrees } from "../runtime/project-state.js";
+import { agentRawResponses, openProjectState, readMergeRequests, readWorktrees } from "../runtime/project-state.js";
 import { runProject } from "../runtime/project-runner.js";
 import { replayRun } from "../runtime/replay.js";
 import { WorkflowQueue } from "../workflow/queue.js";
@@ -77,6 +77,7 @@ export const CLI_OPTIONS = Object.freeze({
   global: { type: "boolean", default: false },
   changed: { type: "boolean", default: false },
   "record-fixtures": { type: "string" },
+  raw: { type: "boolean", default: false },
   fixtures: { type: "string" },
 });
 
@@ -116,7 +117,7 @@ Usage:
   etnpilot queue resume <id> [--force]
   etnpilot queue cancel <id> [--actor name] [--reason text]
   etnpilot receipt keygen [--private-key path] [--public-key path]
-  etnpilot receipt show [file] [--root directory]
+  etnpilot receipt show [file] [--root directory] [--raw]
   etnpilot receipt verify <file> [--public-key path]
     [--require-signatures | --allow-unsigned] [--require-terminal | --allow-incomplete]
   etnpilot secret check <name> [--root directory]
@@ -443,6 +444,10 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
         ...(outcome.rehearsal ? { mergeRehearsal: outcome.rehearsal } : {}),
         ...(outcome.usage ? { usage: outcome.usage } : {}),
         ...(outcome.cleanup ? { cleanup: outcome.cleanup } : {}),
+        // The provider's own response body, exactly as it arrived — not shown
+        // by default, because it is one payload per call and belongs to
+        // whoever asked for it by name with '--raw'.
+        ...(values.raw ? { raw: agentRawResponses(receipt) } : {}),
       }, null, 2));
       return receipt.outcome.status === "succeeded" ? 0 : 1;
     } finally {

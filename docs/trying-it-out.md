@@ -176,6 +176,19 @@ unter „Agents"; im Terminal `a` zum Auswählen, `Enter` öffnet die volle
 Antwort eines Agenten; auf der Kommandozeile steht derselbe Baum ungekürzt
 unter `agents` im JSON von `receipt show`.
 
+Und was der Provider **wörtlich** zurückgegeben hat — der ganze Antwort-Body,
+inklusive des exakten, oft datierten Modellnamens (`gpt-5-mini-2025-08-07`
+statt nur `gpt-5-mini`):
+
+```bash
+etnpilot receipt show --raw
+```
+
+Ohne `--raw` bleibt das weg, weil es pro Aufruf ein ganzer JSON-Block ist.
+Das ist auch der zuverlässigste Weg zu sehen, welches Modell ein Aufruf
+wirklich getroffen hat — nützlich genau dort, wo `observability.pricing`
+„not priced" meldet und der Modellname der Grund ist.
+
 ## Was danach im Receipt steht
 
 ```

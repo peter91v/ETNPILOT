@@ -376,3 +376,47 @@ test("the agents that ran are read back as a tree, not a flat list of lines", as
   const shown = JSON.parse(printed.at(-1));
   assert.equal(shown.agents[1].children[0].agent, "linter");
 });
+
+test("'--raw' shows the provider's own response body; without it, it stays off screen", async () => {
+  // Asked directly: what are the commands to see what OpenAI actually sent
+  // back. The full response was already in the receipt — every provider's
+  // invoke() returns 'raw', and the harness writes the whole result verbatim
+  // — just never read back by any command.
+  const { runCli } = await import("../src/cli/commands.js");
+  const { initializeProject } = await import("../src/config/init.js");
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-raw-cli-"));
+  await initializeProject(root);
+  const runsDir = join(root, ".etnpilot", "state", "runs");
+  await mkdir(runsDir, { recursive: true });
+  await writeFile(join(runsDir, "20260101000006-aaaa.jsonl"), [
+    JSON.stringify({
+      runId: "agent-1", agent: "orchestrator", provider: "openai", status: "succeeded",
+      result: {
+        text: "ok",
+        raw: { model: "gpt-5-mini-2025-08-07", choices: [{ message: { content: "ok" } }], usage: { prompt_tokens: 10 } },
+      },
+    }),
+    JSON.stringify({
+      type: "workflow", terminal: true, runId: "20260101000006-aaaa", status: "succeeded",
+      summary: { status: "succeeded", steps: {} },
+    }),
+  ].join("\n") + "\n", "utf8");
+
+  const printed = [];
+  const log = console.log;
+  console.log = (line) => printed.push(line);
+  try {
+    await runCli(["receipt", "show", "20260101000006-aaaa.jsonl"], { root });
+    assert.equal("raw" in JSON.parse(printed.at(-1)), false, "off by default");
+
+    await runCli(["receipt", "show", "20260101000006-aaaa.jsonl"], { root, raw: true });
+    const shown = JSON.parse(printed.at(-1));
+    assert.equal(shown.raw[0].agent, "orchestrator");
+    // The exact, undated model name the provider actually served — the whole
+    // point of asking for it.
+    assert.equal(shown.raw[0].model, "gpt-5-mini-2025-08-07");
+    assert.equal(shown.raw[0].raw.choices[0].message.content, "ok");
+  } finally {
+    console.log = log;
+  }
+});

@@ -482,6 +482,26 @@ function agentNode(entry) {
   };
 }
 
+// What the provider actually sent back, per agent invocation, exactly as it
+// arrived — 'raw' is what each provider's invoke() already returns and the
+// receipt already stores; this only reads it back rather than adding a new
+// place to look. Kept out of agentTree(): the page and the terminal render
+// that tree on every screen a run has, and a full API payload does not
+// belong on a phone by default. This is for the one command that asks for it.
+export function agentRawResponses(receipt) {
+  return (receipt?.entries ?? [])
+    .filter((entry) => typeof entry.agent === "string" && entry.result?.raw !== undefined)
+    .map((entry) => ({
+      runId: entry.runId,
+      agent: entry.agent,
+      ...(entry.workflowStep ? { workflowStep: entry.workflowStep } : {}),
+      ...(entry.parentRunId ? { parentRunId: entry.parentRunId } : {}),
+      provider: entry.provider,
+      model: entry.result.raw?.model ?? entry.result.model,
+      raw: entry.result.raw,
+    }));
+}
+
 function publicationReason(publication) {
   if (publication.reason === "workflow-not-succeeded") return "not published: the workflow did not succeed";
   if (publication.reason === "merge-conflict") {
