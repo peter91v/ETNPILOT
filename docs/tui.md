@@ -64,8 +64,22 @@ and what removing one would throw away.
   run-9f2a1c44      etnpilot/run-9f2a1c44   3c278aed  a run     clean
 ```
 
-`enter` lists what a worktree is holding, file by file, each marked as a
-person's work or as state ETNPilot wrote itself. `x` removes the one under the
+`enter` lists what a worktree is holding, file by file, with the lines each
+one added and deleted and whether it is a person's work or state ETNPilot
+wrote itself. `enter` again shows that file's diff, with the number every line
+has on its own side:
+
+```
+src.js +5 −1 in 1 place
+            @@ -1,5 +1,9 @@
+    1     1  export function total(rows) {
+          2 +  // Skip the rows a run has already counted.
+    2     3    let sum = 0;
+    3       −  for (const row of rows) sum += row.value;
+```
+
+`esc` steps back one level: from the diff to the files, then out of the
+worktree. `x` removes the one under the
 cursor through the same `removeIfClean` the CLI uses, which is the point: a
 worktree holding unsaved work is **not** removed, and the screen says what it
 is keeping.

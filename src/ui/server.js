@@ -78,6 +78,15 @@ export async function createReviewServer({
         });
         return send(response, 200, changes);
       }
+      if (request.method === "GET" && url.pathname === "/api/worktrees/diff") {
+        const name = url.searchParams.get("name");
+        const file = url.searchParams.get("file");
+        if (!name || !file) throw badRequest("A worktree name and a file are required.");
+        const diff = await state.worktreeDiff(name, file).catch((error) => {
+          throw error instanceof TypeError ? badRequest(error.message) : error;
+        });
+        return send(response, 200, diff);
+      }
       if (request.method === "GET" && url.pathname === "/api/usage") {
         return send(response, 200, await state.usage());
       }

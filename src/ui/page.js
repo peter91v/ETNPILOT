@@ -111,7 +111,7 @@ export function renderReviewPage(token) {
     background: var(--bg); border-bottom: 1px solid var(--line);
   }
   .narrow-only { display: none; }
-  .menu-button { display: none; }
+  .topbar .menu-button { display: none; }
   .context { min-width: 0; }
   .eyebrow { margin: 0 0 3px; color: var(--muted); font: 10px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
   .context-title { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 750; }
@@ -221,6 +221,18 @@ export function renderReviewPage(token) {
 
   /* Tables ------------------------------------------------------------ */
   .scroll { overflow-x: auto; max-width: 100%; }
+  /* A diff reads as lines, each with the number it has on its own side. */
+  .diff { min-width: max-content; font: 12px/1.6 var(--mono); }
+  .diff-line { display: grid; grid-template-columns: 52px 52px 1fr; }
+  .diff-gutter { padding: 0 8px; text-align: right; color: var(--muted); user-select: none; }
+  .diff-text { padding: 0 10px; white-space: pre; }
+  .diff-line.add { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  .diff-line.add .diff-text { color: var(--accent-strong); }
+  .diff-line.remove { background: color-mix(in srgb, var(--red) 10%, transparent); }
+  .diff-line.remove .diff-text { color: var(--red); }
+  .diff-line.hunk { background: var(--surface-0); }
+  .diff-line.hunk .diff-text { color: var(--muted); }
+  @media (prefers-color-scheme: dark) { .diff-line.add .diff-text { color: var(--accent); } }
   table { width: 100%; border-collapse: collapse; }
   th {
     padding: 10px 12px; color: var(--muted); background: var(--surface-0); border-bottom: 1px solid var(--line);
@@ -277,7 +289,7 @@ export function renderReviewPage(token) {
     }
     .scrim.open { visibility: visible; opacity: 1; }
     .main { grid-column: auto; }
-    .menu-button { display: inline-flex; }
+    .topbar .menu-button { display: inline-flex; }
     .content { padding: 16px; }
     .pair { grid-template-columns: 1fr; gap: 2px; }
     .pair dd { margin-bottom: 8px; }
@@ -418,6 +430,7 @@ const $ = (id) => document.getElementById(id);
 let state;
 let worktrees;
 let worktreeChanges;
+let worktreeDiff;
 let merges;
 let usage;
 let openRun;
@@ -1125,6 +1138,7 @@ async function loadWorktrees({ notify = false } = {}) {
     worktrees = await api("/api/worktrees");
     if (worktreeChanges && !(worktrees.entries ?? []).some((entry) => entry.name === worktreeChanges.name)) {
       worktreeChanges = undefined;
+      worktreeDiff = undefined;
     }
     clearError();
     if (notify) toast("The worktrees were read again.");
@@ -1165,12 +1179,14 @@ function renderWorktrees() {
     ], entries, "No worktrees are registered.", { selected: (entry) => entry.name === worktreeChanges?.name })],
   }));
   if (worktreeChanges) host.append(renderWorktreeChanges());
+  if (worktreeDiff) host.append(renderDiff());
 }
 
 function openChanges(entry) {
   return button(entry.name, { class: "btn link", onClick: async () => {
     try {
       worktreeChanges = { name: entry.name, ...await api("/api/worktrees/changes?name=" + encodeURIComponent(entry.name)) };
+      worktreeDiff = undefined;
       clearError();
       renderWorktrees();
     } catch (error) {
@@ -1190,12 +1206,13 @@ function renderWorktreeChanges() {
     body.push(el("p", { class: "empty", text: "Nothing changed here. Removing it throws nothing away." }));
   } else {
     body.push(table([
-      { label: "File", value: (change) => change.renamedFrom ? change.renamedFrom + " → " + change.path : change.path, mono: true },
+      { label: "File", value: (change) => openDiff(changes.name, change), mono: true },
       { label: "Change", value: (change) => ({ text: change.label, class: change.ignorable ? "muted" : "" }) },
+      { label: "Lines", value: (change) => lineCount(change) },
       { label: "Counts as", value: (change) => change.ignorable
         ? { text: "ETNPilot's own state", class: "muted" }
         : { text: "unsaved work", class: "warn" } },
-    ], changes.entries, "Nothing changed here."));
+    ], changes.entries, "Nothing changed here.", { selected: (change) => change.path === worktreeDiff?.file }));
     if (changes.truncated) {
       body.push(el("p", { class: "muted", text: "Showing " + changes.entries.length + " of " + changes.truncated + " changes." }));
     }
@@ -1203,8 +1220,82 @@ function renderWorktreeChanges() {
       ? "None of this is a person's work, so this worktree can be removed."
       : changes.blocking + (changes.blocking === 1 ? " change is" : " changes are") + " unsaved work; removing is refused while they are here." }));
   }
-  body.push(el("div", { class: "row" }, [button("Close", { onClick: () => { worktreeChanges = undefined; renderWorktrees(); } })]));
+  body.push(el("div", { class: "row" }, [button("Close", {
+    onClick: () => { worktreeChanges = undefined; worktreeDiff = undefined; renderWorktrees(); },
+  })]));
   return panel(changes.name, { meta: changes.branch ?? "", open: true, body });
+}
+
+// How much changed, per file. A rewrite and a one-character fix are the same
+// row without it.
+function lineCount(change) {
+  if (change.binary) return { text: "binary", class: "muted" };
+  if (change.large) return { text: "too large to count", class: "muted" };
+  if (change.directory) return { text: "a directory", class: "muted" };
+  if (change.added === undefined && change.deleted === undefined) return { text: "—", class: "muted" };
+  const node = el("span", { class: "mono" });
+  if (change.added) node.append(el("span", { class: "ok", text: "+" + change.added }));
+  if (change.added && change.deleted) node.append(el("span", { text: " " }));
+  if (change.deleted) node.append(el("span", { class: "bad", text: "−" + change.deleted }));
+  if (!change.added && !change.deleted) node.append(el("span", { class: "muted", text: "no lines" }));
+  return node;
+}
+
+function openDiff(name, change) {
+  const label = change.renamedFrom ? change.renamedFrom + " → " + change.path : change.path;
+  if (change.binary || change.large || change.directory) return el("span", { class: "mono", text: label });
+  return button(label, { class: "btn link value", title: "show what changed in this file", onClick: async () => {
+    try {
+      worktreeDiff = await api("/api/worktrees/diff?name=" + encodeURIComponent(name) + "&file=" + encodeURIComponent(change.path));
+      clearError();
+      renderWorktrees();
+      $("view-worktrees").querySelectorAll(".panel.open")[1]?.scrollIntoView({ block: "nearest" });
+    } catch (error) {
+      fail(error);
+    }
+  } });
+}
+
+// The lines themselves, with the number each one has on its own side.
+function renderDiff() {
+  const diff = worktreeDiff;
+  const body = [];
+  if (diff.reason) {
+    body.push(el("p", { class: "muted", text: "No diff: this file is " + diff.reason + "." }));
+  } else if (diff.lines.length === 0) {
+    body.push(el("p", { class: "empty", text: "git reports no textual change for this file." }));
+  } else {
+    const rows = el("div", { class: "diff" });
+    for (const line of diff.lines) {
+      if (line.kind === "hunk") {
+        rows.append(el("div", { class: "diff-line hunk" }, [
+          el("span", { class: "diff-gutter", text: "" }),
+          el("span", { class: "diff-gutter", text: "" }),
+          el("span", { class: "diff-text", text: line.text }),
+        ]));
+        continue;
+      }
+      const mark = line.kind === "add" ? "+" : line.kind === "remove" ? "−" : " ";
+      rows.append(el("div", { class: "diff-line " + line.kind }, [
+        el("span", { class: "diff-gutter", text: line.oldLine === undefined ? "" : String(line.oldLine) }),
+        el("span", { class: "diff-gutter", text: line.newLine === undefined ? "" : String(line.newLine) }),
+        el("span", { class: "diff-text", text: mark + line.text }),
+      ]));
+    }
+    body.push(el("div", { class: "scroll" }, [rows]));
+    if (diff.cut || diff.truncated) {
+      body.push(el("p", { class: "muted", text: "This diff is long; what is shown is cut. Read the rest with 'git diff'." }));
+    }
+  }
+  body.push(el("div", { class: "row" }, [button("Close", { onClick: () => { worktreeDiff = undefined; renderWorktrees(); } })]));
+  return panel(diff.file, {
+    meta: diff.reason
+      ? diff.reason
+      : "+" + (diff.added ?? 0) + " −" + (diff.deleted ?? 0)
+        + " in " + (diff.hunks ?? 0) + (diff.hunks === 1 ? " place" : " places"),
+    open: true,
+    body,
+  });
 }
 
 function worktreeState(entry) {

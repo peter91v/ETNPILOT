@@ -33,6 +33,7 @@ export function renderApp(state, options = {}) {
     merges,
     active = [],
   } = options;
+  const worktreeDiffOpen = Boolean(options.worktreeDiff);
   const style = createStyle({ color });
   // Typing happens on the bottom line, the way a terminal tool has always done
   // it, so whatever you were looking at stays on screen while you type.
@@ -45,7 +46,7 @@ export function renderApp(state, options = {}) {
 
   const context = {
     style, width, height: body, cursor, now, editor, filter, filtering, scope, receipt,
-    worktrees, changes: options.worktreeChanges, merges, active,
+    worktrees, changes: options.worktreeChanges, changeCursor: options.changeCursor, merges, active,
   };
   const rendered = help
     ? renderHelp({ style, width, height: body, offset: helpOffset })
@@ -54,7 +55,9 @@ export function renderApp(state, options = {}) {
       : detail && view === "runs"
         ? renderRunDetail(state, context)
         : detail && view === "worktrees"
-          ? renderWorktreeChanges(state, context)
+          ? (options.worktreeDiff
+              ? renderDiff(state, { ...context, diff: options.worktreeDiff, offset: options.diffOffset })
+              : renderWorktreeChanges(state, context))
           : renderView(view, state, context);
   for (const line of rendered.slice(0, body)) lines.push(truncate(line, width));
   while (lines.length < height - (input ? 2 : 1)) lines.push("");
@@ -62,7 +65,7 @@ export function renderApp(state, options = {}) {
     lines.push(truncate(input.bad ? style.bad(input.hint) : style.dim(input.hint), width));
     lines.push(inputLine(input, { style, width }));
   } else {
-    lines.push(footer({ style, width, view, detail, message, editor, prompt, help }));
+    lines.push(footer({ style, width, view, detail, message, editor, prompt, help, diff: worktreeDiffOpen }));
   }
   return lines.slice(0, height).map((line) => truncate(line, width));
 }
@@ -96,15 +99,15 @@ function header(state, { style, width, view, project, active = [] }) {
   return left + " ".repeat(gap) + right;
 }
 
-function footer({ style, width, view, detail, message, editor, prompt, help }) {
+function footer({ style, width, view, detail, message, editor, prompt, help, ...options }) {
   if (message) return truncate(style.warn(message), width);
-  const keys = footerKeys({ view, detail, editor, prompt, help });
+  const keys = footerKeys({ view, detail, editor, prompt, help, diff: options.diff });
   return truncate(keys.map(([key, label]) => `${style.accent(key)} ${style.dim(label)}`).join(style.dim("  ")), width);
 }
 
 // Whatever is on screen decides which keys the footer promises. A key it names
 // has to do something here, or the footer is teaching the wrong thing.
-function footerKeys({ view, detail, editor, prompt, help }) {
+function footerKeys({ view, detail, editor, prompt, help, diff }) {
   if (help) return [["↑↓", "scroll"], ["?", "close"], ["esc", "close"], ["q", "quit"]];
   if (prompt) return [["enter", "start"], ["tab", "agent"], ["esc", "cancel"], ["^u", "clear"]];
   if (editor) {
@@ -113,6 +116,10 @@ function footerKeys({ view, detail, editor, prompt, help }) {
       : [["enter", "save"], ["esc", "cancel"], ["^u", "clear"]];
   }
   if (detail && view === "runs") return [["esc", "back"], ["↑↓", "move"], ["n", "run"], ["q", "quit"]];
+  if (diff && view === "worktrees") return [["↑↓", "scroll"], ["esc", "back"], ["q", "quit"]];
+  if (detail && view === "worktrees") {
+    return [["↑↓", "move"], ["enter", "what changed"], ["esc", "back"], ["x", "remove if clean"], ["q", "quit"]];
+  }
   if (detail) return [["a", "approve"], ["r", "reject"], ["esc", "back"], ["q", "quit"]];
   if (view === "approvals") {
     return [["↑↓", "move"], ["enter", "open"], ["a", "approve"], ["r", "reject"], ["n", "run"], ["tab", "view"], ["q", "quit"]];
@@ -120,7 +127,6 @@ function footerKeys({ view, detail, editor, prompt, help }) {
   if (view === "queue") {
     return [["↑↓", "move"], ["c", "cancel"], ["R", "resume"], ["n", "run"], ["tab", "view"], ["q", "quit"]];
   }
-  if (detail && view === "worktrees") return [["esc", "back"], ["x", "remove if clean"], ["g", "reread"], ["q", "quit"]];
   if (view === "worktrees") {
     return [["↑↓", "move"], ["enter", "what it holds"], ["x", "remove if clean"], ["g", "reread"], ["tab", "view"], ["q", "quit"]];
   }
@@ -222,7 +228,7 @@ function renderQueue(state, { style, width, height, cursor, now }) {
 // changes physically are, so it is evidence as much as the receipt is.
 // The files a worktree is holding: a number is a claim, the list is the
 // evidence, and it is what removing the worktree would throw away.
-export function renderWorktreeChanges(state, { style, width, height, cursor, worktrees, changes }) {
+export function renderWorktreeChanges(state, { style, width, height, cursor, worktrees, changes, changeCursor = 0 }) {
   const entries = worktrees?.entries ?? [];
   const entry = entries[clamp(cursor, entries.length)];
   if (!entry) return [style.dim("No worktrees are registered.")];
@@ -238,9 +244,12 @@ export function renderWorktreeChanges(state, { style, width, height, cursor, wor
     return [...lines, style.ok("Nothing changed here. Removing it throws nothing away.")];
   }
   const room = Math.max(1, height - lines.length - 3);
-  for (const change of changes.entries.slice(0, room)) {
+  const selected = clamp(changeCursor, changes.entries.length);
+  for (const change of window(changes.entries, changeCursor, room)) {
     const name = change.renamedFrom ? `${change.renamedFrom} → ${change.path}` : change.path;
-    lines.push(`  ${style.tone(pad(change.label, 12), change.ignorable ? "muted" : "warn")} ${style.ink(truncate(name, width - 18))}`);
+    const marker = changes.entries.indexOf(change) === selected ? style.accent("›") : " ";
+    lines.push(`${marker} ${style.tone(pad(change.label, 12), change.ignorable ? "muted" : "warn")} `
+      + `${padStart(countLabel(change, style), 12)} ${style.ink(truncate(name, width - 30))}`);
   }
   if (changes.entries.length > room) {
     lines.push(style.dim(`  … ${changes.entries.length - room} more`));
@@ -249,6 +258,46 @@ export function renderWorktreeChanges(state, { style, width, height, cursor, wor
     ? style.ok("None of this is a person's work, so this worktree can be removed.")
     : style.warn(`${changes.blocking} unsaved; removing is refused while they are here.`));
   return lines;
+}
+
+// How much changed, not only that something did.
+function countLabel(change, style) {
+  if (change.binary) return style.muted("binary");
+  if (change.large) return style.muted("large");
+  if (change.directory) return style.muted("dir");
+  if (change.added === undefined && change.deleted === undefined) return style.muted("—");
+  const added = change.added ? style.ok(`+${change.added}`) : "";
+  const deleted = change.deleted ? style.bad(`−${change.deleted}`) : "";
+  return `${added}${added && deleted ? " " : ""}${deleted}` || style.muted("0");
+}
+
+// One file's diff, with the number each line has on its own side.
+export function renderDiff(state, { style, width, height, diff, offset = 0 }) {
+  if (!diff) return [style.dim("Reading the diff…")];
+  const head = [
+    `${style.bold(style.ink(diff.file))} ${style.muted(diff.reason
+      ? diff.reason
+      : `+${diff.added ?? 0} −${diff.deleted ?? 0} in ${diff.hunks ?? 0} ${diff.hunks === 1 ? "place" : "places"}`)}`,
+    "",
+  ];
+  if (diff.reason) return [...head, style.dim(`No diff: this file is ${diff.reason}.`)];
+  if ((diff.lines ?? []).length === 0) return [...head, style.dim("git reports no textual change for this file.")];
+  const room = Math.max(1, height - head.length - 1);
+  const start = Math.min(Math.max(0, offset), Math.max(0, diff.lines.length - room));
+  const body = diff.lines.slice(start, start + room).map((line) => {
+    const numbers = `${padStart(line.oldLine === undefined ? "" : String(line.oldLine), 5)} `
+      + `${padStart(line.newLine === undefined ? "" : String(line.newLine), 5)} `;
+    if (line.kind === "hunk") return style.dim(truncate(`${" ".repeat(12)}${line.text}`, width));
+    const mark = line.kind === "add" ? "+" : line.kind === "remove" ? "−" : " ";
+    const text = truncate(`${mark}${line.text}`, Math.max(8, width - 13));
+    const tone = line.kind === "add" ? "ok" : line.kind === "remove" ? "bad" : "muted";
+    return `${style.dim(numbers)}${style.tone(text, tone)}`;
+  });
+  const hidden = diff.lines.length - start - body.length;
+  const footer = hidden > 0
+    ? style.dim(`↑↓ scroll · ${hidden} more lines`)
+    : style.dim(diff.cut || diff.truncated ? "cut here; read the rest with 'git diff'" : "the end");
+  return [...head, ...body, footer];
 }
 
 export function renderWorktrees(state, { style, width, height, cursor, worktrees }) {
@@ -606,7 +655,11 @@ const HELP_SECTIONS = Object.freeze([
   ]],
   ["Runs", [["enter", "open the receipt"]]],
   ["Queue", [["c", "request cancellation"], ["R", "resume a failed job"]]],
-  ["Worktrees", [["enter", "the files it holds"], ["x", "remove it, if it is clean"], ["g", "read them again"]]],
+  ["Worktrees", [
+    ["enter", "the files it holds, then one file's diff"],
+    ["x", "remove it, if it is clean"],
+    ["g", "read them again"],
+  ]],
   ["Merge requests", [["↑↓", "ours first, then others"], ["g", "ask GitLab again"]]],
   ["Settings", [
     ["enter", "edit"],

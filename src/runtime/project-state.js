@@ -145,6 +145,22 @@ export async function openProjectState({ root = process.cwd(), env = process.env
       }
       return { name, branch: entry.branch, ...await manager.changesAt(entry.path) };
     },
+    // One file's diff, so 'modified' can be read as the lines it changed. The
+    // file must be one this worktree itself reported as changed: a name from a
+    // surface never decides what is read from disk.
+    async worktreeDiff(name, file) {
+      const manager = worktreeManager(projectRoot, current);
+      const entry = (await manager.describe()).find((candidate) => candidate.name === name);
+      if (!entry) throw new TypeError(`'${name}' is not a worktree of this project.`);
+      const changes = await manager.changesAt(entry.path);
+      const change = changes.entries.find((candidate) => candidate.path === file);
+      if (!change) throw new TypeError(`'${file}' is not a changed file in '${name}'.`);
+      if (change.binary || change.large || change.directory) {
+        return { name, file, ...change, lines: [], reason: change.binary ? "binary" : change.large ? "too large" : "a directory" };
+      }
+      const diff = await manager.diffAt(entry.path, file, { untracked: change.label === "untracked" });
+      return { name, file, ...change, ...parseDiff(diff.text), truncated: diff.truncated === true };
+    },
     removeWorktree: (name) => worktreeManager(projectRoot, current).removeIfClean(name),
     // What the provider cost. Read on demand and only when the telemetry file
     // has changed, because it is the whole file every time.
@@ -340,6 +356,55 @@ function countApprovals(lines) {
 // The worktrees this repository has, with ETNPilot's own marked and the
 // branches they hold. A run works in one of these, so what is on disk is part
 // of the same evidence as the receipt it wrote.
+// A unified diff, read as the lines it touches: every line carries the number
+// it has on each side, so a surface can show where a change is rather than
+// only what it says.
+export function parseDiff(text, { limit = 2000 } = {}) {
+  const lines = [];
+  let oldLine = 0;
+  let newLine = 0;
+  let hunks = 0;
+  let added = 0;
+  let deleted = 0;
+  for (const line of String(text ?? "").split("\n")) {
+    if (lines.length >= limit) return { lines, hunks, added, deleted, cut: true };
+    if (line.startsWith("diff --git") || line.startsWith("index ")
+      || line.startsWith("--- ") || line.startsWith("+++ ")
+      || line.startsWith("new file") || line.startsWith("deleted file")
+      || line.startsWith("similarity index") || line.startsWith("rename ")
+      || line.startsWith("old mode") || line.startsWith("new mode")) continue;
+    const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/.exec(line);
+    if (hunk) {
+      oldLine = Number(hunk[1]);
+      newLine = Number(hunk[2]);
+      hunks += 1;
+      lines.push({ kind: "hunk", text: line, context: hunk[3].trim() });
+      continue;
+    }
+    if (line.startsWith("\\ No newline")) {
+      lines.push({ kind: "note", text: line.slice(2) });
+      continue;
+    }
+    if (hunks === 0) continue;
+    if (line.startsWith("+")) {
+      added += 1;
+      lines.push({ kind: "add", text: line.slice(1), newLine });
+      newLine += 1;
+    } else if (line.startsWith("-")) {
+      deleted += 1;
+      lines.push({ kind: "remove", text: line.slice(1), oldLine });
+      oldLine += 1;
+    } else if (line.startsWith(" ") || line === "") {
+      lines.push({ kind: "context", text: line.slice(1), oldLine, newLine });
+      oldLine += 1;
+      newLine += 1;
+    }
+  }
+  // A diff that ends with a blank line is the split's doing, not the file's.
+  while (lines.at(-1)?.kind === "context" && lines.at(-1).text === "") lines.pop();
+  return { lines, hunks, added, deleted };
+}
+
 function worktreeManager(root, config) {
   return new WorktreeManager(root, config?.git?.worktreeRoot ?? ".etnpilot/worktrees");
 }

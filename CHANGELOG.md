@@ -26,6 +26,25 @@ pre-1.0, so breaking changes may appear in any release.
 - The page also lists the worktrees and the project's merge requests, with the
   same `removeIfClean` behaviour as the other surfaces.
 
+### Added — a worktree's changes, in lines
+
+- Each file in a worktree says how many lines it added and deleted; an
+  untracked file is counted as entirely added, and a binary or oversized one
+  says so rather than being read to be counted.
+- Opening a file shows its diff with the number every line has on its own
+  side, in the page and in the terminal interface. The file must be one that
+  worktree itself reported as changed, so a name from a surface never decides
+  what is read from disk.
+
+### Fixed — the menu button had no function
+
+- The button was visible at every width because `.btn` declares a `display` of
+  its own further down the stylesheet, and at equal specificity the later rule
+  wins. Above 860px it toggled a sidebar that is not a drawer, so it did
+  nothing at all. It is now shown only where it opens something.
+- A view's own detail decides its keys before the generic one: the terminal
+  interface promised "approve" and "reject" under a worktree's file list.
+
 ### Changed — the settings control is in the row
 
 - A setting that accepts one of a known list is a dropdown in its own row, and

@@ -57,10 +57,11 @@ teaches the wrong thing about what this can do.
   `observability.enabled` is false the cards say that rather than showing a
   zero that looks like a measurement.
 - **Worktrees**: which branch each holds, which ones a run made, and what
-  removing one would throw away. Opening one lists the files it is holding,
-  each marked as a person's work or as state ETNPilot wrote itself, so the
-  refusal to remove it can be read rather than taken on trust. `Remove` goes
-  through the same `removeIfClean` the CLI and the TUI use.
+  removing one would throw away. Opening one lists the files it is holding —
+  with how many lines each one added and deleted, and marked as a person's
+  work or as state ETNPilot wrote itself — and opening a file shows the diff
+  with the line numbers it touched. `Remove` goes through the same
+  `removeIfClean` the CLI and the TUI use.
 - **Merge requests**: ETNPilot's own first, told apart by their `etnpilot/`
   branch, with everyone else's beside them. This is the only part of the page
   that needs the network and a token; it is read when the page loads and on

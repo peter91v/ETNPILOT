@@ -36,6 +36,9 @@ export function createTuiApp({
   let receipt;
   let worktrees;
   let worktreeChanges;
+  let changeCursor = 0;
+  let worktreeDiff;
+  let diffOffset = 0;
   let worktreesReadAt = 0;
   let merges;
   let messageTimer;
@@ -59,6 +62,7 @@ export function createTuiApp({
     get receipt() { return receipt; },
     get worktrees() { return worktrees; },
     get worktreeChanges() { return worktreeChanges; },
+    get worktreeDiff() { return worktreeDiff; },
     get merges() { return merges; },
     // What is running is tracked in the shared state, because the page needs
     // the same answer; this is a view of it, not a second copy.
@@ -93,6 +97,9 @@ export function createTuiApp({
         receipt,
         worktrees,
         worktreeChanges,
+        changeCursor,
+        worktreeDiff,
+        diffOffset,
         merges,
         active: snapshot.active ?? [],
         project: state.config?.git?.project ?? "",
@@ -160,16 +167,26 @@ export function createTuiApp({
         scope = scope === "local" ? "global" : "local";
         note(`Changes will be written ${scope === "global" ? "to ~/.config, for every project" : "to this project, locally"}.`);
       } else if (key === "\u001B[B" || key === "j") {
-        cursor = clamp(cursor + 1, selection().length);
+        if (worktreeDiff) diffOffset += 1;
+        else if (detail && view === "worktrees") changeCursor = clamp(changeCursor + 1, changeCount());
+        else cursor = clamp(cursor + 1, selection().length);
       } else if (key === "\u001B[A" || key === "k") {
-        cursor = clamp(cursor - 1, selection().length);
+        if (worktreeDiff) diffOffset = Math.max(0, diffOffset - 1);
+        else if (detail && view === "worktrees") changeCursor = clamp(changeCursor - 1, changeCount());
+        else cursor = clamp(cursor - 1, selection().length);
       } else if (key === "\r" || key === "\n") {
         if (view === "approvals" && selection().length > 0) detail = true;
         else if (view === "runs" && selection().length > 0) await openRun();
+        else if (view === "worktrees" && detail && !worktreeDiff) await openFileDiff();
         else if (view === "worktrees" && selection().length > 0) await openWorktree();
       } else if (key === "\u001B") {
-        detail = false;
-        worktreeChanges = undefined;
+        if (worktreeDiff) {
+          worktreeDiff = undefined;
+          diffOffset = 0;
+        } else {
+          detail = false;
+          worktreeChanges = undefined;
+        }
       } else if (key === "a" || key === "r") {
         await decide(key === "a" ? "approved" : "rejected");
       } else if (key === "c" && view === "queue") {
@@ -267,6 +284,7 @@ export function createTuiApp({
       }
       if (worktreeChanges && !(worktrees.entries ?? []).some((entry) => entry.name === worktreeChanges.name)) {
         worktreeChanges = undefined;
+        worktreeDiff = undefined;
         if (view === "worktrees") detail = false;
       }
       worktreesReadAt = now();
@@ -408,11 +426,29 @@ export function createTuiApp({
     if (!entry) return;
     detail = true;
     worktreeChanges = undefined;
+    worktreeDiff = undefined;
+    changeCursor = 0;
     try {
       worktreeChanges = await state.worktreeChanges(entry.name);
     } catch (error) {
       note(error.message);
       detail = false;
+    }
+  }
+
+  function changeCount() {
+    return worktreeChanges?.entries?.length ?? 0;
+  }
+
+  // The lines a file changed, read from the same worktree that reported it.
+  async function openFileDiff() {
+    const change = worktreeChanges?.entries?.[clamp(changeCursor, changeCount())];
+    if (!change) return;
+    diffOffset = 0;
+    try {
+      worktreeDiff = await state.worktreeDiff(worktreeChanges.name, change.path);
+    } catch (error) {
+      note(error.message);
     }
   }
 
