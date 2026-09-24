@@ -238,7 +238,7 @@ export async function runProject({
   try {
     summary = await engine.run(workflow.steps, async (step, execution) => {
       if (step.type === "agent") {
-        return harness.run({
+        const receipt = await harness.run({
           agent: step.agent,
           input: composeAgentInput(input, execution.dependencyResults),
           metadata: {
@@ -250,6 +250,8 @@ export async function runProject({
           },
           signal: execution.signal,
         });
+        assertStepExpectation(step, receipt);
+        return receipt;
       }
       if (step.type === "quorum") {
         return runQuorumStep(step, harness, {
@@ -729,6 +731,39 @@ function normalizeWorkflow(workflow = {}, { requested, fallback } = {}) {
     maxSteps: workflow.maxSteps ?? 50,
     steps,
   };
+}
+
+// What a step must have done, not only that its agent answered. A model that
+// describes a change, or asks whether it may make one, returns a perfectly
+// successful message and touches nothing — and a workflow that calls that
+// 'succeeded' is reporting work that did not happen. A step that exists to
+// change the repository says so, and is held to it.
+const STEP_EXPECTATIONS = new Set(["tool-use"]);
+
+// Exported under its own name so a test can put a step and a receipt to it
+// without starting a run.
+export const assertStepExpectationForTest = (step, receipt) => assertStepExpectation(step, receipt);
+
+function assertStepExpectation(step, receipt) {
+  if (step.expect === undefined) return;
+  if (!STEP_EXPECTATIONS.has(step.expect)) {
+    throw new TypeError(
+      `Workflow step '${step.id}' expects '${step.expect}', which is not something a step can expect.`
+      + ` The only one is 'tool-use'.`,
+    );
+  }
+  const calls = receipt?.result?.toolCalls ?? receipt?.result?.steps ?? [];
+  if (calls.some((call) => call.ok !== false)) return;
+  const refused = calls.filter((call) => call.ok === false);
+  const said = String(receipt?.result?.text ?? "").trim().replace(/\s+/g, " ").slice(0, 300);
+  throw new Error(
+    `Workflow step '${step.id}' ran agent '${step.agent}' and changed nothing:`
+    + (refused.length > 0
+      ? ` every tool call was refused (${refused.map((call) => call.tool ?? "a tool").join(", ")}).`
+      : " it called no tool at all.")
+    + " This step declares 'expect: tool-use', so describing the work is not doing it."
+    + (said ? ` The agent answered: ${said}` : ""),
+  );
 }
 
 function composeAgentInput(input, dependencies) {

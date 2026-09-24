@@ -568,6 +568,36 @@ workflow:
       needs: [build]
 ```
 
+## A step that must change something
+
+A model can describe a change, or ask whether it may make one, and return a
+perfectly successful message having touched nothing. A step that exists to
+change the repository says so, and is failed when it did not:
+
+```yaml
+workflow:
+  steps:
+    - id: build
+      type: agent
+      agent: builder
+      needs: [plan]
+      expect: tool-use
+```
+
+The step fails unless at least one tool call succeeded, and the error says
+which it is — no tool called at all, or every call refused — and quotes what
+the agent answered instead. Steps without `expect` are unaffected: most steps
+are answers, not changes.
+
+This is the mechanical half. The other half is the prompt: approval in
+ETNPilot is mechanical, not conversational. The agent calls the tool, and the
+harness asks the human before the effect happens. An instruction that tells an
+agent to "ask for approval before writing" produces prose that reaches nobody
+and leaves the work undone — the project instructions and the starter prompt
+say so explicitly.
+
+## Quorum review
+
 Each reviewer ends its answer with `VERDICT: approve` or `VERDICT: reject`;
 anything else is an abstention. Two reviewers on the same provider count once,
 because they are one opinion with two voices. One rejection blocks the step.

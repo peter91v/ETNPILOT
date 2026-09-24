@@ -194,6 +194,10 @@ workflow:
       type: agent
       agent: builder
       needs: [plan]
+      # This step is here to change the repository. An agent that answers
+      # without calling a tool has not done it, however well it describes what
+      # it would have done.
+      expect: tool-use
     - id: test
       type: check
       name: unit-tests
