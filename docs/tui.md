@@ -39,6 +39,14 @@ While a filter or a value is being typed, every printable key is text. `q` does
 not quit and `d` does not reset — the caret on screen says which mode you are
 in.
 
+## From a tablet or a phone
+
+In a terminal app on the device, over SSH, or in Termux where ETNPilot runs on
+the device itself. Every view lays out from 46 columns up, the detail panes
+stack instead of sitting side by side below 92 columns, and a value longer than
+the line is cut at the front so the caret stays visible. For a browser instead,
+see [review-ui.md](review-ui.md#from-a-tablet-or-a-phone).
+
 ## Worktrees
 
 A run works in its own worktree, so what is on disk is evidence as much as the

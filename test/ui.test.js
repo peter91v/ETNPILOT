@@ -238,3 +238,31 @@ async function caller(review) {
     headers: { "x-etnpilot-token": review.token, ...(options.body ? { "content-type": "application/json" } : {}) },
   });
 }
+
+test("a port open to the network is named as such, with an address that works there", async () => {
+  const root = await createProject();
+  const loopback = await createReviewServer({ root });
+  try {
+    const address = await loopback.listen({ port: 0 });
+    assert.equal(address.exposed, false);
+    assert.match(address.url, /^http:\/\/127\.0\.0\.1:\d+\/\?token=/);
+  } finally {
+    await loopback.close();
+  }
+
+  const shared = await createReviewServer({ root });
+  try {
+    const address = await shared.listen({ host: "0.0.0.0", port: 0 });
+    // The link has to be one the other device can reach, and the caller has
+    // to be told the loopback guarantee no longer holds.
+    assert.equal(address.exposed, true);
+    assert.doesNotMatch(address.url, /127\.0\.0\.1/);
+    assert.match(address.url, /^http:\/\/[^/]+:\d+\/\?token=/);
+    // It is the same server either way: the token still decides everything.
+    const base = address.url.slice(0, address.url.indexOf("/?token="));
+    assert.equal((await fetch(`${base}/api/state`)).status, 401);
+    assert.equal((await fetch(`${base}/api/state`, { headers: { "x-etnpilot-token": shared.token } })).status, 200);
+  } finally {
+    await shared.close();
+  }
+});

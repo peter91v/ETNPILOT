@@ -1,5 +1,6 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
+import { networkInterfaces } from "node:os";
 import { ApprovalStateError } from "../core/approval-inbox.js";
 import { parseSettingValue, SettingsRefused } from "../config/settings.js";
 import { openProjectState } from "../runtime/project-state.js";
@@ -136,7 +137,16 @@ export async function createReviewServer({
         const onListening = () => {
           server.off("error", onError);
           const address = server.address();
-          resolveListen({ ...address, url: `http://${displayHost(address.address)}:${address.port}/?token=${token}` });
+          // A link that only works on the machine that printed it is no help
+          // on a tablet: when the port is open to the network, the address
+          // given is one that can actually be reached from there.
+          const exposed = !isLoopback(address.address);
+          const displayed = exposed ? (localAddress() ?? displayHost(address.address)) : displayHost(address.address);
+          resolveListen({
+            ...address,
+            exposed,
+            url: `http://${bracket(displayed)}:${address.port}/?token=${token}`,
+          });
         };
         server.once("error", onError);
         server.once("listening", onListening);
@@ -232,7 +242,31 @@ function badRequest(message) {
 }
 
 function displayHost(address) {
-  return address === "::" || address === "0.0.0.0" ? "127.0.0.1" : address.includes(":") ? `[${address}]` : address;
+  return address === "::" || address === "0.0.0.0" ? "127.0.0.1" : address;
+}
+
+function bracket(address) {
+  return address.includes(":") ? `[${address}]` : address;
+}
+
+// 'Loopback' is the whole security posture of this server, so it is decided
+// from the address it actually bound to, not from what was asked for.
+function isLoopback(address) {
+  if (address === "::1" || address === "127.0.0.1") return true;
+  if (address === "::" || address === "0.0.0.0") return false;
+  return address.startsWith("127.") || address === "::ffff:127.0.0.1";
+}
+
+// The address another device on this network would use. Picked rather than
+// guessed, so the printed link is one that works from the tablet in your hand.
+function localAddress() {
+  for (const interfaces of Object.values(networkInterfaces())) {
+    for (const entry of interfaces ?? []) {
+      if (entry.internal) continue;
+      if (entry.family === "IPv4" || entry.family === 4) return entry.address;
+    }
+  }
+  return undefined;
 }
 
 function send(response, status, payload) {

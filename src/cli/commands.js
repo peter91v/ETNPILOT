@@ -316,7 +316,17 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     const review = await createReviewServer({ root: resolve(values.root) });
     const address = await review.listen({ host: values.host, port });
     console.log(`ETNPilot review UI: ${address.url}`);
-    console.log("The link contains a one-time token. Anyone who has it can approve operations.");
+    console.log("The link contains a one-time token. Anyone who has it can approve operations,");
+    console.log("change local settings, and start runs.");
+    if (address.exposed) {
+      // Binding away from loopback drops the guarantee the rest of this
+      // surface is built on, so it is said plainly rather than left to the
+      // documentation.
+      console.log("");
+      console.log("This port is open to your network, not just this machine. Everyone who can reach");
+      console.log("it and has the token has that same power. An SSH tunnel keeps it on loopback:");
+      console.log(`  ssh -N -L ${address.port}:127.0.0.1:${address.port} <user>@<this-machine>`);
+    }
     await waitForShutdown();
     await review.close();
   } else if (command === "approval" && subcommand === "list") {

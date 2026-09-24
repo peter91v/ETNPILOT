@@ -97,6 +97,17 @@ export function renderReviewPage(token) {
   .pair dt { color: var(--muted); }
   .pair dd { margin: 0; word-break: break-word; }
   #error { color: var(--bad); font-size: 13px; }
+  /* A finger is not a mouse pointer. On a touch screen every control is big
+     enough to hit without aiming, which is what makes the page usable on a
+     tablet rather than merely readable. */
+  @media (pointer: coarse) {
+    button, input, select { min-height: 40px; }
+    button.small { padding: 8px 14px; }
+    button.link { min-height: 32px; padding: 6px 0; }
+    th, td { padding: 10px; }
+    label.check { min-height: 40px; }
+    input[type="checkbox"] { width: 20px; height: 20px; }
+  }
   @media (max-width: 560px) {
     .pair { grid-template-columns: 1fr; gap: 2px; }
     .pair dd { margin-bottom: 6px; }

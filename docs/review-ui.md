@@ -52,6 +52,37 @@ Long lists say when they are cut rather than showing a count that disagrees
 with the rows beneath it, and the poll holds still while a field has focus, so
 it never throws away what is being typed.
 
+## From a tablet or a phone
+
+The page is built for it: it fits at 390px, at 768px and at 820px without a
+horizontal scrollbar, and every control is finger-sized on a touch screen. The
+question is only how the device reaches the server, and the answer is never
+"open the port and hope".
+
+**ETNPilot runs on the tablet itself** (Termux on Android, for example): there
+is nothing to do. Open the URL `etnpilot ui` printed, token and all, in the
+browser on that device. `etnpilot tui` works the same way in the terminal
+there.
+
+**ETNPilot runs on another machine**: forward the port over SSH from the
+tablet, with any SSH client, and open the loopback URL on the device:
+
+```bash
+ssh -N -L 8788:127.0.0.1:8788 <user>@<the-machine>
+# then open http://127.0.0.1:8788/?token=… on the tablet
+```
+
+The server keeps its loopback binding, the traffic is encrypted, and nothing
+else on the network can reach it. The same tunnel serves a phone.
+
+**Binding to the network instead** (`etnpilot ui --host 0.0.0.0`) works and is
+sometimes what you want on a trusted network. It prints an address the other
+device can actually use, and it says what you have given up: the port is then
+reachable by everyone on that network, and everyone who reaches it and has the
+token can approve operations, change local settings, and start runs. There is
+no second check behind the token. Do not do it on a network you share with
+people you would not hand the token to, and never on a public one.
+
 ## Security
 
 The server binds to `127.0.0.1` and mints a token at startup. The token is in

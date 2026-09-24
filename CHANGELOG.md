@@ -26,6 +26,16 @@ pre-1.0, so breaking changes may appear in any release.
 - The page also lists the worktrees and the project's merge requests, with the
   same `removeIfClean` behaviour as the other surfaces.
 
+### Added — reaching the surfaces from a tablet
+
+- The page is checked at tablet widths (768px, 820px, 1180px) as well as at
+  1280px and 390px, and its controls are finger-sized on a touch screen.
+- `etnpilot ui --host 0.0.0.0` prints an address the other device can actually
+  reach, instead of a `127.0.0.1` link that only works where it was printed,
+  and says plainly that the port is now open to the network and what that
+  gives away. The SSH tunnel that keeps the loopback guarantee is printed with
+  it.
+
 ### Fixed — the page, from looking at it
 
 - A wide table no longer stretches the whole page: grid children are
