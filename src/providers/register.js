@@ -20,6 +20,7 @@ const BUILTIN_FACTORIES = {
   anthropic: async (name, config, context) => createAnthropicProvider({
     ...config,
     name,
+    apiKeySource: describeApiKeySource(config, context, "anthropic.apiKey", "ANTHROPIC_API_KEY"),
     workingDirectory: config.workingDirectory ?? context.workingDirectory,
     sandbox: context.sandbox,
     apiKey: config.apiKey ?? await resolveProviderSecret({
@@ -35,6 +36,7 @@ const BUILTIN_FACTORIES = {
   "openai-compatible": async (name, config, context) => createOpenAICompatibleProvider({
     ...config,
     name,
+    apiKeySource: describeApiKeySource(config, context, "provider.apiKey", "ETNPILOT_PROVIDER_API_KEY"),
     workingDirectory: config.workingDirectory ?? context.workingDirectory,
     sandbox: context.sandbox,
     apiKey: config.apiKey ?? await resolveProviderSecret({
@@ -63,6 +65,15 @@ export async function registerConfiguredProviders(harness, providers = {}, conte
     harness.registerProvider(await factory(name, config, context));
   }
   return harness.providers.list();
+}
+
+// A message about a missing key is only useful if it names the variable this
+// provider reads. That is the secret's own mapping where one exists, and the
+// adapter's fallback where it does not.
+function describeApiKeySource(config, context, defaultSecret, fallbackKey) {
+  const secret = config.apiKeySecret ?? defaultSecret;
+  const mapped = context.secretResolver?.values?.[secret];
+  return { secret, env: mapped?.provider === "env" ? mapped.key : fallbackKey };
 }
 
 async function resolveProviderSecret({ resolver, name, fallbackKey, required }) {

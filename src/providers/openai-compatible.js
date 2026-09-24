@@ -15,6 +15,10 @@ export function createOpenAICompatibleProvider({
   maxToolIterations = DEFAULT_MAX_TOOL_ITERATIONS,
   fetchImpl = globalThis.fetch,
   toolsImpl,
+  // Which environment variable and which secret this provider was wired to,
+  // so a message about a missing key names the one to set rather than the
+  // adapter's generic default.
+  apiKeySource,
 }) {
   if (!baseUrl) throw new TypeError("baseUrl is required.");
   if (tools && !workingDirectory && !toolsImpl) {
@@ -33,14 +37,7 @@ export function createOpenAICompatibleProvider({
     capabilities: tools ? ["chat", "tools"] : ["chat"],
     async invoke(context) {
       context.signal?.throwIfAborted();
-      if (needsApiKey) {
-        throw new ProviderError(
-          `Provider '${name}' has no API key. Set ETNPILOT_PROVIDER_API_KEY in the environment`
-          + ` (allowed under 'secrets.providers.env.allow'), or point`
-          + ` 'providers.${name}.apiKeySecret' at a configured secret.`,
-          { code: "missing_api_key", retryable: false, safeToRetry: false },
-        );
-      }
+      if (needsApiKey) throw missingApiKey(name, apiKeySource, "ETNPILOT_PROVIDER_API_KEY");
       const workspaceTools = tools
         ? toolsImpl ?? createWorkspaceTools({
           workingDirectory,
@@ -139,15 +136,43 @@ async function request({ endpoint, apiKey, fetchImpl, context, body }) {
   }
   if (!response.ok) {
     const retryable = response.status === 429 || response.status >= 500;
-    await response.text();
-    throw new ProviderError(`Provider request failed (${response.status}).`, {
-      code: `http_${response.status}`,
-      retryable,
-      // A failed call that already ran tools is not safe to replay blindly.
-      safeToRetry: retryable && !bodyHasToolResults(body),
-    });
+    // The body is the half that says what to do: a rejected key, a model the
+    // account cannot reach, and a proxy in the way all arrive as a status
+    // code alone, and the status alone tells them apart for nobody.
+    const detail = await errorDetail(response);
+    throw new ProviderError(
+      `Provider request failed (${response.status})${detail ? `: ${detail}` : "."}`,
+      {
+        code: `http_${response.status}`,
+        retryable,
+        // A failed call that already ran tools is not safe to replay blindly.
+        safeToRetry: retryable && !bodyHasToolResults(body),
+      },
+    );
   }
   return response.json();
+}
+
+export function missingApiKey(name, source, fallbackEnv) {
+  const variable = source?.env ?? fallbackEnv;
+  const secret = source?.secret;
+  return new ProviderError(
+    `Provider '${name}' has no API key. Set ${variable} in the environment`
+    + (secret ? ` (secret '${secret}', allowed under 'secrets.providers.env.allow')` : "")
+    + `, or point 'providers.${name}.apiKeySecret' at a configured secret.`,
+    { code: "missing_api_key", retryable: false, safeToRetry: false },
+  );
+}
+
+async function errorDetail(response) {
+  const text = await response.text().catch(() => "");
+  if (!text) return "";
+  try {
+    const parsed = JSON.parse(text);
+    return String(parsed?.error?.message ?? parsed?.message ?? text).slice(0, 300);
+  } catch {
+    return text.slice(0, 300);
+  }
 }
 
 function isLoopback(baseUrl) {

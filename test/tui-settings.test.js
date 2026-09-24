@@ -48,7 +48,13 @@ test("settings are a view of their own, showing where each value comes from", as
   try {
     assert.equal(app.view, "settings");
     const text = screen(app);
-    assert.match(text, /133 settings · none changed · writing to local/);
+    // The number is the project's own count, not one kept in step by hand: a
+    // headline that drifts from the settings beneath it is the bug here.
+    const headline = text.match(/(\d+) settings · none changed · writing to local/);
+    assert.notEqual(headline, null, "the headline says how many settings there are");
+    const described = await state.settings();
+    assert.equal(Number(headline[1]), described.entries.length);
+    assert.equal(described.entries.length > 100, true, "a real project has more than a handful");
     assert.match(text, /SETTING\s+VALUE\s+FROM\s+CHANGE/);
     // The mode is on screen, so nobody has to guess what they may change.
     assert.match(text, /committed\s+open/);

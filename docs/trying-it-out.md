@@ -115,11 +115,11 @@ absichtlich leer, damit nichts sie still überstimmt.
 |---|---|---|
 | `github-copilot` | GitHub-Login des Copilot-SDK | Copilot-Abo |
 | `anthropic` | `ANTHROPIC_API_KEY` | console.anthropic.com |
-| `openai` | `ETNPILOT_PROVIDER_API_KEY` | platform.openai.com |
+| `openai` | `OPENAI_API_KEY` | platform.openai.com |
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-etnpilot config set defaultProvider anthropic
+export OPENAI_API_KEY=sk-...
+etnpilot config set defaultProvider openai
 etnpilot run "Fasse dieses Repository zusammen."
 ```
 
@@ -141,20 +141,25 @@ und brauchen nichts Plattformabhängiges. In Termux:
 
 ```bash
 pkg install nodejs git
-export ANTHROPIC_API_KEY=sk-ant-...
-etnpilot config set defaultProvider anthropic
+export OPENAI_API_KEY=sk-...
+etnpilot config set defaultProvider openai
 etnpilot ui            # öffnet den Browser mit der neuen Sitzung
 ```
 
-`ANTHROPIC_API_KEY` steht bereits in `secrets.providers.env.allow`; ohne diesen
-Eintrag liest der env-Backend die Variable nicht.
+`OPENAI_API_KEY` und `ANTHROPIC_API_KEY` stehen bereits in
+`secrets.providers.env.allow`; ohne diesen Eintrag liest das env-Backend die
+Variable nicht. Fehlt der Schlüssel, nennt der Provider beim Aufruf genau die
+Variable, die zu setzen ist.
 
 ### Ein anderes Modell oder ein eigener Endpunkt
 
 ```bash
+etnpilot config set providers.openai.model gpt-5-mini
 etnpilot config set providers.anthropic.model claude-sonnet-5
 etnpilot config set providers.openai.baseUrl http://127.0.0.1:11434/v1
 ```
 
 Ein Modellserver auf diesem Rechner braucht keinen Schlüssel: bei einer
-Loopback-`baseUrl` verlangt der OpenAI-kompatible Adapter keinen.
+Loopback-`baseUrl` verlangt der OpenAI-kompatible Adapter keinen. Erreicht ein
+Modell Ihr Konto nicht, antwortet die API selbst — und der Fehler wiederholt,
+was sie gesagt hat, statt nur „(404)".

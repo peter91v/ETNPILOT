@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
+import { initializeProject } from "../src/config/init.js";
+import { loadConfig } from "../src/config/load.js";
 import { createCopilotProvider } from "../src/providers/copilot.js";
 import { createOpenAICompatibleProvider } from "../src/providers/openai-compatible.js";
 import { ProviderError } from "../src/providers/router.js";
@@ -211,4 +216,89 @@ test("where no Copilot build exists, the advice does not send you in a circle", 
     assert.match(error.message, /requires '@github\/copilot-sdk'/);
     return true;
   });
+});
+
+test("a refused request keeps the server's own message, and loopback needs no key", async () => {
+  // '(401)' alone does not say whether the key is wrong, the model is out of
+  // reach, or something between here and OpenAI refused the call.
+  const refused = createOpenAICompatibleProvider({
+    baseUrl: "https://api.openai.example/v1",
+    apiKey: "sk-wrong",
+    fetchImpl: async () => new Response(
+      JSON.stringify({ error: { message: "Incorrect API key provided: sk-wrong.", code: "invalid_api_key" } }),
+      { status: 401 },
+    ),
+  });
+  await assert.rejects(
+    () => refused.invoke({ agent: { prompt: "System" }, input: "hello", instructions: [] }),
+    (error) => {
+      assert.equal(error.code, "http_401");
+      assert.equal(error.retryable, false);
+      assert.match(error.message, /Incorrect API key provided/);
+      return true;
+    },
+  );
+
+  // A model server on this machine is the one endpoint that legitimately has
+  // no key, so demanding one there would refuse a working setup.
+  const local = createOpenAICompatibleProvider({
+    baseUrl: "http://127.0.0.1:11434/v1",
+    model: "local",
+    fetchImpl: async () => new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), { status: 200 }),
+  });
+  assert.equal((await local.invoke({ agent: { prompt: "p" }, input: "hi", instructions: [] })).text, "ok");
+});
+
+test("the openai provider reads OPENAI_API_KEY, and says so when it is missing", async () => {
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-openai-"));
+  await initializeProject(root);
+  const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"), { ...process.env });
+  assert.equal(config.providers.openai.apiKeySecret, "openai.apiKey");
+
+  const withKey = createSecretResolver({
+    env: { OPENAI_API_KEY: "sk-from-env" },
+    config,
+  });
+  const harness = new Harness();
+  let authorization;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, options) => {
+    authorization = options.headers.authorization;
+    return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), { status: 200 });
+  };
+  try {
+    await registerConfiguredProviders(harness, { openai: config.providers.openai }, {
+      secretResolver: withKey,
+      workingDirectory: root,
+      env: {},
+    });
+    const result = await harness.providers.get("openai").invoke({
+      agent: { name: "worker", prompt: "p" },
+      input: "hi",
+      instructions: [],
+      skills: [],
+      approve: async () => ({ kind: "approve-once" }),
+    });
+    assert.equal(authorization, "Bearer sk-from-env");
+    assert.equal(result.text, "ok");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  // Without it, the message names the variable this provider reads — not the
+  // adapter's generic default, which is not the one to set here.
+  const empty = new Harness();
+  await registerConfiguredProviders(empty, { openai: config.providers.openai }, {
+    secretResolver: createSecretResolver({ env: {}, config }),
+    workingDirectory: root,
+    env: {},
+  });
+  await assert.rejects(
+    () => empty.providers.get("openai").invoke({ agent: { name: "w", prompt: "p" }, input: "hi", instructions: [] }),
+    (error) => {
+      assert.equal(error.code, "missing_api_key");
+      assert.match(error.message, /Set OPENAI_API_KEY in the environment \(secret 'openai\.apiKey'/);
+      return true;
+    },
+  );
 });

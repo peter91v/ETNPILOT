@@ -196,17 +196,20 @@ not an edit to every agent manifest:
 | --- | --- | --- | --- |
 | `github-copilot` | `github-copilot` | a Copilot subscription, through the Copilot SDK | `chat`, `tools`, `permissions`, `skills`. No SDK build exists for Android. |
 | `anthropic` | `anthropic` | `ANTHROPIC_API_KEY` (secret `anthropic.apiKey`) | The Messages API, spoken directly. `chat`, and `tools` when `tools: true`. |
-| `openai` | `openai-compatible` | `ETNPILOT_PROVIDER_API_KEY` (secret `provider.apiKey`) | Any OpenAI-compatible endpoint, including a model server on this machine, which needs no key. |
+| `openai` | `openai-compatible` | `OPENAI_API_KEY` (secret `openai.apiKey`) | Any OpenAI-compatible endpoint. A model server on loopback needs no key at all. |
 
 ```sh
-export ANTHROPIC_API_KEY=sk-ant-...
-npm run etnpilot -- config set defaultProvider anthropic
+export OPENAI_API_KEY=sk-...
+npm run etnpilot -- config set defaultProvider openai
 ```
 
 The generated `routing.defaults` is empty on purpose, so `defaultProvider` alone decides and
 nothing quietly outranks it. A key is read when the provider is used, not when it is
 configured: a project can configure all three and run with one of them. A provider that is
-reached without its key says so by name, and says which variable to set.
+reached without its key names the variable to set — the one its own
+`apiKeySecret` maps to, not a generic default. A request the API refuses keeps
+the API's own message, so a rejected key and a model the account cannot reach
+are told apart.
 
 ETNPilot skips unavailable or incompatible
 providers. It retries with another provider only when the adapter marks the failure as both

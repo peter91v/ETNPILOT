@@ -1,3 +1,4 @@
+import { missingApiKey } from "./openai-compatible.js";
 import { ProviderError } from "./router.js";
 import { createWorkspaceTools } from "./workspace-tools.js";
 
@@ -23,6 +24,7 @@ export function createAnthropicProvider({
   maxToolIterations = DEFAULT_MAX_TOOL_ITERATIONS,
   fetchImpl = globalThis.fetch,
   toolsImpl,
+  apiKeySource,
 }) {
   if (tools && !workingDirectory && !toolsImpl) {
     throw new TypeError("Tool support requires a workingDirectory.");
@@ -42,14 +44,7 @@ export function createAnthropicProvider({
       context.signal?.throwIfAborted();
       // A key that is absent is the most common reason this provider cannot
       // run, and a 401 from the API says less about it than this does.
-      if (!apiKey) {
-        throw new ProviderError(
-          `Provider '${name}' has no API key. Set ANTHROPIC_API_KEY in the environment`
-          + ` (allowed under 'secrets.providers.env.allow'), or point`
-          + ` 'providers.${name}.apiKeySecret' at a configured secret.`,
-          { code: "missing_api_key", retryable: false, safeToRetry: false },
-        );
-      }
+      if (!apiKey) throw missingApiKey(name, apiKeySource, "ANTHROPIC_API_KEY");
       const workspaceTools = tools
         ? toolsImpl ?? createWorkspaceTools({
           workingDirectory,

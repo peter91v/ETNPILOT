@@ -30,7 +30,7 @@ settings:
 #                   The SDK has no build for Android, so on a tablet or phone
 #                   use 'anthropic' or 'openai'.
 #   anthropic       ANTHROPIC_API_KEY, from console.anthropic.com
-#   openai          ETNPILOT_PROVIDER_API_KEY, from platform.openai.com
+#   openai          OPENAI_API_KEY, from platform.openai.com
 defaultProvider: github-copilot
 providers:
   github-copilot:
@@ -47,7 +47,10 @@ providers:
   openai:
     type: openai-compatible
     baseUrl: https://api.openai.com/v1
+    # Any model your account can reach. A model it cannot reach is answered by
+    # the API itself, and the error repeats what it said.
     model: gpt-5
+    apiKeySecret: openai.apiKey
     tools: true
 routing:
   # Empty on purpose: with no list here the route is 'defaultProvider', so
@@ -117,6 +120,7 @@ secrets:
         - ETNPILOT_GITHUB_TOKEN
         - ETNPILOT_PROVIDER_API_KEY
         - ANTHROPIC_API_KEY
+        - OPENAI_API_KEY
         - ETNPILOT_OTLP_HEADERS
     local:
       type: file
@@ -131,6 +135,7 @@ secrets:
     # it names another with 'apiKeySecret'.
     provider.apiKey: { provider: env, key: ETNPILOT_PROVIDER_API_KEY }
     anthropic.apiKey: { provider: env, key: ANTHROPIC_API_KEY }
+    openai.apiKey: { provider: env, key: OPENAI_API_KEY }
     observability.otlpHeaders: { provider: env, key: ETNPILOT_OTLP_HEADERS }
 receipts:
   signing:
