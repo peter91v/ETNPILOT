@@ -107,7 +107,11 @@ function footer({ style, width, view, detail, message, editor, prompt, help }) {
 function footerKeys({ view, detail, editor, prompt, help }) {
   if (help) return [["↑↓", "scroll"], ["?", "close"], ["esc", "close"], ["q", "quit"]];
   if (prompt) return [["enter", "start"], ["tab", "agent"], ["esc", "cancel"], ["^u", "clear"]];
-  if (editor) return [["enter", "save"], ["esc", "cancel"], ["^u", "clear"]];
+  if (editor) {
+    return editor.entry.choices?.kind === "one"
+      ? [["← →", "choose"], ["enter", "save"], ["esc", "cancel"]]
+      : [["enter", "save"], ["esc", "cancel"], ["^u", "clear"]];
+  }
   if (detail && view === "runs") return [["esc", "back"], ["↑↓", "move"], ["n", "run"], ["q", "quit"]];
   if (detail) return [["a", "approve"], ["r", "reject"], ["esc", "back"], ["q", "quit"]];
   if (view === "approvals") {

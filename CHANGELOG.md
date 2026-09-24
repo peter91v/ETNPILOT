@@ -26,6 +26,20 @@ pre-1.0, so breaking changes may appear in any release.
 - The page also lists the worktrees and the project's merge requests, with the
   same `removeIfClean` behaviour as the other surfaces.
 
+### Changed — the settings control is in the row
+
+- A setting that accepts one of a known list is a dropdown in its own row, and
+  choosing saves it; a refusal puts the row back rather than showing a change
+  that did not happen. Everything else shows its value with a caret that opens
+  the editor, and a `locked` setting has no control at all. The dropdowns were
+  there before, but only inside the editor behind a click on the name, which
+  is the same as not being there.
+- In the terminal interface the arrows step through those same values while
+  editing.
+- A table cell holding a control is that column's cell again: it was being
+  right-aligned as if it were an action, which is why the setting names sat
+  against the value column.
+
 ### Added — `etnpilot ui` opens the page
 
 - At a terminal the command opens the review page in a browser, because the

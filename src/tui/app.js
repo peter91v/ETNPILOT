@@ -321,6 +321,18 @@ export function createTuiApp({
       editor = undefined;
       return;
     }
+    // Where a setting accepts one of a list, the arrows step through it: the
+    // terminal's answer to the page's dropdown.
+    const choices = editor.entry.choices?.kind === "one" ? editor.entry.choices.values : undefined;
+    if (choices && (key === "\u001B[C" || key === "\u001B[D")) {
+      const literals = choices.map((value) => settingLiteral(value));
+      const at = literals.indexOf(editor.buffer);
+      const next = key === "\u001B[C"
+        ? (at + 1) % literals.length
+        : (at <= 0 ? literals.length - 1 : at - 1);
+      editor = { ...editor, buffer: literals[next], error: undefined };
+      return;
+    }
     if (key === "\r" || key === "\n") return saveSetting();
     if (key === "\u0015") {
       editor = { ...editor, buffer: "" };

@@ -32,6 +32,7 @@ In the settings view:
 | Key | Does |
 | --- | --- |
 | `enter` | Edit the setting under the cursor; the line beneath names the values it accepts |
+| `←` `→` (editing) | Step through those values, where a setting has a list |
 | `d` | Put it back to the committed default |
 | `s` | Switch between writing locally and writing to `~/.config` |
 | `/` | Filter by path; `enter` keeps the filter, `esc` clears it |

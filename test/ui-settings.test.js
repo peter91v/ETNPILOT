@@ -147,3 +147,25 @@ async function settingsServer() {
     close: () => review.close(),
   };
 }
+
+test("the values a setting accepts are part of what the page is told", async () => {
+  const { call, close } = await settingsServer();
+  try {
+    const settings = await (await call("/api/settings")).json();
+    const byPath = Object.fromEntries(settings.entries.map((entry) => [entry.path, entry]));
+    // The page builds its dropdowns and checkboxes from this, so it is here
+    // rather than in the page's own copy of what a setting accepts.
+    assert.deepEqual(byPath["workspace.mode"].choices, { kind: "one", values: ["worktree", "in-place"] });
+    assert.deepEqual(byPath["approval.requireHuman"].choices.kind, "set");
+    assert.equal(byPath["git.committer.name"].choices, undefined);
+
+    // Choosing in a row is the same call as saving in the editor.
+    const chosen = await (await call("/api/settings/set", {
+      method: "POST",
+      body: JSON.stringify({ path: "workspace.mode", value: '"in-place"', scope: "local" }),
+    })).json();
+    assert.equal(chosen.effective, "in-place");
+  } finally {
+    await close();
+  }
+});

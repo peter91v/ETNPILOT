@@ -202,11 +202,19 @@ export function renderReviewPage(token) {
     text-decoration: underline; font-weight: 650;
   }
   @media (prefers-color-scheme: dark) { .btn.link { color: var(--accent); } }
+  /* In a column of values the caret says 'this opens'; underlining all of
+     them turns the table into a page of links. */
+  .btn.link.value { color: var(--text); text-decoration: none; }
+  .btn.link.value:hover, .btn.link.value:focus-visible { color: var(--accent); text-decoration: underline; }
   input, select {
     min-height: 36px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 8px;
     background: var(--surface-0); color: var(--text); min-width: 0;
   }
   input[type="checkbox"] { min-height: 0; width: 16px; height: 16px; }
+  /* In a table cell the control carries the row, so it stays compact and
+     never sets the column's width. */
+  select.inline { min-height: 30px; max-width: 220px; font-family: var(--mono); font-size: 12px; }
+  @media (pointer: coarse) { select.inline { min-height: 38px; } }
   label.check { display: inline-flex; gap: 7px; align-items: center; color: var(--muted); font-size: 13px; }
   .field { display: grid; gap: 6px; }
   .field label { color: var(--text-soft); font-size: 12px; font-weight: 700; }
@@ -594,8 +602,14 @@ function table(columns, rows, emptyText, options = {}) {
   const head = el("tr", {}, columns.map((column) => el("th", { text: column.label })));
   const body = rows.map((row) => el("tr", { class: options.selected?.(row) ? "selected" : "" }, columns.map((column) => {
     const value = column.value(row);
-    if (value instanceof Node) return el("td", { class: "actions" }, [value]);
-    if (Array.isArray(value)) return el("td", { class: "actions" }, value);
+    if (value instanceof Node || Array.isArray(value)) {
+      // A cell that holds a control is still that column's cell: only the
+      // nameless column at the end is the one for actions, which is what
+      // 'actions' means — right-aligned and never wrapped.
+      const nodes = Array.isArray(value) ? value : [value];
+      const kind = column.label === "" ? "actions" : (column.mono ? "mono" : "");
+      return el("td", { class: kind }, nodes);
+    }
     return el("td", {
       class: column.mono ? "mono" : (value.class ?? ""),
       text: value.text ?? value,
@@ -1345,7 +1359,7 @@ function renderSettings() {
   const entries = matching.slice(0, settingsLimit);
   body.push(table([
     { label: "Setting", value: (entry) => editSetting(entry), mono: true },
-    { label: "Value", value: (entry) => shortValue(entry.value), mono: true },
+    { label: "Value", value: (entry) => valueControl(entry), mono: true },
     { label: "From", value: (entry) => ({ text: sourceLabel(entry.source), class: entry.source === "project" ? "" : "warn" }) },
     { label: "Change", value: (entry) => ({ text: entry.mode, class: entry.mode === "locked" ? "bad" : entry.mode === "stricter-only" ? "warn" : "" }) },
   ], entries, "Nothing matches that filter.", { selected: (entry) => entry.path === openSetting?.entry.path }));
@@ -1364,6 +1378,72 @@ function renderSettings() {
   if (openSetting) host.append(renderSettingEditor());
 }
 
+// The value is where a person looks, so the control lives there rather than
+// behind a click on the name: a setting with a list of values is a dropdown in
+// its own row, and everything else opens the editor from the value it shows.
+function valueControl(entry) {
+  if (entry.mode === "locked") {
+    const shown = shortValue(entry.value);
+    return el("span", {
+      class: "muted",
+      text: shown.text,
+      attrs: { title: (shown.title ? shown.title + " — " : "") + "locked by the committed default; it can only change there" },
+    });
+  }
+  if (entry.choices?.kind === "one") {
+    const select = el("select", { class: "inline", attrs: { "aria-label": entry.path } });
+    const current = describeValue(entry.value);
+    for (const option of entry.choices.values) {
+      select.append(el("option", { text: String(option), attrs: { value: JSON.stringify(option) } }));
+    }
+    // A value this project already has that is not in the list is still shown,
+    // so opening a setting never silently changes it.
+    if (![...select.options].some((option) => option.value === current)) {
+      select.append(el("option", { text: shortValue(entry.value).text, attrs: { value: current } }));
+    }
+    select.value = current;
+    select.addEventListener("change", async () => {
+      const chosen = select.value;
+      select.disabled = true;
+      try {
+        await applySetting(entry.path, chosen, scope);
+      } catch (error) {
+        // A refusal puts the value back: the row must not show a change that
+        // did not happen.
+        select.value = current;
+        toast(error.message, "bad");
+      } finally {
+        select.disabled = false;
+      }
+    });
+    return select;
+  }
+  // A set of values and free text both need more room than a cell: the value
+  // opens the editor, and says so by being a control rather than plain text.
+  const shown = shortValue(entry.value);
+  return button(shown.text + " ▾", {
+    class: "btn link mono value",
+    title: shown.title ?? (entry.choices ? "choose from " + entry.choices.values.join(", ") : "edit this value"),
+    onClick: () => openEditor(entry),
+  });
+}
+
+// One way in for every change, so the inline control, the editor and the
+// keyboard all report the same success and the same refusal.
+async function applySetting(path, value, writeScope) {
+  const result = await api("/api/settings/set", {
+    method: "POST",
+    body: JSON.stringify({ path, value, scope: writeScope }),
+  });
+  clearError();
+  toast(result.restartRequired
+    ? result.path + " is saved, but this server already opened that file — restart to use it."
+    : result.path + " is now " + describeValue(result.effective) + " — " + result.scope + ", and never committed.",
+    result.restartRequired ? "warn" : "ok");
+  await refresh({ force: true });
+  return result;
+}
+
 function sourceLabel(source) {
   if (source === "user-local") return "local";
   if (source === "user-global") return "global";
@@ -1371,16 +1451,18 @@ function sourceLabel(source) {
 }
 
 function editSetting(entry) {
-  return button(entry.path, { class: "btn link", onClick: () => {
-    if (entry.mode === "locked") {
-      // A locked setting does not open at all, and says why.
-      toast(entry.path + " is locked by the committed default; it can only change there.", "warn");
-      return;
-    }
-    clearError();
-    openSetting = { entry, value: describeValue(entry.value), scope };
-    renderSettings();
-  } });
+  return button(entry.path, { class: "btn link", onClick: () => openEditor(entry) });
+}
+
+function openEditor(entry) {
+  if (entry.mode === "locked") {
+    // A locked setting does not open at all, and says why.
+    toast(entry.path + " is locked by the committed default; it can only change there.", "warn");
+    return;
+  }
+  clearError();
+  openSetting = { entry, value: describeValue(entry.value), scope };
+  renderSettings();
 }
 
 function renderSettingEditor() {
@@ -1398,17 +1480,8 @@ function renderSettingEditor() {
   const close = () => { openSetting = undefined; renderSettings(); };
   const save = button("Save", { class: "btn primary", onClick: async () => {
     try {
-      const result = await api("/api/settings/set", {
-        method: "POST",
-        body: JSON.stringify({ path: entry.path, value: openSetting.value, scope: openSetting.scope }),
-      });
-      clearError();
-      toast(result.restartRequired
-        ? result.path + " is saved, but this server already opened that file — restart to use it."
-        : result.path + " is now " + describeValue(result.effective) + " — " + result.scope + ", and never committed.",
-        result.restartRequired ? "warn" : "ok");
+      await applySetting(entry.path, openSetting.value, openSetting.scope);
       close();
-      await refresh({ force: true });
     } catch (error) {
       // A refusal is shown where the change was made, and the value stays.
       message.className = "notice bad";

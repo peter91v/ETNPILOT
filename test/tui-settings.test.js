@@ -300,3 +300,31 @@ test("a settings frame still fits the terminal it was given", () => {
   assert.equal(settingLiteral([1, 2]), "[1,2]");
   assert.equal(settingLiteral(undefined), "");
 });
+
+test("the arrows step through the values a setting accepts", async () => {
+  const { app, state } = await settingsApp();
+  try {
+    await select(app, "workspace.mode");
+    await app.handle("\r");
+    assert.equal(app.editor.buffer, '"worktree"');
+    // Right and left walk the list the page offers as a dropdown, and it
+    // wraps rather than stopping at the end.
+    await app.handle("\u001B[C");
+    assert.equal(app.editor.buffer, '"in-place"');
+    await app.handle("\u001B[C");
+    assert.equal(app.editor.buffer, '"worktree"');
+    await app.handle("\u001B[D");
+    assert.equal(app.editor.buffer, '"in-place"');
+    await app.handle("\r");
+    assert.equal((await state.collect()).settings.entries.find((entry) => entry.path === "workspace.mode").value, "in-place");
+
+    // A setting with no list keeps the arrows out of its text.
+    await select(app, "queue.workers");
+    await app.handle("\r");
+    const before = app.editor.buffer;
+    await app.handle("\u001B[C");
+    assert.equal(app.editor.buffer, before);
+  } finally {
+    state.close();
+  }
+});

@@ -68,9 +68,11 @@ teaches the wrong thing about what this can do.
   GitLab itself is missing.
 - **Settings**, against the same layers the CLI and the TUI use: the value, the
   layer it came from, and whether it may be changed (`open`, `stricter-only`,
-  `locked`). Where a setting accepts only certain values, they are offered —
-  a dropdown for one of them, checkboxes for a set — and the list is the one
-  the code validates against. Anything else is YAML, as everywhere else. A refusal appears where the
+  `locked`). The control is in the row: a setting that takes one of a known
+  list is a dropdown there, and choosing saves at once; a refusal puts the row
+  back. Everything else shows its value with a caret that opens the editor —
+  checkboxes for a set of values, a YAML field otherwise. A `locked` setting
+  has no control at all and says why when you ask. A refusal appears where the
   change was made, with the reason, and the input keeps what was typed. Nothing
   changed here is ever committed — it goes to `.etnpilot/etnpilot.local.yaml`
   or `~/.config/etnpilot/config.yaml`. Local settings the loader refuses are
