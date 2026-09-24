@@ -132,6 +132,14 @@ vorliegt:
 Die erste Zeile heißt: Satz fehlt. Die zweite: Satz ist da, diese Aufrufe sind
 älter — der nächste Run zeigt Kosten.
 
+**Datierte Snapshots sind mitgemeint.** OpenAI beantwortet eine Anfrage nach
+`gpt-5-mini` mit `gpt-5-mini-2025-08-07`. Ein Satz unter `gpt-5-mini` gilt
+auch dafür — sonst wäre jeder Satz veraltet, sobald der Anbieter den Snapshot
+wechselt. Ein exakter Schlüssel gewinnt weiterhin, falls ein bestimmter
+Snapshot anders abgerechnet wird. Abgeschnitten wird nur ein echtes
+`-JJJJ-MM-TT` am Ende, kein Präfix: `gpt-5` erbt nie den Satz von
+`gpt-5-mini`.
+
 Der Schlüssel ist der **Modellname, den der Provider zurückmeldet** — derselbe,
 der im Receipt unter `usage.model` steht. `"*"` gilt für alles, was sonst
 keinen Satz hat. `currency` ist ein dreistelliger Code, Standard `USD`.

@@ -187,3 +187,50 @@ test("a cost that cannot be worked out names the model whose rate is missing", a
     { model: "claude-opus-5", calls: 1 },
   ]);
 });
+
+test("a rate reaches the dated snapshot a provider actually served", async () => {
+  // OpenAI answers a request for 'gpt-5-mini' with 'gpt-5-mini-2025-08-07',
+  // and the rate is keyed by what came back. Keying it by the name someone
+  // configured would otherwise go stale the next time the provider rotates
+  // its snapshot, and the card would read 'not priced' with no cause anyone
+  // could see.
+  const telemetry = new Telemetry({
+    enabled: false,
+    serviceName: "s",
+    environment: "test",
+    pricing: {
+      currency: "USD",
+      models: {
+        "gpt-5-mini": { inputPerMillion: 0.25, outputPerMillion: 2 },
+        "gpt-5-mini-2025-01-01": { inputPerMillion: 99, outputPerMillion: 99 },
+      },
+    },
+  });
+
+  const dated = telemetry.recordProviderUsage({
+    workflowRunId: "w1",
+    provider: "openai",
+    model: "gpt-5-mini-2025-08-07",
+    usage: { inputTokens: 1_000_000, outputTokens: 0 },
+  });
+  assert.equal(dated.estimatedCost, 0.25, "the undated rate applies to the snapshot");
+
+  // An exact key still wins, so a snapshot that is priced differently can say so.
+  const pinned = telemetry.recordProviderUsage({
+    workflowRunId: "w2",
+    provider: "openai",
+    model: "gpt-5-mini-2025-01-01",
+    usage: { inputTokens: 1_000_000, outputTokens: 0 },
+  });
+  assert.equal(pinned.estimatedCost, 99);
+
+  // And the suffix is a shape, not a prefix: a different model keeps its own
+  // answer rather than borrowing one.
+  const other = telemetry.recordProviderUsage({
+    workflowRunId: "w3",
+    provider: "openai",
+    model: "gpt-5-mini-high",
+    usage: { inputTokens: 1_000_000, outputTokens: 0 },
+  });
+  assert.equal(other.estimatedCost, undefined);
+});

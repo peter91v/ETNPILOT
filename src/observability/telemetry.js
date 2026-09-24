@@ -99,7 +99,9 @@ export class Telemetry {
   recordProviderUsage({ workflowRunId, agentRunId, provider, model, usage = {} }) {
     const normalized = normalizeUsage(usage);
     const key = workflowRunId ?? agentRunId;
-    const rate = this.pricing.models[model] ?? this.pricing.models["*"];
+    const rate = this.pricing.models[model]
+      ?? this.pricing.models[undatedModel(model)]
+      ?? this.pricing.models["*"];
     const estimatedCost = rate ? calculateCost(normalized, rate) : undefined;
     const previous = this.totals.get(key) ?? emptySummary(this.pricing.currency);
     const total = {
@@ -436,6 +438,15 @@ function providerAttributes(accounting = {}) {
 
 export function telemetryProviderAttributes(accounting) {
   return providerAttributes(accounting);
+}
+
+// Providers answer with the dated snapshot they actually served —
+// 'gpt-5-mini-2025-08-07' for a request that named 'gpt-5-mini'. A rate keyed
+// by the name someone configured must reach it, or every rate goes stale the
+// next time the provider rotates its snapshot. The suffix is an exact shape,
+// not a prefix guess: 'gpt-5' never picks up the rate for 'gpt-5-mini'.
+function undatedModel(model) {
+  return typeof model === "string" ? model.replace(/-\d{4}-\d{2}-\d{2}$/, "") : model;
 }
 
 function emptySummary(currency) {
