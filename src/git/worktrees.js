@@ -1,5 +1,5 @@
 import { mkdir } from "node:fs/promises";
-import { dirname, resolve, sep } from "node:path";
+import { basename, dirname, relative, resolve, sep } from "node:path";
 import { git } from "./command.js";
 
 const DEFAULT_IGNORED_UNTRACKED = Object.freeze([".codegraph/", ".etnpilot/state/", ".etnpilot/worktrees/"]);
@@ -27,6 +27,55 @@ export class WorktreeManager {
         return [key, parts.join(" ") || true];
       }),
     ));
+  }
+
+  // What a surface needs to show a worktree: which branch it holds, whether it
+  // is one ETNPilot made, and whether removing it would throw away work. The
+  // same ignore list as removeIfClean decides the last one, so the screen and
+  // the removal can never disagree about 'clean'.
+  async describe({ ignoredUntracked = DEFAULT_IGNORED_UNTRACKED } = {}) {
+    const described = [];
+    for (const entry of await this.list()) {
+      const path = typeof entry.worktree === "string" ? entry.worktree : undefined;
+      if (path === undefined) continue;
+      const managed = path.startsWith(`${this.worktreeRoot}${sep}`);
+      const record = {
+        name: managed ? relative(this.worktreeRoot, path) : basename(path),
+        path,
+        branch: typeof entry.branch === "string" ? entry.branch.replace(/^refs\/heads\//, "") : undefined,
+        head: typeof entry.HEAD === "string" ? entry.HEAD : undefined,
+        detached: entry.detached !== undefined,
+        bare: entry.bare !== undefined,
+        locked: entry.locked === undefined ? undefined : (entry.locked === true ? "" : String(entry.locked)),
+        prunable: entry.prunable === undefined ? undefined : (entry.prunable === true ? "" : String(entry.prunable)),
+        managed,
+        main: path === this.repositoryRoot,
+      };
+      described.push({ ...record, ...await this.#inspect(record, ignoredUntracked) });
+    }
+    return described;
+  }
+
+  async #inspect(record, ignoredUntracked) {
+    if (record.bare || record.prunable !== undefined) return { readable: false };
+    let status;
+    try {
+      status = await git(["status", "--porcelain"], { cwd: record.path });
+    } catch (error) {
+      // A worktree whose directory is gone is still worth listing: 'git
+      // worktree prune' is the fix, and the screen should say so.
+      return { readable: false, error: error.message };
+    }
+    const entries = status.stdout.split("\n").filter(Boolean);
+    const blocking = entries.filter((entry) => !isIgnorableUntracked(entry, ignoredUntracked));
+    return {
+      readable: true,
+      changes: entries.length,
+      blocking: blocking.length,
+      // Only a managed worktree that holds nothing unsaved can be removed from
+      // a surface; the main checkout is never a candidate.
+      removable: record.managed && !record.main && record.locked === undefined && blocking.length === 0,
+    };
   }
 
   async removeIfClean(name, { ignoredUntracked = DEFAULT_IGNORED_UNTRACKED } = {}) {

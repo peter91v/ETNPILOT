@@ -24,7 +24,7 @@ import { latestPipeline } from "../gitlab/pipelines.js";
 import { createGitLabWebhookServer } from "../gitlab/webhook-server.js";
 import { createReviewServer } from "../ui/server.js";
 import { createTuiApp } from "../tui/app.js";
-import { openProjectState } from "../runtime/project-state.js";
+import { openProjectState, readMergeRequests, readWorktrees } from "../runtime/project-state.js";
 import { runProject } from "../runtime/project-runner.js";
 import { replayRun } from "../runtime/replay.js";
 import { WorkflowQueue } from "../workflow/queue.js";
@@ -86,6 +86,7 @@ Usage:
     [--require-signatures]
   etnpilot worktree list [--root directory]
   etnpilot worktree cleanup <name> [--root directory]
+  etnpilot merge list [--status opened|merged|closed|all] [--root directory]
   etnpilot graph build [directory]
   etnpilot graph dependencies <file> [--root directory]
   etnpilot graph dependents <file> [--root directory]
@@ -175,12 +176,22 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     console.log(JSON.stringify(report, null, 2));
     return report.receiptValid && report.drifted.length === 0 ? 0 : 1;
   } else if (command === "worktree" && subcommand === "list") {
-    const manager = new WorktreeManager(resolve(values.root));
-    console.log(JSON.stringify(await manager.list(), null, 2));
+    // The same description the TUI shows: which branch each worktree holds,
+    // which ones a run made, and what removing one would throw away.
+    const root = resolve(values.root);
+    const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml")).catch(ignoreMissing);
+    console.log(JSON.stringify(await readWorktrees({ root, config: config ?? {} }), null, 2));
   } else if (command === "worktree" && subcommand === "cleanup") {
     if (!rest[0]) throw new Error("A worktree name is required.");
     const manager = new WorktreeManager(resolve(values.root));
     console.log(JSON.stringify(await manager.removeIfClean(rest[0]), null, 2));
+  } else if (command === "merge" && (subcommand === "list" || subcommand === undefined)) {
+    const root = resolve(values.root);
+    const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"));
+    const merges = await readMergeRequests({ root, config, env: process.env }, { state: values.status ?? "opened" });
+    console.log(JSON.stringify(merges, null, 2));
+    // Nothing to say is success; being unable to ask is not.
+    return merges.configured === false || merges.available === false ? 1 : 0;
   } else if (command === "graph" && subcommand === "build") {
     const root = resolve(rest[0] ?? ".");
     const graph = new CodeGraph(root);

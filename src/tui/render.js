@@ -4,7 +4,7 @@ import { createStyle, displayWidth, duration, pad, padStart, shortId, since, tru
 // The runtime below only paints what these return, which is what makes the
 // interface testable without a terminal.
 
-const VIEWS = Object.freeze(["approvals", "runs", "queue", "settings"]);
+const VIEWS = Object.freeze(["approvals", "runs", "queue", "settings", "worktrees", "merges"]);
 
 export function viewList() {
   return [...VIEWS];
@@ -29,6 +29,8 @@ export function renderApp(state, options = {}) {
     help = false,
     helpOffset = 0,
     receipt,
+    worktrees,
+    merges,
     active = [],
   } = options;
   const style = createStyle({ color });
@@ -41,7 +43,9 @@ export function renderApp(state, options = {}) {
     "",
   ];
 
-  const context = { style, width, height: body, cursor, now, editor, filter, filtering, scope, receipt, active };
+  const context = {
+    style, width, height: body, cursor, now, editor, filter, filtering, scope, receipt, worktrees, merges, active,
+  };
   const rendered = help
     ? renderHelp({ style, width, height: body, offset: helpOffset })
     : detail && view === "approvals"
@@ -63,6 +67,8 @@ export function renderApp(state, options = {}) {
 function renderView(view, state, context) {
   if (view === "runs") return renderRuns(state, context);
   if (view === "queue") return renderQueue(state, context);
+  if (view === "worktrees") return renderWorktrees(state, context);
+  if (view === "merges") return renderMerges(state, context);
   if (view === "settings") {
     return renderSettings(state, context);
   }
@@ -104,6 +110,12 @@ function footerKeys({ view, detail, editor, prompt, help }) {
   }
   if (view === "queue") {
     return [["↑↓", "move"], ["c", "cancel"], ["R", "resume"], ["n", "run"], ["tab", "view"], ["q", "quit"]];
+  }
+  if (view === "worktrees") {
+    return [["↑↓", "move"], ["x", "remove if clean"], ["g", "reread"], ["n", "run"], ["tab", "view"], ["q", "quit"]];
+  }
+  if (view === "merges") {
+    return [["↑↓", "move"], ["g", "reread"], ["n", "run"], ["tab", "view"], ["?", "help"], ["q", "quit"]];
   }
   if (view === "settings") {
     return [["↑↓", "move"], ["enter", "edit"], ["d", "default"], ["s", "scope"], ["/", "filter"], ["tab", "view"], ["q", "quit"]];
@@ -193,6 +205,134 @@ function renderQueue(state, { style, width, height, cursor, now }) {
     { label: "UPDATED", width: 10, value: (job) => since(job.updatedAt, now) },
   ];
   return [style.dim(summary), "", ...table(jobs, columns, { style, width, height: height - 2, cursor, now })];
+}
+
+// The worktrees on disk: which branch each holds, which ones a run made, and
+// whether removing one would throw away work. A worktree is where a run's
+// changes physically are, so it is evidence as much as the receipt is.
+export function renderWorktrees(state, { style, width, height, cursor, worktrees }) {
+  if (worktrees === undefined) return [style.dim("Reading the worktrees…")];
+  if (worktrees.available === false) {
+    return [
+      style.bad("The worktrees could not be listed."),
+      "",
+      ...wrap(worktrees.error ?? "git did not answer.", width - 2).map((line) => `  ${style.ink(line)}`),
+      "",
+      style.dim("A project outside a git checkout has none; 'etnpilot run' needs one."),
+    ];
+  }
+  const entries = worktrees.entries ?? [];
+  if (entries.length === 0) return [style.dim("No worktrees are registered.")];
+  const summary = [
+    `${entries.length} ${entries.length === 1 ? "worktree" : "worktrees"}`,
+    `${worktrees.managed ?? 0} from runs`,
+    worktrees.unsaved > 0 ? `${worktrees.unsaved} with unsaved work` : "nothing unsaved",
+  ].join(" · ");
+  const columns = [
+    { label: "WORKTREE", width: Math.max(16, Math.floor(width * 0.24)), value: (entry) => entry.name },
+    { label: "BRANCH", width: Math.max(18, Math.floor(width * 0.28)), value: (entry) => branchLabel(entry) },
+    { label: "HEAD", width: 9, value: (entry) => (entry.head ?? "").slice(0, 8) },
+    { label: "FROM", width: 9, value: (entry) => (entry.main ? "checkout" : entry.managed ? "a run" : "elsewhere"),
+      tone: (entry) => (entry.managed ? "accent" : "muted") },
+    { label: "STATE", width: 14, value: (entry) => worktreeState(entry), tone: (entry) => worktreeTone(entry) },
+  ];
+  const lines = [style.dim(summary), "", ...table(entries, columns, { style, width, height: height - 2, cursor })];
+  // 'x' is in the footer, so the list says which rows it can actually act on
+  // rather than letting the key look broken on the others.
+  if (!entries.some((entry) => entry.removable)) {
+    lines.push("", style.dim("None of these can be removed from here: only a run's own worktree, with nothing unsaved."));
+  }
+  return lines;
+}
+
+function branchLabel(entry) {
+  if (entry.branch) return entry.branch;
+  return entry.detached ? "(detached)" : entry.bare ? "(bare)" : "—";
+}
+
+function worktreeState(entry) {
+  if (entry.locked !== undefined) return "locked";
+  if (entry.prunable !== undefined) return "prunable";
+  if (entry.readable === false) return "missing";
+  if (entry.blocking > 0) return `${entry.blocking} unsaved`;
+  if (entry.changes > 0) return "clean";
+  return "clean";
+}
+
+function worktreeTone(entry) {
+  if (entry.readable === false || entry.prunable !== undefined) return "bad";
+  if (entry.locked !== undefined || entry.blocking > 0) return "warn";
+  return "ok";
+}
+
+// ETNPilot's own merge requests first, then everyone else's for the same
+// target: what lands before ours is what breaks ours. Read from GitLab, since
+// a receipt is sealed before publishing and cannot carry this.
+export function renderMerges(state, { style, width, height, cursor, now, merges }) {
+  if (merges === undefined) return [style.dim("Reading the merge requests…")];
+  if (merges.configured === false) {
+    return [style.dim(merges.reason ?? "No GitLab project is configured."), "", style.dim("Everything else here works without it.")];
+  }
+  if (merges.available === false) {
+    return [
+      style.bad(`GitLab did not answer for ${merges.project}.`),
+      "",
+      ...wrap(merges.error ?? "", width - 2).map((line) => `  ${style.ink(line)}`),
+      "",
+      style.dim("This view is the only one that needs the network and a token; 'g' tries again."),
+    ];
+  }
+  const entries = merges.entries ?? [];
+  const ours = merges.ours ?? 0;
+  const summary = [
+    merges.project,
+    `${entries.length} ${merges.state ?? "opened"}`,
+    ours > 0 ? `${ours} ours` : "none of them ours",
+    `target ${merges.targetBranch ?? "main"}`,
+  ].join(" · ");
+  if (entries.length === 0) {
+    return [style.dim(summary), "", style.dim("Nothing is open. A published run appears here as a draft.")];
+  }
+  const columns = [
+    { label: "MR", width: 7, value: (entry) => `!${entry.iid}`, tone: (entry) => (entry.own ? "accent" : "muted") },
+    { label: "TITLE", width: Math.max(20, Math.floor(width * 0.34)), value: (entry) => entry.title },
+    { label: "BRANCH", width: Math.max(16, Math.floor(width * 0.2)), value: (entry) => entry.sourceBranch },
+    { label: "WHOSE", width: 12, value: (entry) => (entry.own ? "ours" : entry.author || "someone"),
+      tone: (entry) => (entry.own ? "accent" : "muted") },
+    { label: "MERGE", width: 16, value: (entry) => mergeLabel(entry), tone: (entry) => mergeTone(entry) },
+    { label: "UPDATED", width: 9, value: (entry) => since(entry.updatedAt, now) },
+  ];
+  const ordered = mergeEntries(merges);
+  const lines = [style.dim(summary), "", ...table(ordered, columns, { style, width, height: height - 2, cursor })];
+  if (merges.truncated) {
+    lines.push("", style.dim(`Showing ${entries.length} of ${merges.truncated}; the rest are in GitLab.`));
+  }
+  const selected = ordered[clamp(cursor, ordered.length)];
+  if (selected) lines.push("", style.dim(truncate(selected.webUrl ?? "", width)));
+  return lines;
+}
+
+// Ours first: they are the ones this window can do something about. The app
+// selects from this same order, or the cursor would point at another row than
+// the one under it.
+export function mergeEntries(merges) {
+  const entries = merges?.entries ?? [];
+  return [...entries].sort((left, right) => Number(right.own) - Number(left.own) || right.iid - left.iid);
+}
+
+function mergeLabel(entry) {
+  if (entry.hasConflicts) return "conflicts";
+  if (entry.state && entry.state !== "opened") return entry.state;
+  const status = (entry.mergeStatus ?? "").replaceAll("_", " ");
+  if (entry.draft) return status === "mergeable" || status === "" ? "draft" : `draft · ${status}`;
+  return status || "open";
+}
+
+function mergeTone(entry) {
+  if (entry.hasConflicts || entry.state === "closed") return "bad";
+  if (entry.state === "merged") return "ok";
+  if (entry.draft) return "warn";
+  return entry.mergeStatus === "mergeable" ? "ok" : "muted";
 }
 
 function table(rows, columns, { style, width, height, cursor }) {
@@ -373,7 +513,7 @@ function twoColumns(sections, render, width) {
 
 const HELP_SECTIONS = Object.freeze([
   ["Everywhere", [
-    ["tab / 1-4", "switch view"],
+    ["tab / 1-6", "switch view"],
     ["↑ ↓ / k j", "move the cursor"],
     ["n", "start a run"],
     ["g", "refresh now"],
@@ -387,6 +527,8 @@ const HELP_SECTIONS = Object.freeze([
   ]],
   ["Runs", [["enter", "open the receipt"]]],
   ["Queue", [["c", "request cancellation"], ["R", "resume a failed job"]]],
+  ["Worktrees", [["x", "remove it, if it is clean"], ["g", "read them again"]]],
+  ["Merge requests", [["↑↓", "ours first, then others"], ["g", "ask GitLab again"]]],
   ["Settings", [
     ["enter", "edit"],
     ["d", "back to the default"],

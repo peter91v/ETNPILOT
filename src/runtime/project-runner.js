@@ -32,6 +32,10 @@ import { createTelemetry } from "../observability/telemetry.js";
 import { buildDevcontainerImage, createSandbox, readDevcontainerImage } from "./sandbox.js";
 import { createFixtureRecorder, fixtureProviderFactories, loadFixtures } from "./fixtures.js";
 
+// Every branch a run publishes from starts here, which is also how a surface
+// tells ETNPilot's own merge requests apart from everyone else's.
+export const RUN_BRANCH_PREFIX = "etnpilot/";
+
 export async function runProject({
   root = process.cwd(),
   input,
@@ -61,7 +65,7 @@ export async function runProject({
   const effectiveCleanupPolicy = cleanupPolicy ?? bootstrapConfig.workspace?.cleanup ?? "never";
   assertCleanupPolicy(effectiveCleanupPolicy);
   const runId = createRunId();
-  const branch = `etnpilot/run-${runId}`;
+  const branch = `${RUN_BRANCH_PREFIX}run-${runId}`;
   const worktreeManager = new WorktreeManager(repositoryRoot);
   const receiptPath = join(repositoryRoot, ".etnpilot", "state", "runs", `${runId}.jsonl`);
   const policy = new PolicyEngine(bootstrapConfig.policy);

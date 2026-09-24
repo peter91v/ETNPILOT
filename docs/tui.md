@@ -14,11 +14,12 @@ setting changed here is refused for the same reasons.
 
 | Key | Does |
 | --- | --- |
-| `tab`, `1`–`4` | Switch between approvals, runs, queue, and settings |
+| `tab`, `1`–`6` | Switch between approvals, runs, queue, settings, worktrees, and merge requests |
 | `↑` `↓`, `k` `j` | Move the cursor |
 | `enter` | Open the approval under the cursor |
 | `a` / `r` | Approve once / reject |
 | `c` / `R` | Request cancellation of / resume the queue job under the cursor |
+| `x` | Remove the worktree under the cursor, if it is clean |
 | `n` | Start a run |
 | `esc` | Leave the detail view |
 | `g` | Refresh now, rather than waiting for the next poll |
@@ -37,6 +38,70 @@ In the settings view:
 While a filter or a value is being typed, every printable key is text. `q` does
 not quit and `d` does not reset — the caret on screen says which mode you are
 in.
+
+## Worktrees
+
+A run works in its own worktree, so what is on disk is evidence as much as the
+receipt is. `5` lists them: which branch each holds, which ones ETNPilot made,
+and what removing one would throw away.
+
+```
+3 worktrees · 2 from runs · 1 with unsaved work
+
+  WORKTREE          BRANCH                  HEAD      FROM      STATE
+  service           main                    3c278aed  checkout  clean
+› run-7e1b0a33      etnpilot/run-7e1b0a33   3c278aed  a run     1 unsaved
+  run-9f2a1c44      etnpilot/run-9f2a1c44   3c278aed  a run     clean
+```
+
+`x` removes the one under the cursor through the same `removeIfClean` the CLI
+uses, which is the point: a worktree holding unsaved work is **not** removed,
+and the screen says what it is keeping.
+
+```
+run-7e1b0a33 keeps 1 unsaved change — nothing was removed.
+```
+
+The state ETNPilot itself writes into a workspace — the CodeGraph index,
+`.etnpilot/state/` — never counts as unsaved work, exactly as it does not for
+`etnpilot worktree cleanup`. The checkout you work in, a locked worktree, and
+one that is not ETNPilot's are refused with the reason; when no row on screen
+can be removed, the view says so rather than letting `x` look broken.
+
+Worktrees are local but not free — one `git status` each — so they are reread
+while this view is open and at most every five seconds. `g` rereads now.
+
+## Merge requests
+
+`6` shows what is open in GitLab for this project, ours first. Ours are the
+ones a run published: told apart by their branch, `etnpilot/…`, not by a name
+in the title that anyone could copy.
+
+```
+group/service · 3 opened · 2 ours · target main
+
+  MR     TITLE                                BRANCH                 WHOSE  MERGE      UPDATED
+  !42    Draft: ETNPilot: add a health check  etnpilot/run-9f2a1c44  ours   draft      2h
+› !41    Draft: ETNPilot: retry the lease     etnpilot/run-7e1b0a33  ours   conflicts  1d
+  !39    Split the scheduler out              feature/scheduler      mira   mergeable  5m
+
+https://gitlab.internal/group/service/-/merge_requests/41
+```
+
+Everyone else's are listed too, because what lands before ours is what breaks
+ours — the same reason a run rehearses its merge against the target branch.
+Titles, branches, and names written by other people are data here: escaped and
+bounded, like every other value on screen.
+
+This is the one view that needs the network and a token, so it is never fetched
+behind your back: it reads when you open it and again on `g`, never on the
+poll. Without `git.project` it says what to configure; without a token, or when
+GitLab refuses, it says that instead of looking like a project with nothing
+open. Everything else in the TUI keeps working either way.
+
+The same two are in the terminal: `etnpilot worktree list` prints exactly what
+the worktrees view shows, and `etnpilot merge list [--status …]` what the merge
+requests view shows.
 
 ## Starting a run
 
