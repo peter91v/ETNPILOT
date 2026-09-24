@@ -156,6 +156,37 @@ etnpilot ui            # öffnet den Browser mit der neuen Sitzung
 Variable nicht. Fehlt der Schlüssel, nennt der Provider beim Aufruf genau die
 Variable, die zu setzen ist.
 
+#### Wenn ein Check mit 126 scheitert
+
+```
+Check failed with exit code 126: npm
+env: 'node': Permission denied
+```
+
+Checks erben absichtlich nur erlaubte Variablen, damit agentengeschriebener
+Code keine Zugangsdaten sieht. Auf Termux gehört `LD_PRELOAD` dazu: darin
+steht `libtermux-exec`, und ohne sie darf Android den Interpreter aus der
+`#!`-Zeile gar nicht starten — `npm` stirbt, bevor es läuft. `LD_PRELOAD`,
+`LD_LIBRARY_PATH`, `PREFIX` und die `ANDROID_*`-Paare sind deshalb in der
+Standardliste.
+
+Fehlt etwas anderes, sagt die Meldung, was der Check bekommen hat:
+
+```
+It inherited only these variables: HOME, LANG, PATH, TMPDIR.
+```
+
+Nachstellen lässt sich das direkt:
+
+```bash
+env -i PATH="$PATH" HOME="$HOME" npm test          # scheitert wie der Check
+env -i PATH="$PATH" HOME="$HOME" LD_PRELOAD="$LD_PRELOAD" npm test   # läuft
+```
+
+Ergänzen lässt sich die Liste nur in der eingecheckten
+`.etnpilot/etnpilot.yaml` unter `checks.envAllow` — die Einstellung ist
+`stricter-only`, lokal kann man sie nur verkleinern.
+
 ### Ein anderes Modell oder ein eigener Endpunkt
 
 ```bash

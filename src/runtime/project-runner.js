@@ -456,10 +456,14 @@ export async function runProject({
   };
 }
 
-// PATH and the locale are what any command needs; PREFIX, LD_LIBRARY_PATH and
-// the ANDROID_* pair are what one needs on Termux, where the loader and every
-// wrapper script read them and a command without them exits 126 before it
-// runs. None of them carry credentials, which is what this list keeps out.
+// PATH and the locale are what any command needs. The rest are what one needs
+// on Termux, where a check without them fails before it runs: LD_PRELOAD holds
+// libtermux-exec, which is what lets Android execute a script's interpreter at
+// all — without it 'npm' dies as "env: 'node': Permission denied" — and PREFIX,
+// LD_LIBRARY_PATH and the ANDROID_* pair are read by the loader and by every
+// wrapper script. None of them carry credentials, which is what this list
+// keeps out; they come from the same shell that started the run, exactly as
+// PATH does.
 const DEFAULT_CHECK_ENV_ALLOW = Object.freeze([
   "PATH",
   "HOME",
@@ -467,14 +471,19 @@ const DEFAULT_CHECK_ENV_ALLOW = Object.freeze([
   "LC_ALL",
   "TZ",
   "TMPDIR",
-  "PREFIX",
+  "LD_PRELOAD",
   "LD_LIBRARY_PATH",
+  "PREFIX",
   "ANDROID_DATA",
   "ANDROID_ROOT",
 ]);
 
 // Checks execute code the agent just wrote. They inherit an allow-listed
 // environment so repository and provider credentials cannot be read by them.
+// Exported under its own name so a test can assert what a check inherits and
+// what it must not, without starting a run to find out.
+export const checkEnvironmentForTest = (env, config) => checkEnvironment(env, config);
+
 function checkEnvironment(env, config = {}) {
   const extra = config.envAllow ?? [];
   if (!Array.isArray(extra) || extra.some((name) => typeof name !== "string" || !/^[A-Z][A-Z0-9_]*$/.test(name))) {

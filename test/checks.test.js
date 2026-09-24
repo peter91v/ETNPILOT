@@ -51,6 +51,8 @@ test("126 and 127 point at the environment, and at the file that can widen it", 
     (error) => {
       assert.match(error.message, /could not be executed/);
       assert.match(error.message, /'checks\.envAllow' in the committed \.etnpilot\/etnpilot\.yaml/);
+      // What it was given, so the missing name is visible rather than guessed.
+      assert.match(error.message, /It inherited only these variables: PATH/);
       // The setting is stricter-only, so sending someone to a local change
       // would send them to a refusal.
       assert.match(error.message, /a local file cannot widen it/);
@@ -87,4 +89,31 @@ test("a long failure is trimmed rather than pasted whole", async () => {
       return true;
     },
   );
+});
+
+test("the environment a check inherits carries what Termux needs to exec at all", async () => {
+  // 'env: node: Permission denied' is what a check reports on Android when
+  // LD_PRELOAD is not passed: libtermux-exec is what lets the system execute a
+  // script's interpreter there, so without it nothing with a '#!' line runs.
+  const { checkEnvironmentForTest } = await import("../src/runtime/project-runner.js");
+  const inherited = checkEnvironmentForTest({
+    PATH: "/usr/bin",
+    HOME: "/home/user",
+    LD_PRELOAD: "/data/data/com.termux/files/usr/lib/libtermux-exec.so",
+    PREFIX: "/data/data/com.termux/files/usr",
+    LD_LIBRARY_PATH: "/data/data/com.termux/files/usr/lib",
+    ANDROID_DATA: "/data",
+    ANDROID_ROOT: "/system",
+    OPENAI_API_KEY: "sk-secret",
+    ETNPILOT_GITLAB_TOKEN: "glpat-secret",
+  }, {});
+
+  for (const name of ["PATH", "HOME", "LD_PRELOAD", "PREFIX", "LD_LIBRARY_PATH", "ANDROID_DATA", "ANDROID_ROOT"]) {
+    assert.equal(name in inherited, true, `${name} reaches the check`);
+  }
+  // The reason this list exists: a check runs agent-authored code, and the
+  // credentials this run holds are not its to read.
+  assert.equal("OPENAI_API_KEY" in inherited, false);
+  assert.equal("ETNPILOT_GITLAB_TOKEN" in inherited, false);
+  assert.equal(inherited.ETNPILOT_CHECK, "1");
 });
