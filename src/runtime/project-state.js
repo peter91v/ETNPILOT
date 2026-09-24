@@ -369,8 +369,35 @@ export function describeOutcome(receipt, { running = false } = {}) {
     steps,
     reasons,
     usage: terminal.observability?.summary,
+    ...(terminal.git?.mergeRehearsal ? { rehearsal: describeRehearsal(terminal.git.mergeRehearsal) } : {}),
     ...(terminal.cleanup ? { cleanup: terminal.cleanup } : {}),
   };
+}
+
+const REHEARSAL_REASONS = Object.freeze({
+  "fetch-failed": "the target branch could not be fetched",
+  "merge-tree-unavailable": "this git does not support 'merge-tree --write-tree'",
+});
+
+// A merge that was never attempted is not a merge that is not clean. The
+// rehearsal fetches the target branch first, and a fetch that fails leaves
+// nothing to be clean or dirty about — reporting that as 'not clean' invents
+// a conflict nobody found.
+function describeRehearsal(rehearsal) {
+  const target = rehearsal.targetBranch ?? "the target branch";
+  if (rehearsal.rehearsed === false) {
+    const why = REHEARSAL_REASONS[rehearsal.reason] ?? rehearsal.reason ?? "no reason recorded";
+    return {
+      state: "not-rehearsed",
+      text: `not rehearsed against ${target}: ${why}`,
+      ...(rehearsal.error ? { error: rehearsal.error } : {}),
+    };
+  }
+  if (rehearsal.clean === true) return { state: "clean", text: `clean into ${target}` };
+  const conflicts = rehearsal.conflicts ?? [];
+  return conflicts.length > 0
+    ? { state: "conflicts", text: `conflicts with ${target}: ${conflicts.join(", ")}`, conflicts }
+    : { state: "conflicts", text: `does not merge into ${target}, with no file named`, conflicts };
 }
 
 function publicationReason(publication) {

@@ -181,7 +181,7 @@ test("a run that is still going is not a run that stopped", async () => {
   );
 });
 
-test("a rehearsal that is not clean names its files or says it named none", async () => {
+test("a rehearsal that never ran is not a rehearsal that found conflicts", async () => {
   // 'CONFLICTS:' with nothing after it is a claim with no evidence.
   const directory = await runsDirectory({
     "20260101000002-cccc.jsonl": [
@@ -190,21 +190,43 @@ test("a rehearsal that is not clean names its files or says it named none", asyn
         runId: "20260101000002-cccc",
         terminal: true,
         status: "succeeded",
-        git: { mergeRehearsal: { clean: false, conflicts: [] } },
+        git: { mergeRehearsal: { rehearsed: true, clean: false, targetBranch: "main", conflicts: [] } },
         summary: { status: "succeeded", steps: {} },
       },
     ],
   });
   const receipt = await readReceipt(directory, "20260101000002-cccc.jsonl");
-  const rehearsal = receipt.terminal.git.mergeRehearsal;
-  assert.equal(rehearsal.clean, false);
-  assert.deepEqual(rehearsal.conflicts, [], "the receipt records what it found, empty or not");
-  // The surfaces are what must not turn that into 'conflicts:' and a blank.
+  // 'not clean' with nothing after it was a claim with no evidence.
+  assert.equal(receipt.outcome.rehearsal.state, "conflicts");
+  assert.match(receipt.outcome.rehearsal.text, /does not merge into main, with no file named/);
+
+  // And a rehearsal that never ran is neither clean nor conflicting: the
+  // fetch failed, so there was nothing to merge. Reporting that as 'not
+  // clean' invents a conflict nobody found.
+  const unrun = await runsDirectory({
+    "20260101000003-dddd.jsonl": [
+      { runId: "20260101000003-dddd", type: "start" },
+      {
+        runId: "20260101000003-dddd",
+        terminal: true,
+        status: "succeeded",
+        git: { mergeRehearsal: { rehearsed: false, reason: "fetch-failed", targetBranch: "main", error: "could not read from remote" } },
+        summary: { status: "succeeded", steps: {} },
+      },
+    ],
+  });
+  const never = await readReceipt(unrun, "20260101000003-dddd.jsonl");
+  assert.equal(never.outcome.rehearsal.state, "not-rehearsed");
+  assert.match(never.outcome.rehearsal.text, /not rehearsed against main: the target branch could not be fetched/);
+  assert.equal(never.outcome.rehearsal.error, "could not read from remote");
+
+  // The terminal says the same, and does not colour it as a conflict.
   const { renderApp } = await import("../src/tui/render.js");
   const screen = renderApp(
-    { runs: [{ runId: "20260101000002-cccc", status: "succeeded", mode: "execute", receiptFile: "20260101000002-cccc.jsonl" }] },
-    { view: "runs", detail: true, color: false, receipt, width: 100, height: 40 },
+    { runs: [{ runId: "20260101000003-dddd", status: "succeeded", mode: "execute", receiptFile: "20260101000003-dddd.jsonl" }] },
+    { view: "runs", detail: true, color: false, receipt: never, width: 100, height: 40 },
   ).join("\n");
-  assert.match(screen, /not clean\s+no file was named/);
-  assert.equal(/conflicts\s*$/m.test(screen), false, "no 'conflicts' with nothing after it");
+  assert.match(screen, /not rehearsed against main: the target branch could not be fetched/);
+  assert.match(screen, /could not read from remote/);
+  assert.equal(/\bconflicts\b/.test(screen), false, "a fetch that failed found no conflict");
 });

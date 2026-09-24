@@ -264,7 +264,7 @@ test("enter on a run opens its receipt", async () => {
     assert.equal(app.detail, true);
     const text = screen(app);
     assert.match(text, /etnpilot\/run-4f2a9c1b/);
-    assert.match(text, /conflicts\s+src\/index\.js/);
+    assert.match(text, /conflicts with main: src\/index\.js/);
     // Which settings were in effect is evidence, so the run carries it.
     assert.match(text, /project → user-local/);
     assert.match(text, /1 changed locally\s+queue\.workers/);

@@ -556,15 +556,14 @@ function renderRunDetail(state, { style, width, height, cursor, receipt }) {
   }
   field("Branch", terminal.workspace?.branch);
   field("Sandbox", terminal.workspace?.sandbox?.image);
-  if (terminal.git?.mergeRehearsal) {
-    const rehearsal = terminal.git.mergeRehearsal;
+  const rehearsal = outcome.rehearsal;
+  if (rehearsal) {
     lines.push(style.dim("Merge rehearsal"));
-    const conflicts = rehearsal.conflicts ?? [];
-    lines.push(rehearsal.clean
-      ? `  ${style.ok("clean")} ${style.muted(`into ${rehearsal.targetBranch ?? "the target branch"}`)}`
-      : conflicts.length > 0
-        ? `  ${style.bad("conflicts")} ${style.muted(conflicts.join(", "))}`
-        : `  ${style.bad("not clean")} ${style.muted(rehearsal.reason ?? "no file was named")}`);
+    const tone = rehearsal.state === "clean" ? "ok" : rehearsal.state === "conflicts" ? "bad" : "warn";
+    for (const [index, piece] of wrap(rehearsal.text, width - 4).entries()) {
+      lines.push(`  ${index === 0 ? style.tone(piece, tone) : style.muted(piece)}`);
+    }
+    if (rehearsal.error) for (const piece of wrap(rehearsal.error, width - 4)) lines.push(`  ${style.muted(piece)}`);
     lines.push("");
   }
   // Which settings were in effect is evidence, so it belongs next to the run

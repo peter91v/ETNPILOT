@@ -1161,18 +1161,15 @@ function renderRunDetail() {
     ], outcome.steps, "None recorded."));
   }
   if (outcome.usage) body.push(usagePanelBody(outcome.usage));
-  const rehearsal = terminal.git?.mergeRehearsal;
+  // Clean, conflicting, or never attempted: three answers, and the reader
+  // gives the same one here, in the terminal, and on the command line.
+  const rehearsal = receipt.outcome?.rehearsal;
   if (rehearsal) {
     body.push(el("div", { class: "row" }, [
       el("span", { class: "muted", text: "Merge rehearsal" }),
-      // 'conflicts:' with nothing after it is a claim with no evidence: the
-      // rehearsal names the files it could not merge, or says it named none.
-      rehearsal.clean
-        ? pill("clean into " + (rehearsal.targetBranch ?? "the target branch"), "ok")
-        : pill((rehearsal.conflicts ?? []).length > 0
-          ? "conflicts: " + rehearsal.conflicts.join(", ")
-          : "not clean" + (rehearsal.reason ? ": " + rehearsal.reason : ", with no file named"), "bad"),
+      pill(rehearsal.text, rehearsal.state === "clean" ? "ok" : rehearsal.state === "conflicts" ? "bad" : "warn"),
     ]));
+    if (rehearsal.error) body.push(el("p", { class: "muted mono", text: rehearsal.error }));
   }
   const train = terminal.git?.mergeTrain;
   for (const collision of train?.conflicts ?? []) {

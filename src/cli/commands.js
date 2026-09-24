@@ -436,6 +436,7 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
           ...(step.attempts > 1 ? { attempts: step.attempts } : {}),
           ...(step.error ? { error: step.error } : {}),
         })),
+        ...(outcome.rehearsal ? { mergeRehearsal: outcome.rehearsal } : {}),
         ...(outcome.usage ? { usage: outcome.usage } : {}),
         ...(outcome.cleanup ? { cleanup: outcome.cleanup } : {}),
       }, null, 2));
