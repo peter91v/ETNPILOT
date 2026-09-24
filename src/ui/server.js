@@ -7,6 +7,7 @@ import { openProjectState } from "../runtime/project-state.js";
 import { WorkflowQueueStateError } from "../workflow/queue.js";
 import { createProject, describeProject } from "../runtime/first-run.js";
 import { renderReviewPage } from "./page.js";
+import { renderIcon, renderManifest, renderServiceWorker } from "./app.js";
 import { renderSetupPage } from "./setup-page.js";
 
 // A local review surface for the evidence ETNPilot already produces: pending
@@ -42,6 +43,22 @@ export async function createReviewServer({
         return html(response, 200, state
           ? renderReviewPage(token)
           : renderSetupPage(token, await describeProject({ root })));
+      }
+      // The app's shell. These three carry no evidence — a name, two drawn
+      // icons and a worker script — so they are served without the token:
+      // a manifest and a service worker are fetched by the browser itself,
+      // sometimes without the page's credentials, and an installed app that
+      // cannot fetch its own icon is not installed.
+      if (request.method === "GET" && url.pathname === "/manifest.webmanifest") {
+        return send(response, 200, renderManifest({ project: state?.config?.git?.project ?? "" }));
+      }
+      if (request.method === "GET" && (url.pathname === "/icon.svg" || url.pathname === "/icon-maskable.svg")) {
+        return svg(response, renderIcon({ maskable: url.pathname.includes("maskable") }));
+      }
+      if (request.method === "GET" && url.pathname === "/sw.js") {
+        // The token is the cache's version, so a new session cannot be served
+        // a previous one's shell.
+        return script(response, renderServiceWorker(token.slice(0, 8)));
       }
       if (!url.pathname.startsWith("/api/")) return send(response, 404, { error: "not-found" });
       if (!authorized(header(request, "x-etnpilot-token"), token)) {
@@ -249,6 +266,27 @@ export async function createReviewServer({
 // A refusal is an answer, not a crash: the state errors these modules raise
 // are conflicts and bad requests, and the page shows them where the action
 // was taken rather than as 'request failed (500)'.
+function svg(response, body) {
+  response.writeHead(200, {
+    "content-type": "image/svg+xml; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+  });
+  response.end(body);
+}
+
+function script(response, body) {
+  response.writeHead(200, {
+    "content-type": "text/javascript; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    // A service worker may only control the paths under its own scope, and
+    // this one needs the origin so an installed page is one of them.
+    "service-worker-allowed": "/",
+  });
+  response.end(body);
+}
+
 function statusFor(error) {
   if (error.statusCode) return error.statusCode;
   if (error instanceof ApprovalStateError || error instanceof WorkflowQueueStateError) return 409;
@@ -365,7 +403,11 @@ function html(response, status, body) {
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",
     // The page loads nothing from anywhere: no CDN, no fonts, no analytics.
-    "content-security-policy": "default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'",
+    // The three 'self' sources are the app shell this server draws itself —
+    // the icons, the manifest and the service worker — and nothing else is
+    // reachable from here, which is what 'default-src none' keeps true.
+    "content-security-policy": "default-src 'none'; img-src data: 'self'; style-src 'unsafe-inline';"
+      + " script-src 'unsafe-inline'; connect-src 'self'; manifest-src 'self'; worker-src 'self'",
     "referrer-policy": "no-referrer",
   });
   response.end(body);

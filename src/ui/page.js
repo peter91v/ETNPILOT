@@ -20,6 +20,9 @@ export function renderReviewPage(token) {
 <meta name="theme-color" content="#f5fbf8" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0e1513" media="(prefers-color-scheme: dark)">
 <title>ETNPilot Review</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icon.svg">
+<meta name="mobile-web-app-capable" content="yes">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230b0f13'/%3E%3Cpath d='M16 18h32v8H25v8h20v8H25v4h23v8H16z' fill='%233ee6c1'/%3E%3C/svg%3E">
 <style>
   /* Material Design 3, implemented rather than approximated -------------
@@ -624,6 +627,7 @@ export function renderReviewPage(token) {
           <span>Commands</span>
           <span class="kbd">ctrl K</span>
         </button>
+        <button class="btn state" id="install" hidden>Install</button>
         <button class="btn primary state" id="open-run" aria-label="Start a run">
           <span class="wide-only">Start a run</span><span class="narrow-only">Run</span>
         </button>
@@ -1378,7 +1382,15 @@ function renderApprovals() {
   }
   for (const approval of list) {
     const details = approval.details ?? {};
-    const actor = el("input", { attrs: { placeholder: "your name", "aria-label": "reviewer" } });
+    const actor = el("input", {
+      class: "inline",
+      attrs: { placeholder: "your name", "aria-label": "reviewer", title: "Recorded in the receipt as you typed it: this page never checked who you are." },
+    });
+    // Remembered per device, because typing your name into a phone for every
+    // decision is how people stop typing it at all. It is still self-asserted;
+    // nothing here authenticates anybody.
+    actor.value = reviewerName();
+    actor.addEventListener("change", () => rememberReviewer(actor.value));
     const reason = el("input", { class: "grow", attrs: { placeholder: "reason (optional)", "aria-label": "reason" } });
     const decide = (decision) => act(
       () => api("/api/approvals/decide", {
@@ -2589,6 +2601,53 @@ async function refresh({ force = false } = {}) {
 }
 
 let usageSignature;
+
+// The app: the page is installed as it stands, which is the only way there is
+// one surface rather than two. The worker caches the shell and never the
+// evidence — see src/ui/app.js for why, and for the two other decisions this
+// took (loopback only, and no claim to know who you are).
+if ("serviceWorker" in navigator && location.protocol !== "file:") {
+  addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {
+      // An install that cannot be offered is not a failure worth a toast:
+      // everything on this page works without it.
+    });
+  });
+}
+
+let installPrompt;
+addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  installPrompt = event;
+  $("install").hidden = false;
+});
+$("install").addEventListener("click", async () => {
+  if (!installPrompt) return;
+  $("install").hidden = true;
+  const offered = installPrompt;
+  installPrompt = undefined;
+  await offered.prompt();
+});
+addEventListener("appinstalled", () => { $("install").hidden = true; });
+
+// The reviewer's name lives on the device, never on the server: it is what
+// they call themselves, and the receipt records it as exactly that.
+function reviewerName() {
+  try {
+    return localStorage.getItem("etnpilot.reviewer") ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function rememberReviewer(name) {
+  try {
+    localStorage.setItem("etnpilot.reviewer", name.trim());
+  } catch {
+    // A browser with storage switched off still decides approvals; it just
+    // asks for the name again.
+  }
+}
 
 // Material's 'on-scroll' app bar: raised only while something is behind it.
 const topbar = document.querySelector(".topbar");
