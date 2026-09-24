@@ -198,9 +198,13 @@ test("a run that failed says why, with its steps, and what it cost", async () =>
   try {
     const call = await caller(review);
     await call("/api/runs/start", { method: "POST", body: JSON.stringify({ task: "break please" }) });
-    const state = await waitFor(call, (payload) => payload.runs.length === 1, "the run to be recorded");
+    // Recorded is not finished: a receipt exists from the first entry, and the
+    // run is still going until it is sealed. Waiting for the file to appear
+    // and then asserting a final status asserts a race.
+    const state = await waitFor(call, (payload) => payload.runs[0]?.terminal === true, "the run to be sealed");
     const run = state.runs[0];
     assert.equal(run.status, "failed");
+    assert.equal(run.running, undefined);
 
     const receipt = await (await call(`/api/runs/${encodeURIComponent(run.receiptFile)}`)).json();
     // The reason is the failing step's own error, not 'it failed'.
