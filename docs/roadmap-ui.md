@@ -34,27 +34,105 @@ Lesepfad, keine zweite Wahrheit.
 
 | Fähigkeit | CLI | TUI | Web | App |
 | --- | :-: | :-: | :-: | :-: |
-| Approvals listen und entscheiden | ✅ | ✅ | ✅ | — |
-| Approval im Volltext + auslösende Regel | ✅ | ✅ | ✅ | — |
-| Queue listen / abbrechen | ✅ | ✅ | ✅ | — |
-| Queue fortsetzen (`resume`) | ✅ | ✅ | ✅ | — |
-| Runs listen | ✗ | ✅ | ✅ | — |
-| Receipt eines Runs im Detail | teilw. | ✅ | ✅ | — |
-| Run starten | ✅ | ✅ | ✅ | — |
-| Settings listen / diff | ✅ | ✅ | ✅ | — |
-| Settings ändern (lokal/global) | ✅ | ✅ | ✅ | — |
-| `policy check` | ✅ | ✗ | ✗ | — |
-| `receipt verify`, `replay`, `attest` | ✅ | ✗ | ✗ | — |
-| `deps check`, `sbom`, `scan secrets` | ✅ | ✗ | ✗ | — |
-| `graph *`, `content lock/verify` | ✅ | ✗ | ✗ | — |
-| `doctor`, `telemetry summary` | ✅ | ✗ | ✗ | — |
-| `init` | ✅ | ✗ | ✗ | — |
-| Worktrees listen, mit ungespeicherter Arbeit | ✅ | ✅ | ✅ | — |
-| Worktree entfernen (nur wenn sauber) | ✅ | ✅ | ✅ | — |
-| Eigene Merge Requests listen | ✅ | ✅ | ✅ | — |
+| Approvals: list and decide | ✅ | ✅ | ✅ | ✅ |
+| Approval in full, with the rule that stopped it | ✅ | ✅ | ✅ | ✅ |
+| Queue: list, cancel, resume | ✅ | ✅ | ✅ | ✅ |
+| Runs: list | ✅ | ✅ | ✅ | ✅ |
+| A run's receipt in detail | ✅ | ✅ | ✅ | ✅ |
+| The agents that ran, each one readable in full | ✅ | ✅ | ✅ | ✅ |
+| Verify a receipt: hash chain and signatures | ✅ | ✅ | ✅ | ✅ |
+| Start a run | ✅ | ✅ | ✅ | ✅ |
+| Settings: list, diff, change locally or globally | ✅ | ✅ | ✅ | ✅ |
+| Worktrees: list, and remove only when clean | ✅ | ✅ | ✅ | ✅ |
+| What a worktree holds, and one file's diff | ✅ | ✅ | ✅ | ✅ |
+| The project's own merge requests | ✅ | ✅ | ✅ | ✅ |
+| The checks: doctor, policy, content, deps, secrets, telemetry | ✅ | ✅ | ✅ | ✅ |
+| A project where there is none yet | ✅ | ✅ | ✅ | ✅ |
+| The models a provider can reach, and their published prices | ✗ | ✗ | ✅ | ✅ |
+| An SBOM, an attestation, a replay | ✅ | ✗ | ✗ | ✗ |
+TAP version 13
+# Subtest: every capability the table claims is in the code
+ok 1 - every capability the table claims is in the code
+  ---
+  duration_ms: 6.057198
+  type: 'test'
+  ...
+# Subtest: a capability that is open says so, and says why
+ok 2 - a capability that is open says so, and says why
+  ---
+  duration_ms: 0.311122
+  type: 'test'
+  ...
+# Subtest: the table in docs/roadmap-ui.md is the one these rows produce
+not ok 3 - the table in docs/roadmap-ui.md is the one these rows produce
+  ---
+  duration_ms: 3.185708
+  type: 'test'
+  location: '/home/user/ETNPILOT/test/parity.test.js:157:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    docs/roadmap-ui.md is out of date. Replace its capability table with:
+    
+    | Fähigkeit | CLI | TUI | Web | App |
+    | --- | :-: | :-: | :-: | :-: |
+    | Approvals: list and decide | ✅ | ✅ | ✅ | ✅ |
+    | Approval in full, with the rule that stopped it | ✅ | ✅ | ✅ | ✅ |
+    | Queue: list, cancel, resume | ✅ | ✅ | ✅ | ✅ |
+    | Runs: list | ✅ | ✅ | ✅ | ✅ |
+    | A run's receipt in detail | ✅ | ✅ | ✅ | ✅ |
+    | The agents that ran, each one readable in full | ✅ | ✅ | ✅ | ✅ |
+    | Verify a receipt: hash chain and signatures | ✅ | ✅ | ✅ | ✅ |
+    | Start a run | ✅ | ✅ | ✅ | ✅ |
+    | Settings: list, diff, change locally or globally | ✅ | ✅ | ✅ | ✅ |
+    | Worktrees: list, and remove only when clean | ✅ | ✅ | ✅ | ✅ |
+    | What a worktree holds, and one file's diff | ✅ | ✅ | ✅ | ✅ |
+    | The project's own merge requests | ✅ | ✅ | ✅ | ✅ |
+    | The checks: doctor, policy, content, deps, secrets, telemetry | ✅ | ✅ | ✅ | ✅ |
+    | A project where there is none yet | ✅ | ✅ | ✅ | ✅ |
+    | The models a provider can reach, and their published prices | ✗ | ✗ | ✅ | ✅ |
+    | An SBOM, an attestation, a replay | ✅ | ✗ | ✗ | ✗ |
+    
+    
+    false !== true
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///home/user/ETNPILOT/test/parity.test.js:160:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: the app column is the web column, because the app is the page
+ok 4 - the app column is the web column, because the app is the page
+  ---
+  duration_ms: 0.28567
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 3
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 16.150046
 
-Die App existiert als Code **gar nicht** — nur als Artboards im Design-Canvas
-(`https://claude.ai/artifact/Rr65iXmq1fgRSZMKMwD1YH`).
+**Diese Tabelle prüft sich selbst.** Sie wird aus `test/parity.test.js`
+erzeugt, und jede Zeile nennt dort pro Oberfläche das Beleg-Stück im Code —
+den CLI-Befehl, die Ansicht oder Taste, die HTTP-Route. Der Test sucht sie und
+schlägt fehl, wenn eine Behauptung nicht stimmt oder wenn diese Tabelle von den
+Zeilen abweicht. Ein ✗ muss einen Grund haben, sonst schlägt er auch fehl.
+
+Die App-Spalte ist die Web-Spalte, weil die App die Seite *ist* — installiert
+(UI-3). Das ist eine Entscheidung, keine Lücke: eine zweite Implementierung
+jeder Ansicht wäre genau der zweite Lesepfad, den dieses Projekt vermeidet.
+
+Der Design-Canvas mit den Artboards liegt weiterhin unter
+`https://claude.ai/artifact/Rr65iXmq1fgRSZMKMwD1YH`.
 
 ---
 
