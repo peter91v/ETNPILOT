@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { tail } from "../checks/runner.js";
 import { readdir, readFile, mkdir, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
@@ -70,7 +71,12 @@ export function createWorkspaceTools({ workingDirectory, limits = {}, signal, sa
   return {
     definitions: WORKSPACE_TOOL_DEFINITIONS,
     async invoke(name, rawArguments, context) {
-      const args = parseArguments(rawArguments);
+      const parsed = parseArguments(rawArguments);
+      // Arguments that could not be read used to become an empty object, so
+      // the model was told 'content must be a string' when the real answer
+      // was that its JSON did not parse.
+      if (parsed.ok === false) return parsed;
+      const args = parsed.value;
       switch (name) {
         case "read_file": return readWorkspaceFile(root, bounds, args, context);
         case "list_files": return listWorkspaceFiles(root, bounds, args, context);
@@ -100,7 +106,11 @@ async function readWorkspaceFile(root, bounds, args, context) {
 }
 
 async function listWorkspaceFiles(root, bounds, args, context) {
-  const path = containedPath(root, args.path ?? ".");
+  // The schema marks 'path' optional, so a missing one — and an empty string,
+  // which is how a model writes 'no path' — is the workspace root. Refusing
+  // it contradicted this tool's own description.
+  const requested = typeof args.path === "string" ? args.path.trim() : args.path;
+  const path = containedPath(root, requested === undefined || requested === "" ? "." : requested);
   if (!path.ok) return path;
   const decision = await context.approve({ kind: "read", fileName: path.relative, toolName: "list_files" });
   if (decision.kind !== "approve-once") return denied(decision);
@@ -174,7 +184,11 @@ async function runWorkspaceCommand(root, bounds, args, context, signal, sandbox)
       if (target === "out") stdout += text;
       else stderr += text;
     };
-    const timer = setTimeout(() => child.kill("SIGKILL"), bounds.shellTimeoutMs);
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, bounds.shellTimeoutMs);
     child.stdout.on("data", (chunk) => collect(chunk, "out"));
     child.stderr.on("data", (chunk) => collect(chunk, "err"));
     child.once("error", (error) => {
@@ -185,6 +199,7 @@ async function runWorkspaceCommand(root, bounds, args, context, signal, sandbox)
       clearTimeout(timer);
       resolveResult({
         ok: code === 0,
+        ...(code === 0 ? {} : { error: commandFailure(command, code, exitSignal, timedOut, bounds, stderr, stdout) }),
         exitCode: code,
         signal: exitSignal ?? undefined,
         stdout,
@@ -194,6 +209,19 @@ async function runWorkspaceCommand(root, bounds, args, context, signal, sandbox)
       });
     });
   });
+}
+
+// Why a command failed, in one line the receipt can carry: the exit code or
+// the timeout, and what the command itself said.
+function commandFailure(command, code, exitSignal, timedOut, bounds, stderr, stdout) {
+  const name = command[0];
+  const headline = timedOut
+    ? `'${name}' was killed after the ${bounds.shellTimeoutMs}ms limit`
+    : code === null
+      ? `'${name}' was killed by ${exitSignal ?? "a signal"}`
+      : `'${name}' exited with code ${code}`;
+  const said = tail(stderr) || tail(stdout);
+  return said ? `${headline}: ${said}` : `${headline}, and said nothing.`;
 }
 
 function containedPath(root, value) {
@@ -209,14 +237,17 @@ function containedPath(root, value) {
 }
 
 function parseArguments(rawArguments) {
-  if (rawArguments === undefined || rawArguments === null) return {};
-  if (typeof rawArguments === "object") return rawArguments;
+  if (rawArguments === undefined || rawArguments === null) return { ok: true, value: {} };
+  if (typeof rawArguments === "object") return { ok: true, value: rawArguments };
+  let parsed;
   try {
-    const parsed = JSON.parse(String(rawArguments));
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
+    parsed = JSON.parse(String(rawArguments));
+  } catch (error) {
+    return { ok: false, error: `Tool arguments are not valid JSON: ${error.message}` };
   }
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+    ? { ok: true, value: parsed }
+    : { ok: false, error: "Tool arguments must be a JSON object." };
 }
 
 function denied(decision) {

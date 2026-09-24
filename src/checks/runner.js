@@ -112,7 +112,7 @@ function exitCodeHint(code, executable, passed = []) {
   return undefined;
 }
 
-function tail(text) {
+export function tail(text) {
   if (!text) return "";
   const trimmed = text.trimEnd();
   if (!trimmed) return "";
