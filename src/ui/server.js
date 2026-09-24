@@ -87,6 +87,9 @@ export async function createReviewServer({
         });
         return send(response, 200, diff);
       }
+      if (request.method === "GET" && url.pathname === "/api/agents") {
+        return send(response, 200, await state.agents());
+      }
       if (request.method === "GET" && url.pathname === "/api/usage") {
         return send(response, 200, await state.usage());
       }

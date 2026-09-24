@@ -21,7 +21,9 @@ second source of truth.
 ## The shape of it
 
 A sidebar of views rather than one long scroll: Overview, Approvals, Queue,
-Runs, Worktrees, Merge requests, Settings. The view is in the address
+Runs, Worktrees, Merge requests, Settings. The button beside the project name
+collapses it to a rail of icons — the counts stay — and remembers that for
+this browser; where the sidebar is a drawer, the same button opens it. The view is in the address
 (`#approvals`), so a reload comes back where you were. `ctrl` `K` opens a
 command palette that goes to a view or runs a command; `Escape` closes
 whatever is open. Below 860px the sidebar becomes a drawer, and below 560px the
@@ -79,7 +81,9 @@ teaches the wrong thing about what this can do.
   or `~/.config/etnpilot/config.yaml`. Local settings the loader refuses are
   reported above the list, because otherwise the next run would be the first to
   mention them.
-- **Starting a run**, whose approvals come back to this same page. The request
+- **Starting a run**, with the agent chosen from the project's own — the list
+  is read from `.etnpilot/agents/`, and each choice says which provider it
+  would use and what it needs. Its approvals come back to this same page. The request
   is answered at once rather than held for the whole run; what is running, and
   what a run failed with, is part of the state the page polls. Closing the
   server stops the runs it started, as quitting the TUI does.

@@ -11,10 +11,17 @@ export class ProviderError extends Error {
 }
 
 export class ProviderRouter {
-  constructor(registry, config = {}, { policy } = {}) {
+  constructor(registry, config = {}, { policy, defaultProvider } = {}) {
     this.registry = registry;
     this.policy = policy;
-    this.defaults = normalizeProviderList(config.defaults ?? []);
+    // 'defaultProvider' is the project's plain answer to 'which provider?'.
+    // It comes after routing.defaults, so a project that lists providers to
+    // try keeps that order, and one that only names a default is not left
+    // with no route at all.
+    this.defaults = unique([
+      ...normalizeProviderList(config.defaults ?? []),
+      ...normalizeProviderList(defaultProvider ? [defaultProvider] : []),
+    ]);
     this.rules = normalizeRules(config.rules ?? []);
     this.fallback = {
       enabled: config.fallback?.enabled ?? true,
@@ -84,6 +91,9 @@ export class ProviderRouter {
           provider: name,
           status: "failed",
           durationMs,
+          // The reason it failed, kept with the attempt: a provider that was
+          // tried and refused the connection is not 'no provider can satisfy'.
+          message: String(error?.message ?? error).slice(0, 300),
           code: error instanceof ProviderError ? error.code : "provider_error",
           retryable: error instanceof ProviderError ? error.retryable : false,
           safeToRetry: error instanceof ProviderError ? error.safeToRetry : false,
@@ -126,10 +136,25 @@ export class ProviderRouter {
     // policy denial sends people to look at the wrong file.
     const error = new ProviderError(
       `No provider can satisfy agent '${context.agent.name}' with capabilities: ${route.requires.join(", ") || "none"}.`
-      + explainSkips(attempts),
+      + explainSkips(attempts)
+      + explainFailures(attempts)
+      + this.#explainRoute(route),
       { code: "no_eligible_provider" },
     );
     throw annotateError(error, undefined, attempts);
+  }
+
+  // What was tried and what there is: an error that names neither sends
+  // people looking through files for a provider that was never in the route.
+  #explainRoute(route) {
+    const configured = typeof this.registry?.list === "function" ? this.registry.list() : [];
+    const tried = route.providers.length > 0 ? route.providers.map((name) => `'${name}'`).join(", ") : "nothing";
+    const available = configured.length > 0
+      ? `Configured and ready: ${configured.map((name) => `'${name}'`).join(", ")}.`
+      : "No provider is configured under 'providers'.";
+    return ` Tried in order: ${tried}. ${available}`
+      + " The route comes from the agent's own 'provider', then 'routing.rules',"
+      + " then 'routing.defaults', then 'defaultProvider'.";
   }
 
   #route(agent) {
@@ -218,6 +243,17 @@ const SKIP_REASONS = Object.freeze({
   "capability-mismatch": "does not declare a required capability",
   unavailable: "reported itself unavailable",
 });
+
+// A provider that was tried and failed is the more useful half of the story,
+// and the one a message about capabilities hides.
+function explainFailures(attempts) {
+  const failed = attempts.filter((attempt) => attempt.status === "failed");
+  if (failed.length === 0) return "";
+  const reasons = failed
+    .map((attempt) => `'${attempt.provider}' (${attempt.code}) ${(attempt.message ?? "no message").replace(/\.$/, "")}`)
+    .join("; ");
+  return ` Tried and failed: ${reasons}.`;
+}
 
 function explainSkips(attempts) {
   const skipped = attempts.filter((attempt) => attempt.status === "skipped");

@@ -184,11 +184,20 @@ routing:
       require: [chat]
 ```
 
+The route is, in order: the agent's own `provider`, then `routing.rules`, then
+`routing.defaults`, then the project's `defaultProvider`. An agent manifest that names no
+provider takes `defaultProvider` too, so one provider does not have to be repeated in every
+agent.
+
 Built-in GitHub Copilot sessions provide `chat`, `tools`, `permissions`, and `skills`; the
 OpenAI-compatible adapter currently provides `chat`. ETNPilot skips unavailable or incompatible
 providers. It retries with another provider only when the adapter marks the failure as both
 retryable and safe to replay. The selected provider and all routing attempts are stored in the run
 receipt.
+
+When nothing in the route works, the error says what was tried, why each one was passed over or
+failed, and which providers are configured and ready — a provider that refused a connection is
+named as such rather than reported as "no provider can satisfy".
 
 ## Secret providers
 

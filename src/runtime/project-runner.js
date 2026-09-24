@@ -193,7 +193,10 @@ export async function runProject({
         harness.providers.replace(name, recorder.wrap(harness.providers.get(name)));
       }
     }
-    harness.setProviderRouter(new ProviderRouter(harness.providers, config.routing, { policy }));
+    harness.setProviderRouter(new ProviderRouter(harness.providers, config.routing, {
+      policy,
+      defaultProvider: config.defaultProvider,
+    }));
     workflow = normalizeWorkflow(config.workflow, {
       requested: agent,
       fallback: config.defaultAgent ?? "orchestrator",

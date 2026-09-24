@@ -114,7 +114,12 @@ async function request({ endpoint, apiKey, fetchImpl, context, body }) {
     // A cancelled step must not be replayed by the router; the workflow
     // engine owns timeouts and aborts.
     if (context.signal?.aborted) throw context.signal.reason ?? error;
-    throw new ProviderError("Provider network request failed.", {
+    // The cause is what a person needs — a refused connection names the host
+    // and port they typed into 'providers.<name>.baseUrl'.
+    // fetch's own message is 'fetch failed'; what a person needs is one level
+    // below it, where the host and port they configured are named.
+    const detail = error?.cause?.message ?? error?.message ?? String(error);
+    throw new ProviderError(`Provider network request failed: ${detail}`, {
       code: "network_error",
       retryable: true,
       safeToRetry: true,

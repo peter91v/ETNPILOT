@@ -1,5 +1,6 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import YAML from "yaml";
 import { loadConfig } from "../config/load.js";
 import { describeSettings, setSetting, unsetSetting } from "../config/settings.js";
 import { ApprovalInbox, createInboxApprovalHandler } from "../core/approval-inbox.js";
@@ -165,6 +166,9 @@ export async function openProjectState({ root = process.cwd(), env = process.env
     // What the provider cost. Read on demand and only when the telemetry file
     // has changed, because it is the whole file every time.
     usage: () => readUsage({ root: projectRoot, config: current }),
+    // Which agents this project has, so a surface can offer them by name
+    // instead of asking a person to remember how they spelled one.
+    agents: () => readAgents({ root: projectRoot, config: current }),
     mergeRequests: (options) => readMergeRequests({ root: projectRoot, config: current, env }, options),
     // Changing a setting from any surface goes through the same module the
     // CLI uses, so every surface is refused for the same reason.
@@ -407,6 +411,44 @@ export function parseDiff(text, { limit = 2000 } = {}) {
 
 function worktreeManager(root, config) {
   return new WorktreeManager(root, config?.git?.worktreeRoot ?? ".etnpilot/worktrees");
+}
+
+// The agents a run can be given, read from the manifests the run itself would
+// load. A name typed by hand is a run that fails a minute later.
+export async function readAgents({ root, config }) {
+  const directory = join(resolve(root), ".etnpilot", "agents");
+  const files = await readdir(directory).catch((error) => {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  });
+  const agents = [];
+  for (const file of files.filter((name) => name.endsWith(".yaml") || name.endsWith(".yml")).sort()) {
+    const content = await readFile(join(directory, file), "utf8").catch(() => "");
+    let manifest;
+    try {
+      manifest = YAML.parse(content) ?? {};
+    } catch (error) {
+      // A manifest that does not parse is named rather than hidden: a run
+      // would fail on it too.
+      agents.push({ name: file.replace(/\.ya?ml$/, ""), file, error: error.message });
+      continue;
+    }
+    // What it would actually run with: its own provider, or the project's.
+    const provider = manifest.provider ?? (manifest.providers?.length ? undefined : config?.defaultProvider);
+    agents.push({
+      name: typeof manifest.name === "string" && manifest.name ? manifest.name : file.replace(/\.ya?ml$/, ""),
+      file,
+      ...(provider ? { provider, ...(manifest.provider ? {} : { inheritedProvider: true }) } : {}),
+      ...(Array.isArray(manifest.requires) ? { requires: manifest.requires } : {}),
+      ...(typeof manifest.description === "string" ? { description: manifest.description } : {}),
+    });
+  }
+  return {
+    agents,
+    // What an empty choice means, so the surface does not have to guess.
+    defaultAgent: config?.defaultAgent,
+    steps: (config?.workflow?.steps ?? []).map((step) => step.id ?? step.agent).filter(Boolean),
+  };
 }
 
 // Tokens and cost for this project, as recorded by the runs themselves. A

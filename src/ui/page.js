@@ -66,6 +66,23 @@ export function renderReviewPage(token) {
     overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
   }
   .shell { min-height: 100vh; display: grid; grid-template-columns: var(--sidebar) minmax(0, 1fr); }
+  /* Collapsed, the sidebar keeps every view reachable as a rail of icons
+     rather than disappearing: what is waiting for you stays countable. */
+  .shell.collapsed { --sidebar: 62px; }
+  .shell.collapsed .brand span:not(.brand-mark),
+  .shell.collapsed .nav-label,
+  .shell.collapsed .nav-item span:not(.count),
+  .shell.collapsed .runtime-meta,
+  .shell.collapsed #runtime-state { display: none; }
+  .shell.collapsed .sidebar { padding: 18px 10px; align-items: center; }
+  .shell.collapsed .brand { padding: 3px 0 18px; }
+  .shell.collapsed .nav-list { width: 100%; }
+  .shell.collapsed .nav-item { justify-content: center; padding: 0; position: relative; }
+  .shell.collapsed .nav-item .count {
+    position: absolute; top: 3px; right: 6px; margin: 0; font-size: 9px; line-height: 1;
+  }
+  .shell.collapsed .runtime-card { padding: 10px; display: grid; place-items: center; }
+  .shell.collapsed .runtime-line { gap: 0; }
 
   /* Sidebar ---------------------------------------------------------- */
   .sidebar {
@@ -111,7 +128,7 @@ export function renderReviewPage(token) {
     background: var(--bg); border-bottom: 1px solid var(--line);
   }
   .narrow-only { display: none; }
-  .topbar .menu-button { display: none; }
+  .topbar .menu-button { display: inline-flex; }
   .context { min-width: 0; }
   .eyebrow { margin: 0 0 3px; color: var(--muted); font: 10px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
   .context-title { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 750; }
@@ -346,7 +363,7 @@ export function renderReviewPage(token) {
 
   <div class="main">
     <header class="topbar">
-      <button class="btn icon menu-button" id="menu" aria-label="Open the view list" aria-expanded="false">
+      <button class="btn icon menu-button" id="menu" aria-label="Collapse the view list" aria-expanded="true">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
       </button>
       <div class="context">
@@ -399,7 +416,7 @@ export function renderReviewPage(token) {
         </div>
         <div class="field">
           <label for="run-agent">Agent</label>
-          <input id="run-agent" placeholder="leave empty for the project's own workflow" autocomplete="off">
+          <select id="run-agent"></select>
         </div>
         <p class="muted" id="run-hint"></p>
       </div>
@@ -433,6 +450,7 @@ let worktreeChanges;
 let worktreeDiff;
 let merges;
 let usage;
+let agents;
 let openRun;
 let openSetting;
 let view = "overview";
@@ -661,7 +679,11 @@ function renderNav() {
     const count = navCount(entry.id);
     const node = el("button", {
       class: "nav-item",
-      attrs: { type: "button", ...(entry.id === view ? { "aria-current": "page" } : {}) },
+      attrs: {
+        type: "button",
+        title: entry.label,
+        ...(entry.id === view ? { "aria-current": "page" } : {}),
+      },
     }, [
       icon(entry.icon),
       el("span", { text: entry.label }),
@@ -717,6 +739,46 @@ function renderPageActions() {
   host.append(button("Refresh", { class: "btn", onClick: () => refresh({ force: true }) }));
 }
 
+// Two jobs for one button, because they are the same job at two widths: wide,
+// it collapses the sidebar to its icons; narrow, where the sidebar is a
+// drawer, it opens and closes that.
+function drawerWidth() {
+  return window.matchMedia("(max-width: 860px)").matches;
+}
+
+function toggleSidebar() {
+  if (drawerWidth()) {
+    if ($("sidebar").classList.contains("open")) closeSidebar();
+    else openSidebar();
+    return;
+  }
+  const shell = document.querySelector(".shell");
+  const collapsed = shell.classList.toggle("collapsed");
+  $("menu").setAttribute("aria-expanded", String(!collapsed));
+  $("menu").setAttribute("aria-label", collapsed ? "Expand the view list" : "Collapse the view list");
+  // A per-viewer preference, so it survives a reload; it is not state anyone
+  // else shares.
+  try {
+    localStorage.setItem("etnpilot.sidebar", collapsed ? "collapsed" : "open");
+  } catch {
+    // Private windows and blocked storage are not an error here.
+  }
+  renderNav();
+}
+
+function restoreSidebar() {
+  let collapsed = false;
+  try {
+    collapsed = localStorage.getItem("etnpilot.sidebar") === "collapsed";
+  } catch {
+    collapsed = false;
+  }
+  if (!collapsed) return;
+  document.querySelector(".shell").classList.add("collapsed");
+  $("menu").setAttribute("aria-expanded", "false");
+  $("menu").setAttribute("aria-label", "Expand the view list");
+}
+
 function openSidebar() {
   $("sidebar").classList.add("open");
   $("scrim").classList.add("open");
@@ -726,7 +788,9 @@ function openSidebar() {
 function closeSidebar() {
   $("sidebar").classList.remove("open");
   $("scrim").classList.remove("open");
-  $("menu").setAttribute("aria-expanded", "false");
+  // Choosing a view closes the drawer. At a width where the sidebar is not a
+  // drawer, that must not contradict whether it is collapsed.
+  if (drawerWidth()) $("menu").setAttribute("aria-expanded", "false");
 }
 
 // ------------------------------------------------------------- the views
@@ -1661,11 +1725,46 @@ function closeModal(id) {
   lastFocus?.focus?.();
 }
 
-function prepareRunModal() {
-  const steps = (state?.settings?.entries ?? []).find((entry) => entry.path === "workflow.steps");
-  $("run-hint").textContent = "An empty agent runs what the project runs by itself"
-    + (steps?.value ? ": " + describeValue(steps.value) : "")
-    + ". The run works in its own worktree and asks this page for anything it needs approved.";
+// The agents are the project's own, read when the dialog opens: a name typed
+// by hand is a run that fails a minute later.
+async function prepareRunModal() {
+  const select = $("run-agent");
+  select.replaceChildren(el("option", { text: "the project's own workflow", attrs: { value: "" } }));
+  describeRunChoice();
+  try {
+    agents = await api("/api/agents");
+  } catch (error) {
+    agents = { agents: [], error: error.message };
+  }
+  for (const agent of agents.agents ?? []) {
+    select.append(el("option", {
+      text: agent.error ? agent.name + " (this manifest does not parse)" : agent.name,
+      attrs: { value: agent.name, ...(agent.error ? { disabled: "disabled" } : {}) },
+    }));
+  }
+  describeRunChoice();
+}
+
+function describeRunChoice() {
+  const chosen = $("run-agent").value;
+  const agent = (agents?.agents ?? []).find((candidate) => candidate.name === chosen);
+  const steps = agents?.steps ?? [];
+  const hint = $("run-hint");
+  if (!chosen) {
+    hint.textContent = (steps.length > 0
+      ? "The project's own workflow runs: " + steps.join(" → ")
+      : agents?.defaultAgent
+        ? "The project's default agent is '" + agents.defaultAgent + "'"
+        : "The project runs its default agent")
+      + ". The run works in its own worktree and asks this page for anything it needs approved.";
+    return;
+  }
+  hint.textContent = "Runs '" + chosen + "' instead of the configured steps"
+    + (agent?.provider
+      ? " · provider " + agent.provider + (agent.inheritedProvider ? " (the project's default)" : "")
+      : "")
+    + (agent?.requires?.length ? " · needs " + agent.requires.join(", ") : "")
+    + (agent?.description ? " · " + agent.description : "") + ".";
 }
 
 async function startRun(event) {
@@ -1707,7 +1806,7 @@ function paletteCommands() {
     run: () => show(entry.id),
   }));
   commands.push(
-    { label: "Start a run", hint: "run", run: () => { prepareRunModal(); openModal("run-modal"); } },
+    { label: "Start a run", hint: "run", run: () => { openModal("run-modal"); void prepareRunModal(); } },
     { label: "Refresh now", hint: "state", run: () => refresh({ force: true }) },
     { label: "Read the worktrees again", hint: "git", run: () => loadWorktrees({ notify: true }) },
     { label: "Ask GitLab for merge requests", hint: "gitlab", run: () => loadMerges({ notify: true }) },
@@ -1801,9 +1900,10 @@ async function refresh({ force = false } = {}) {
 
 let usageSignature;
 
-$("menu").addEventListener("click", () => ($("sidebar").classList.contains("open") ? closeSidebar() : openSidebar()));
+$("menu").addEventListener("click", toggleSidebar);
 $("scrim").addEventListener("click", closeSidebar);
-$("open-run").addEventListener("click", () => { prepareRunModal(); openModal("run-modal"); });
+$("open-run").addEventListener("click", () => { openModal("run-modal"); void prepareRunModal(); });
+$("run-agent").addEventListener("change", describeRunChoice);
 $("run-form").addEventListener("submit", startRun);
 $("open-palette").addEventListener("click", () => {
   $("palette-input").value = "";
@@ -1836,6 +1936,7 @@ document.addEventListener("keydown", (event) => {
 });
 window.addEventListener("hashchange", () => show(location.hash.slice(1)));
 
+restoreSidebar();
 renderNav();
 show(location.hash.slice(1) || "overview");
 refresh();

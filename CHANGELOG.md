@@ -26,6 +26,34 @@ pre-1.0, so breaking changes may appear in any release.
 - The page also lists the worktrees and the project's merge requests, with the
   same `removeIfClean` behaviour as the other surfaces.
 
+### Fixed — 'no provider can satisfy' said the least useful true thing
+
+- `defaultProvider` was written into every generated project and used nowhere.
+  It is now the last entry in the route — after the agent's own provider,
+  `routing.rules` and `routing.defaults` — and an agent manifest that names no
+  provider takes it, so one provider does not have to be repeated in every
+  agent.
+- When no provider works, the error names what was tried, what was skipped and
+  why, **what failed and with which message**, and which providers are
+  configured and ready. A provider that was reached and refused the connection
+  was previously reported as "no provider can satisfy these capabilities".
+- The OpenAI-compatible adapter reports the cause beneath `fetch failed`, so a
+  wrong `baseUrl` reads as `connect ECONNREFUSED 127.0.0.1:45999`.
+
+### Changed — the run dialog offers the project's agents
+
+- The agent field is a dropdown of the agents in `.etnpilot/agents/`, and each
+  choice says which provider it would use — its own or the project's default —
+  and what it requires. A name typed by hand is a run that fails a minute
+  later.
+
+### Changed — the menu button collapses the sidebar
+
+- It is back on every width. Wide, it collapses the sidebar to a rail of icons
+  that keeps every view and its count reachable, and remembers that per
+  browser; narrow, it is still the drawer. Removing the button was the wrong
+  half of the fix.
+
 ### Added — a worktree's changes, in lines
 
 - Each file in a worktree says how many lines it added and deleted; an

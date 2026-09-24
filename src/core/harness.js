@@ -85,7 +85,10 @@ export class Harness {
 
   registerAgent(agent) {
     if (!agent?.name || (!agent.provider && !agent.providers?.length) || !agent.prompt) {
-      throw new TypeError("An agent requires name, at least one provider, and prompt.");
+      throw new TypeError(
+        `An agent requires name, prompt, and a provider: ${agent?.name ? `'${agent.name}'` : "this manifest"}`
+        + " names none, and the project sets no 'defaultProvider' to fall back on.",
+      );
     }
     this.agents.register(agent.name, Object.freeze({ skills: [], subagents: [], requires: [], ...agent }));
     return agent;

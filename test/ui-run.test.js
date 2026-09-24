@@ -253,3 +253,31 @@ test("usage is served, and says why there is none when nothing records it", asyn
     await review.close();
   }
 });
+
+test("the agents a run can be given are the project's own", async () => {
+  const root = await runnableProject();
+  const { writeFile } = await import("node:fs/promises");
+  await writeFile(join(root, ".etnpilot", "agents", "reviewer.yaml"),
+    "name: reviewer\nprovider: local-llm\nrequires: [chat]\ndescription: Reads the diff\nprompt: Review it.\n");
+  // A manifest that does not parse is named rather than hidden: a run would
+  // fail on it too.
+  await writeFile(join(root, ".etnpilot", "agents", "broken.yaml"), "name: [unclosed\n");
+
+  const review = await createReviewServer({ root });
+  try {
+    const call = await caller(review);
+    const listed = await (await call("/api/agents")).json();
+    const byName = Object.fromEntries(listed.agents.map((agent) => [agent.name, agent]));
+    assert.deepEqual(Object.keys(byName).sort(), ["broken", "reviewer", "worker"]);
+    assert.equal(byName.reviewer.provider, "local-llm");
+    assert.deepEqual(byName.reviewer.requires, ["chat"]);
+    assert.equal(byName.reviewer.description, "Reads the diff");
+    assert.match(byName.broken.error, /./);
+    // What an empty choice means is part of the answer, so the page does not
+    // have to guess it.
+    assert.equal(listed.defaultAgent, "worker");
+    assert.deepEqual(listed.steps, ["build"]);
+  } finally {
+    await review.close();
+  }
+});
