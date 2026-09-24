@@ -1,5 +1,5 @@
 import { access } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { CodeGraph } from "../codegraph/codegraph.js";
 import { initializeProject } from "../config/init.js";
 import { loadConfig } from "../config/load.js";
@@ -116,6 +116,7 @@ Usage:
   etnpilot queue resume <id> [--force]
   etnpilot queue cancel <id> [--actor name] [--reason text]
   etnpilot receipt keygen [--private-key path] [--public-key path]
+  etnpilot receipt show [file] [--root directory]
   etnpilot receipt verify <file> [--public-key path]
     [--require-signatures | --allow-unsigned] [--require-terminal | --allow-incomplete]
   etnpilot secret check <name> [--root directory]
@@ -399,6 +400,49 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
       publicKeyPath: resolve(root, publicKeys[0] ?? ".etnpilot/receipt-signing-public.pem"),
     });
     console.log(JSON.stringify(result, null, 2));
+  } else if (command === "receipt" && subcommand === "show") {
+    // The same answer the review page and the terminal interface give, from
+    // the same reader: a run explained in one place and not the others is a
+    // run explained differently depending on where you look.
+    const root = resolve(values.root);
+    const state = await openProjectState({ root });
+    try {
+      const runs = await state.collect().then((snapshot) => snapshot.runs ?? []);
+      const file = rest[0] ? basename(rest[0]) : runs[0]?.receiptFile;
+      if (!file) throw new Error("No receipt to show: this project has recorded no runs yet.");
+      // A path printed by 'etnpilot run' is the natural thing to paste, so the
+      // directory part is dropped rather than refused; what is read is always
+      // this project's own runs directory.
+      const receipt = await state.readReceipt(file).catch((error) => {
+        if (error.code === "ENOENT") {
+          throw new Error(`No receipt named '${file}' in .etnpilot/state/runs. 'etnpilot receipt show' with no file takes the newest.`);
+        }
+        throw error instanceof TypeError ? new Error(`${error.message} Receipts live in .etnpilot/state/runs.`) : error;
+      });
+      const run = runs.find((candidate) => candidate.receiptFile === file);
+      const outcome = receipt.outcome;
+      console.log(JSON.stringify({
+        receipt: file,
+        ...(run ? { runId: run.runId, mode: run.mode, sealed: run.terminal, signed: run.signed, durationMs: run.durationMs } : {}),
+        status: outcome.status,
+        entries: receipt.entries.length,
+        // Why it ended, first: that is what someone opening a failed run is
+        // asking. The step's whole result belongs in the file, not in an
+        // answer read on a phone.
+        why: outcome.reasons.map((reason) => (reason.step ? `${reason.step}: ` : "") + reason.text),
+        steps: outcome.steps.map((step) => ({
+          id: step.id,
+          status: step.status,
+          ...(step.attempts > 1 ? { attempts: step.attempts } : {}),
+          ...(step.error ? { error: step.error } : {}),
+        })),
+        ...(outcome.usage ? { usage: outcome.usage } : {}),
+        ...(outcome.cleanup ? { cleanup: outcome.cleanup } : {}),
+      }, null, 2));
+      return receipt.outcome.status === "succeeded" ? 0 : 1;
+    } finally {
+      state.close();
+    }
   } else if (command === "receipt" && subcommand === "verify") {
     if (!rest[0]) throw new Error("A receipt file is required.");
     if (values["require-signatures"] && values["allow-unsigned"]) {

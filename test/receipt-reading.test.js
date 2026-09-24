@@ -87,3 +87,65 @@ test("a sealed receipt still reports its own outcome", async () => {
   assert.equal(receipt.outcome.reasons.some((reason) => reason.kind === "incomplete"), false);
   assert.equal(receipt.outcome.steps.find((step) => step.id === "test").error, "Check failed");
 });
+
+test("'receipt show' gives the terminal the answer the other surfaces give", async () => {
+  // Four windows on the same thing: a run explained on the review page and in
+  // the terminal interface, but not on the command line, is a surface that
+  // cannot do what the others can.
+  const { runCli } = await import("../src/cli/commands.js");
+  const { initializeProject } = await import("../src/config/init.js");
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-show-"));
+  await initializeProject(root);
+  const directory = join(root, ".etnpilot", "state", "runs");
+  await mkdir(directory, { recursive: true });
+  await writeFile(
+    join(directory, "20260101000000-aaaa.jsonl"),
+    SEALED.map((line) => JSON.stringify(line)).join("\n") + "\n",
+    "utf8",
+  );
+  await writeFile(
+    join(directory, "20260101000001-bbbb.jsonl"),
+    UNSEALED.map((line) => JSON.stringify(line)).join("\n") + "\n",
+    "utf8",
+  );
+
+  const printed = [];
+  const log = console.log;
+  console.log = (line) => printed.push(line);
+  try {
+    // With no file it takes the newest run, which is what someone asking
+    // 'why did that fail' means.
+    const code = await runCli(["receipt", "show"], { root });
+    assert.equal(code, 1, "a run that did not succeed exits non-zero");
+    const newest = JSON.parse(printed.at(-1));
+    assert.equal(newest.receipt, "20260101000001-bbbb.jsonl");
+    assert.equal(newest.status, "incomplete");
+    assert.equal(newest.sealed, false);
+    assert.deepEqual(newest.why, ["the receipt was never sealed: the run stopped before it could finish"]);
+
+    await runCli(["receipt", "show", "20260101000000-aaaa.jsonl"], { root });
+    const named = JSON.parse(printed.at(-1));
+    assert.equal(named.status, "failed");
+    assert.match(named.why.join("\n"), /test: Check failed/);
+    assert.deepEqual(named.steps, [
+      { id: "agent", status: "succeeded" },
+      { id: "test", status: "failed", error: "Check failed" },
+    ]);
+    // The whole step payload belongs in the file, not in an answer read on a
+    // phone.
+    assert.equal("result" in named.steps[0], false);
+
+    // A pasted path is read as this project's own run, never as a way out of
+    // the runs directory.
+    await assert.rejects(
+      () => runCli(["receipt", "show", "../../../etc/passwd.jsonl"], { root }),
+      /No receipt named 'passwd\.jsonl' in \.etnpilot\/state\/runs/,
+    );
+    await assert.rejects(() => runCli(["receipt", "show", "not-a-receipt.txt"], { root }), /is not a receipt file/);
+    // The full path 'etnpilot run' prints is accepted as the name it ends in.
+    await runCli(["receipt", "show", join(directory, "20260101000000-aaaa.jsonl")], { root });
+    assert.equal(JSON.parse(printed.at(-1)).receipt, "20260101000000-aaaa.jsonl");
+  } finally {
+    console.log = log;
+  }
+});

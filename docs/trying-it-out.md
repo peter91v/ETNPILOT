@@ -78,6 +78,24 @@ Ohne `--approvals inbox` fragt der Run das Terminal, in dem er läuft — und oh
 interaktives Terminal lehnt er **jede** Anfrage ab. Das ist sicher, aber im
 Hintergrund unbrauchbar.
 
+## Das Receipt öffnen
+
+Jeder Run schreibt eine Datei unter `.etnpilot/state/runs/`. Drei Wege führen
+hinein, alle über denselben Leser — keine Ansicht kann etwas anderes über
+denselben Run sagen als eine andere:
+
+```bash
+etnpilot receipt show                       # der neueste Run: warum er endete
+etnpilot receipt show 20260924-abc.jsonl    # ein bestimmter
+etnpilot receipt verify <datei>             # die Hash-Kette, nicht der Inhalt
+```
+
+`receipt show` endet mit Exit-Code 1, wenn der Run nicht erfolgreich war.
+
+Im Browser (`etnpilot ui`): **Runs** → auf die Run-ID tippen. Im Terminal
+(`etnpilot tui`): **runs**, Zeile wählen, Enter. Beide zeigen dasselbe
+„Why it ended", dieselben Schritte und dieselbe Nutzung.
+
 ## Was danach im Receipt steht
 
 ```
