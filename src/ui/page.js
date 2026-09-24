@@ -409,7 +409,9 @@ const $ = (id) => document.getElementById(id);
 // poll below never throws either of these away.
 let state;
 let worktrees;
+let worktreeChanges;
 let merges;
+let usage;
 let openRun;
 let openSetting;
 let view = "overview";
@@ -752,6 +754,10 @@ function renderOverview() {
       hint: (state.active ?? [])[0]?.task ?? "nothing started here",
     }),
   ]));
+  host.append(el("div", { class: "summary-strip" }, usageCards()));
+
+  // A run that is working says where it is, not just that it is.
+  for (const run of state.active ?? []) host.append(runningPanel(run));
 
   const decisions = panel("Needs your decision", {
     meta: pending.length > 0 ? pending.length + " open" : "clear",
@@ -787,6 +793,48 @@ function renderOverview() {
       ? "1 local setting is refused; a run will not start until it is gone."
       : state.settings.refusals.length + " local settings are refused; a run will not start until they are gone.") }));
   }
+}
+
+function usageCards() {
+  const described = describeUsage(usage);
+  if (!usage || usage.available === false) {
+    return [summaryCard("Usage", "—", { hint: usage?.reason ?? "reading…", accent: "line-strong" })];
+  }
+  if (!described) return [summaryCard("Usage", "0", { unit: "calls", hint: "nothing recorded yet", accent: "line-strong" })];
+  return [
+    summaryCard("Tokens", described.tokens.toLocaleString(), {
+      accent: "blue",
+      hint: described.input.toLocaleString() + " in · " + described.output.toLocaleString() + " out",
+    }),
+    summaryCard("From cache", described.cached.toLocaleString(), { accent: "accent", hint: "read rather than sent again" }),
+    summaryCard("Provider calls", described.invocations.toLocaleString(), { accent: "accent", hint: "across every run on disk" }),
+    summaryCard("Estimated cost", described.cost ?? "not priced", {
+      accent: "amber",
+      hint: described.cost ? "from observability.pricing" : "set observability.pricing to see it",
+    }),
+  ];
+}
+
+// What a run is doing right now: the step, the agent inside it, and how far
+// along the plan it is.
+function runningPanel(run) {
+  const steps = run.steps ?? [];
+  const position = steps.length > 0 ? " · step " + Math.min(steps.length, (run.done ?? 0) + 1) + " of " + steps.length : "";
+  const body = [
+    el("div", { class: "row" }, [
+      pill(run.step ? "in " + run.step : "starting", "warn"),
+      el("span", { class: "grow", text: run.stepAgent ? "agent " + run.stepAgent : (run.agent ? "agent " + run.agent : "the project's own workflow") }),
+      timeSpan("since", run.stepSince ?? run.startedAt),
+    ]),
+  ];
+  if (steps.length > 0) {
+    body.push(el("div", { class: "row" }, steps.map((step, index) => pill(
+      step,
+      run.step === step ? "warn" : index < (run.done ?? 0) ? "ok" : "",
+    ))));
+  }
+  if (run.error) body.push(el("p", { class: "notice bad", text: run.failedStep + ": " + run.error }));
+  return panel(run.task, { meta: "working" + position, open: true, body });
 }
 
 function subject(approval) {
@@ -922,6 +970,45 @@ function renderRuns() {
   if (openRun) host.append(renderRunDetail());
 }
 
+function stepDuration(step) {
+  const from = Date.parse(step.startedAt);
+  const to = Date.parse(step.finishedAt);
+  if (Number.isNaN(from) || Number.isNaN(to)) return "—";
+  return ((to - from) / 1000).toFixed(1) + "s";
+}
+
+// Tokens and cost, in the same words everywhere they are shown.
+function describeUsage(summary) {
+  if (!summary || summary.invocations === undefined) return undefined;
+  const cost = summary.estimatedCost === undefined
+    ? undefined
+    : (summary.currency ? summary.currency + " " : "") + summary.estimatedCost.toFixed(4);
+  return {
+    tokens: (summary.inputTokens ?? 0) + (summary.outputTokens ?? 0),
+    input: summary.inputTokens ?? 0,
+    output: summary.outputTokens ?? 0,
+    cached: summary.cacheReadTokens ?? 0,
+    invocations: summary.invocations ?? 0,
+    cost,
+    unpriced: summary.unpricedInvocations ?? 0,
+  };
+}
+
+function usagePanelBody(summary) {
+  const described = describeUsage(summary);
+  if (!described) return el("p", { class: "muted", text: "No provider usage was recorded for this run." });
+  return el("div", {}, [
+    el("p", { class: "muted", text: "Usage" }),
+    pairs([
+      ["Tokens", described.tokens.toLocaleString() + " (" + described.input.toLocaleString() + " in, " + described.output.toLocaleString() + " out)"],
+      ["Cached", described.cached > 0 ? described.cached.toLocaleString() + " read from cache" : "none"],
+      ["Provider calls", String(described.invocations)],
+      ["Estimated cost", described.cost ?? "not priced — set observability.pricing to see it"],
+      ...(described.unpriced > 0 && described.cost ? [["Unpriced calls", String(described.unpriced)]] : []),
+    ]),
+  ]);
+}
+
 function openReceipt(run) {
   return button(run.runId, { class: "btn link", onClick: async () => {
     try {
@@ -954,6 +1041,30 @@ function renderRunDetail() {
       ["Hash", run.hash ?? "—", "mono"],
     ]),
   ];
+  // Why it ended, before anything else: a reviewer opening a failed run is
+  // asking exactly this.
+  const outcome = openRun.receipt.outcome ?? { reasons: [], steps: [] };
+  if (outcome.reasons.length > 0) {
+    body.push(el("p", { class: "muted", text: run.status === "succeeded" ? "Worth knowing" : "Why it ended" }));
+    for (const reason of outcome.reasons) {
+      body.push(el("p", {
+        class: reason.kind === "publication" || reason.kind === "blocked" ? "notice" : "notice bad",
+        text: (reason.step ? reason.step + ": " : "") + reason.text
+          + (reason.attempts > 1 ? " (after " + reason.attempts + " attempts)" : ""),
+      }));
+    }
+  }
+  if (outcome.steps.length > 0) {
+    body.push(el("p", { class: "muted", text: "Steps" }));
+    body.push(table([
+      { label: "Step", value: (step) => step.id, mono: true },
+      { label: "Status", value: (step) => pill(step.status, step.status === "succeeded" ? "ok" : step.status === "failed" ? "bad" : "warn") },
+      { label: "Attempts", value: (step) => String(step.attempts ?? 0) },
+      { label: "Took", value: (step) => stepDuration(step) },
+      { label: "Error", value: (step) => ({ text: step.error ?? "", class: "bad" }) },
+    ], outcome.steps, "None recorded."));
+  }
+  if (outcome.usage) body.push(usagePanelBody(outcome.usage));
   const rehearsal = terminal.git?.mergeRehearsal;
   if (rehearsal) {
     body.push(el("div", { class: "row" }, [
@@ -998,11 +1109,15 @@ function renderRunDetail() {
 async function loadWorktrees({ notify = false } = {}) {
   try {
     worktrees = await api("/api/worktrees");
+    if (worktreeChanges && !(worktrees.entries ?? []).some((entry) => entry.name === worktreeChanges.name)) {
+      worktreeChanges = undefined;
+    }
     clearError();
     if (notify) toast("The worktrees were read again.");
   } catch (error) {
     worktrees = { available: false, error: error.message, entries: [] };
   }
+  if (!state) return;
   renderNav();
   if (view === "worktrees") renderWorktrees();
 }
@@ -1027,14 +1142,55 @@ function renderWorktrees() {
       + (worktrees.managed ?? 0) + " from runs · "
       + (worktrees.unsaved > 0 ? worktrees.unsaved + " with unsaved work" : "nothing unsaved"),
     body: [table([
-      { label: "Worktree", value: (entry) => entry.name, mono: true },
+      { label: "Worktree", value: (entry) => openChanges(entry), mono: true },
       { label: "Branch", value: (entry) => entry.branch ?? (entry.detached ? "(detached)" : "—"), mono: true },
       { label: "Head", value: (entry) => (entry.head ?? "").slice(0, 8), mono: true },
       { label: "From", value: (entry) => entry.main ? "checkout" : entry.managed ? "a run" : "elsewhere" },
       { label: "State", value: (entry) => worktreeState(entry) },
       { label: "", value: (entry) => worktreeActions(entry) },
-    ], entries, "No worktrees are registered.")],
+    ], entries, "No worktrees are registered.", { selected: (entry) => entry.name === worktreeChanges?.name })],
   }));
+  if (worktreeChanges) host.append(renderWorktreeChanges());
+}
+
+function openChanges(entry) {
+  return button(entry.name, { class: "btn link", onClick: async () => {
+    try {
+      worktreeChanges = { name: entry.name, ...await api("/api/worktrees/changes?name=" + encodeURIComponent(entry.name)) };
+      clearError();
+      renderWorktrees();
+    } catch (error) {
+      fail(error);
+    }
+  } });
+}
+
+// A number is a claim; the files are the evidence. Opening a worktree says
+// exactly what removing it would throw away.
+function renderWorktreeChanges() {
+  const changes = worktreeChanges;
+  const body = [];
+  if (changes.unreadable) {
+    body.push(el("p", { class: "notice bad", text: "This worktree's directory cannot be read; 'git worktree prune' clears it." }));
+  } else if (changes.entries.length === 0) {
+    body.push(el("p", { class: "empty", text: "Nothing changed here. Removing it throws nothing away." }));
+  } else {
+    body.push(table([
+      { label: "File", value: (change) => change.renamedFrom ? change.renamedFrom + " → " + change.path : change.path, mono: true },
+      { label: "Change", value: (change) => ({ text: change.label, class: change.ignorable ? "muted" : "" }) },
+      { label: "Counts as", value: (change) => change.ignorable
+        ? { text: "ETNPilot's own state", class: "muted" }
+        : { text: "unsaved work", class: "warn" } },
+    ], changes.entries, "Nothing changed here."));
+    if (changes.truncated) {
+      body.push(el("p", { class: "muted", text: "Showing " + changes.entries.length + " of " + changes.truncated + " changes." }));
+    }
+    body.push(el("p", { class: "muted", text: changes.blocking === 0
+      ? "None of this is a person's work, so this worktree can be removed."
+      : changes.blocking + (changes.blocking === 1 ? " change is" : " changes are") + " unsaved work; removing is refused while they are here." }));
+  }
+  body.push(el("div", { class: "row" }, [button("Close", { onClick: () => { worktreeChanges = undefined; renderWorktrees(); } })]));
+  return panel(changes.name, { meta: changes.branch ?? "", open: true, body });
 }
 
 function worktreeState(entry) {
@@ -1063,6 +1219,17 @@ function worktreeActions(entry) {
   } })];
 }
 
+async function loadUsage() {
+  try {
+    usage = await api("/api/usage");
+  } catch (error) {
+    usage = { available: false, reason: error.message };
+  }
+  // The usage answer can arrive before the first state does; the views are
+  // drawn from both, so it waits for the other one.
+  if (state && view === "overview") renderOverview();
+}
+
 async function loadMerges({ notify = false } = {}) {
   try {
     merges = await api("/api/merges");
@@ -1071,6 +1238,7 @@ async function loadMerges({ notify = false } = {}) {
   } catch (error) {
     merges = { configured: true, available: false, error: error.message, entries: [] };
   }
+  if (!state) return;
   renderNav();
   if (view === "merges") renderMerges();
 }
@@ -1217,8 +1385,14 @@ function editSetting(entry) {
 
 function renderSettingEditor() {
   const { entry } = openSetting;
-  const value = el("input", { class: "grow mono", attrs: { "aria-label": "value as YAML", value: openSetting.value } });
-  value.addEventListener("input", () => { openSetting.value = value.value; });
+  // Where a setting only accepts certain values, they are offered rather than
+  // remembered: the list is the one the configuration loader validates against.
+  const value = entry.choices ? choiceControl(entry) : freeValue();
+  function freeValue() {
+    const input = el("input", { class: "grow mono", attrs: { "aria-label": "value as YAML", value: openSetting.value } });
+    input.addEventListener("input", () => { openSetting.value = input.value; });
+    return input;
+  }
   const message = el("p", { class: "muted", text: entry.mode + " · default " + describeValue(entry.defaultValue)
     + " · writing " + (openSetting.scope === "global" ? "~/.config, for every project" : "this project, locally") });
   const close = () => { openSetting = undefined; renderSettings(); };
@@ -1258,7 +1432,9 @@ function renderSettingEditor() {
   } });
   const atDefault = entry.source === "project";
   return panel(entry.path, {
-    meta: "YAML, so 4, true and ['read'] all mean what they look like",
+    meta: entry.choices
+      ? (entry.choices.kind === "set" ? "choose any of them" : "one of these values")
+      : "YAML, so 4, true and ['read'] all mean what they look like",
     open: true,
     body: [
       el("div", { class: "row" }, atDefault
@@ -1268,6 +1444,42 @@ function renderSettingEditor() {
       el("div", { class: "row" }, [button("Cancel", { onClick: close })]),
     ],
   });
+}
+
+// One of a list becomes a dropdown; a set of them becomes checkboxes. Both
+// write the same YAML the free field would, so the server sees no difference.
+function choiceControl(entry) {
+  const { values, kind } = entry.choices;
+  if (kind === "one") {
+    const select = el("select", { class: "grow", attrs: { "aria-label": "value" } });
+    const current = openSetting.value;
+    for (const option of values) {
+      select.append(el("option", { text: String(option), attrs: { value: JSON.stringify(option) } }));
+    }
+    // A value the project already has that is not in the list is still shown,
+    // so opening a setting never silently changes it.
+    if (![...select.options].some((option) => option.value === current)) {
+      select.append(el("option", { text: describeValue(entry.value) + " (current)", attrs: { value: current } }));
+    }
+    select.value = current;
+    select.addEventListener("change", () => { openSetting.value = select.value; });
+    return select;
+  }
+  const chosen = new Set(Array.isArray(entry.value) ? entry.value : []);
+  const box = el("div", { class: "row grow" });
+  const update = () => { openSetting.value = JSON.stringify([...chosen]); };
+  for (const option of values) {
+    const check = el("input", { attrs: { type: "checkbox", "aria-label": String(option) } });
+    check.checked = chosen.has(option);
+    check.addEventListener("change", () => {
+      if (check.checked) chosen.add(option);
+      else chosen.delete(option);
+      update();
+    });
+    box.append(el("label", { class: "check" }, [check, el("span", { text: String(option) })]));
+  }
+  update();
+  return box;
 }
 
 // --------------------------------------------------------- start a run
@@ -1311,6 +1523,9 @@ async function startRun(event) {
     closeModal("run-modal");
     toast("Started: " + started.task + ". Whatever it needs approved appears under Approvals.");
     await refresh({ force: true });
+    // A run needs a moment to plan itself and enter its first step. Waiting a
+    // whole poll to say where it is makes it look like nothing happened.
+    for (const delay of [800, 2000, 4000]) setTimeout(() => refresh(), delay);
   } catch (error) {
     fail(error);
     toast(error.message, "bad");
@@ -1408,10 +1623,19 @@ async function refresh({ force = false } = {}) {
     title.title = root;
     render();
     clearError();
+    // Usage is the whole telemetry file, so it is read when it can have
+    // changed: at the start, and whenever a run has finished since last time.
+    const finished = state.runs.length + "/" + (state.active ?? []).length;
+    if (usageSignature !== finished) {
+      usageSignature = finished;
+      void loadUsage();
+    }
   } catch (error) {
     fail(error);
   }
 }
+
+let usageSignature;
 
 $("menu").addEventListener("click", () => ($("sidebar").classList.contains("open") ? closeSidebar() : openSidebar()));
 $("scrim").addEventListener("click", closeSidebar);
@@ -1451,6 +1675,7 @@ window.addEventListener("hashchange", () => show(location.hash.slice(1)));
 renderNav();
 show(location.hash.slice(1) || "overview");
 refresh();
+loadUsage();
 setInterval(refresh, 5000);
 </script>
 </body>

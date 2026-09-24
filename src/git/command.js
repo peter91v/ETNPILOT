@@ -1,6 +1,9 @@
 import { spawn } from "node:child_process";
 
-export function git(args, { cwd, env = process.env, input, allowExitCodes = [] } = {}) {
+// 'trim' is the default because most callers want a value, not a line; it is
+// off where a column matters, such as the two status columns of
+// 'git status --porcelain', whose first one is a space for an unstaged change.
+export function git(args, { cwd, env = process.env, input, allowExitCodes = [], trim = true } = {}) {
   if (!Array.isArray(args) || args.some((arg) => typeof arg !== "string")) {
     throw new TypeError("Git arguments must be an array of strings.");
   }
@@ -15,7 +18,7 @@ export function git(args, { cwd, env = process.env, input, allowExitCodes = [] }
       // Some porcelain reports a meaningful result through a non-zero exit,
       // such as merge-tree signalling conflicts.
       if (code === 0 || allowExitCodes.includes(code)) {
-        resolve({ stdout: stdout.trim(), stderr: stderr.trim(), exitCode: code });
+        resolve({ stdout: trim ? stdout.trim() : stdout, stderr: stderr.trim(), exitCode: code });
       } else {
         reject(new Error(`git ${args[0]} failed (${code}): ${stderr.trim()}`));
       }

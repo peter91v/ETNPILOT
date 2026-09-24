@@ -70,6 +70,17 @@ export async function createReviewServer({
         });
         return send(response, 200, removal);
       }
+      if (request.method === "GET" && url.pathname === "/api/worktrees/changes") {
+        const name = url.searchParams.get("name");
+        if (!name) throw badRequest("A worktree name is required.");
+        const changes = await state.worktreeChanges(name).catch((error) => {
+          throw error instanceof TypeError ? badRequest(error.message) : error;
+        });
+        return send(response, 200, changes);
+      }
+      if (request.method === "GET" && url.pathname === "/api/usage") {
+        return send(response, 200, await state.usage());
+      }
       if (request.method === "GET" && url.pathname === "/api/merges") {
         const status = url.searchParams.get("status");
         return send(response, 200, await state.mergeRequests(status ? { state: status } : undefined));

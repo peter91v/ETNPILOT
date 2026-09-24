@@ -20,6 +20,7 @@ setting changed here is refused for the same reasons.
 | `a` / `r` | Approve once / reject |
 | `c` / `R` | Request cancellation of / resume the queue job under the cursor |
 | `x` | Remove the worktree under the cursor, if it is clean |
+| `enter` (worktrees) | What that worktree is holding, file by file |
 | `n` | Start a run |
 | `esc` | Leave the detail view |
 | `g` | Refresh now, rather than waiting for the next poll |
@@ -30,7 +31,7 @@ In the settings view:
 
 | Key | Does |
 | --- | --- |
-| `enter` | Edit the setting under the cursor |
+| `enter` | Edit the setting under the cursor; the line beneath names the values it accepts |
 | `d` | Put it back to the committed default |
 | `s` | Switch between writing locally and writing to `~/.config` |
 | `/` | Filter by path; `enter` keeps the filter, `esc` clears it |
@@ -62,9 +63,11 @@ and what removing one would throw away.
   run-9f2a1c44      etnpilot/run-9f2a1c44   3c278aed  a run     clean
 ```
 
-`x` removes the one under the cursor through the same `removeIfClean` the CLI
-uses, which is the point: a worktree holding unsaved work is **not** removed,
-and the screen says what it is keeping.
+`enter` lists what a worktree is holding, file by file, each marked as a
+person's work or as state ETNPilot wrote itself. `x` removes the one under the
+cursor through the same `removeIfClean` the CLI uses, which is the point: a
+worktree holding unsaved work is **not** removed, and the screen says what it
+is keeping.
 
 ```
 run-7e1b0a33 keeps 1 unsaved change — nothing was removed.
@@ -139,9 +142,27 @@ abort, its waiting request is closed, and its receipt records why.
 
 ## What a run's receipt shows
 
-`enter` on a run opens what was sealed: the branch and sandbox, the merge
-rehearsal and any conflicts, the approvals with who decided them, and which
-settings layers were in effect:
+`enter` on a run opens what was sealed, beginning with why it ended — the
+failing step and its own error, the steps that never ran because of it, and
+whether it was published:
+
+```
+Why it ended
+  verify: checks failed: 2 of 18 tests (src/workflow/queue.test.js)
+  publish: never ran: a step it needs failed
+  not published: the workflow did not succeed
+```
+
+Then every step with its attempts, what the run cost:
+
+```
+Usage
+  204,621 tokens 184,203 in · 20,418 out · 120,000 cached
+  7 provider calls USD 0.8123
+```
+
+and the branch and sandbox, the merge rehearsal and any conflicts, the
+approvals with who decided them, and which settings layers were in effect:
 
 ```
 Settings in effect

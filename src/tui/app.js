@@ -35,6 +35,7 @@ export function createTuiApp({
   let helpOffset = 0;
   let receipt;
   let worktrees;
+  let worktreeChanges;
   let worktreesReadAt = 0;
   let merges;
   let messageTimer;
@@ -57,6 +58,7 @@ export function createTuiApp({
     get helpOffset() { return helpOffset; },
     get receipt() { return receipt; },
     get worktrees() { return worktrees; },
+    get worktreeChanges() { return worktreeChanges; },
     get merges() { return merges; },
     // What is running is tracked in the shared state, because the page needs
     // the same answer; this is a view of it, not a second copy.
@@ -90,6 +92,7 @@ export function createTuiApp({
         helpOffset,
         receipt,
         worktrees,
+        worktreeChanges,
         merges,
         active: snapshot.active ?? [],
         project: state.config?.git?.project ?? "",
@@ -163,8 +166,10 @@ export function createTuiApp({
       } else if (key === "\r" || key === "\n") {
         if (view === "approvals" && selection().length > 0) detail = true;
         else if (view === "runs" && selection().length > 0) await openRun();
+        else if (view === "worktrees" && selection().length > 0) await openWorktree();
       } else if (key === "\u001B") {
         detail = false;
+        worktreeChanges = undefined;
       } else if (key === "a" || key === "r") {
         await decide(key === "a" ? "approved" : "rejected");
       } else if (key === "c" && view === "queue") {
@@ -219,9 +224,17 @@ export function createTuiApp({
   };
 
   function onData(chunk) {
-    void app.handle(String(chunk)).then((keepGoing) => {
-      if (!keepGoing) app.stop();
-    }).catch(report);
+    // A terminal delivers what it has, not one key at a time: typing quickly
+    // or pasting a task arrives as a single chunk. Treating that chunk as one
+    // key drops every character in it.
+    void (async () => {
+      for (const key of splitKeys(String(chunk))) {
+        if (!await app.handle(key)) {
+          app.stop();
+          return;
+        }
+      }
+    })().catch(report);
   }
 
   function selection() {
@@ -251,6 +264,10 @@ export function createTuiApp({
         worktrees = await state.worktrees();
       } catch (error) {
         worktrees = { available: false, error: error.message, entries: [] };
+      }
+      if (worktreeChanges && !(worktrees.entries ?? []).some((entry) => entry.name === worktreeChanges.name)) {
+        worktreeChanges = undefined;
+        if (view === "worktrees") detail = false;
       }
       worktreesReadAt = now();
       cursor = clamp(cursor, selection().length);
@@ -366,6 +383,21 @@ export function createTuiApp({
     receipt = undefined;
     try {
       receipt = await state.readReceipt(run.receiptFile);
+    } catch (error) {
+      note(error.message);
+      detail = false;
+    }
+  }
+
+  // What a worktree holds is read when it is opened, not in the poll: it is
+  // another 'git status', and only the one on screen is worth the cost.
+  async function openWorktree() {
+    const entry = selection()[clamp(cursor, selection().length)];
+    if (!entry) return;
+    detail = true;
+    worktreeChanges = undefined;
+    try {
+      worktreeChanges = await state.worktreeChanges(entry.name);
     } catch (error) {
       note(error.message);
       detail = false;
@@ -491,4 +523,31 @@ export function createTuiApp({
   }
 
   return app;
+}
+
+// Splits a chunk into keys: an escape sequence stays whole, everything else is
+// one code point, so a pasted word arrives as its letters.
+export function splitKeys(chunk) {
+  const keys = [];
+  let index = 0;
+  while (index < chunk.length) {
+    if (chunk[index] === "\u001B") {
+      const rest = chunk.slice(index + 1);
+      const sequence = /^[[O][0-9;]*[A-Za-z~]/u.exec(rest);
+      if (sequence) {
+        keys.push(chunk.slice(index, index + 1 + sequence[0].length));
+        index += 1 + sequence[0].length;
+        continue;
+      }
+      // A lone escape, or one that has not finished arriving: on its own it
+      // means 'back', which is what every view does with it.
+      keys.push("\u001B");
+      index += 1;
+      continue;
+    }
+    const character = [...chunk.slice(index)][0];
+    keys.push(character);
+    index += character.length;
+  }
+  return keys;
 }

@@ -105,7 +105,9 @@ test("a widening change is refused in the editor, where it was made", async () =
   try {
     await select(app, "approval.allow");
     await app.handle("\r");
-    assert.match(screen(app), /stricter-only · default \["read"\]/);
+    // Where a setting accepts only certain values, the hint names them in
+    // place of the default, which is one of them.
+    assert.match(screen(app), /stricter-only · any of: "read", "write", "shell", "network"/);
 
     await app.handle("\u0015");
     await type(app, '["read","write"]');
@@ -263,7 +265,15 @@ test("a settings frame still fits the terminal it was given", () => {
       overrides: ["queue.workers"],
       entries: [
         { path: "queue.workers", value: 4, defaultValue: 1, source: "user-local", mode: "open" },
-        { path: "approval.allow", value: [], defaultValue: ["read"], source: "user-local", mode: "stricter-only" },
+        {
+          path: "approval.allow",
+          value: [],
+          defaultValue: ["read"],
+          source: "user-local",
+          mode: "stricter-only",
+          // As describeSettings reports it: this setting accepts a known set.
+          choices: { kind: "set", values: ["read", "write", "shell", "network"] },
+        },
         { path: "receipts.signing.enabled", value: false, defaultValue: false, source: "project", mode: "locked" },
       ],
     },
@@ -284,7 +294,7 @@ test("a settings frame still fits the terminal it was given", () => {
   });
   assert.equal(editing.length, 16);
   assert.match(editing.join("\n"), /SETTING\s+VALUE\s+FROM\s+CHANGE/);
-  assert.match(editing.at(-2), /stricter-only · default \["read"\] · writing this project, locally/);
+  assert.match(editing.at(-2), /stricter-only · any of: "read", "write", "shell", "network"/);
   assert.match(editing.at(-1), /^set approval\.allow> \["read"\] $/);
 
   assert.equal(settingLiteral([1, 2]), "[1,2]");

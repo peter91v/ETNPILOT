@@ -1,4 +1,4 @@
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { loadConfig } from "../config/load.js";
 import { describeSettings, setSetting, unsetSetting } from "../config/settings.js";
@@ -6,6 +6,7 @@ import { ApprovalInbox, createInboxApprovalHandler } from "../core/approval-inbo
 import { escapeControlCharacters } from "../core/text-safety.js";
 import { WorktreeManager } from "../git/worktrees.js";
 import { GitLabClient } from "../gitlab/client.js";
+import { summarizeTelemetryFile } from "../observability/telemetry.js";
 import { runProject, RUN_BRANCH_PREFIX } from "./project-runner.js";
 import { createSecretResolver } from "../secrets/resolver.js";
 import { WorkflowQueue } from "../workflow/queue.js";
@@ -68,13 +69,34 @@ export async function openProjectState({ root = process.cwd(), env = process.env
         if (signal.aborted) controller.abort();
         else signal.addEventListener("abort", () => controller.abort(), { once: true });
       }
-      const record = { task, agent, startedAt: new Date().toISOString(), controller };
+      const record = { task, agent, startedAt: new Date().toISOString(), controller, done: 0 };
       const started = runProject({
         root: projectRoot,
         env,
         input: task,
         agent,
         signal: controller.signal,
+        // Where the run is, so a surface can say more than 'working'.
+        onEvent: (event) => {
+          if (event.type === "workflow.planned") record.steps = event.steps;
+          if (event.type === "workflow.step.started") {
+            record.step = event.step;
+            record.stepSince = event.at;
+            record.stepAgent = undefined;
+          }
+          if (event.type === "run.started") record.stepAgent = event.agent;
+          if (event.type === "workflow.step.completed") {
+            record.done += 1;
+            record.step = undefined;
+            record.stepAgent = undefined;
+          }
+          if (event.type === "workflow.step.failed") {
+            record.done += 1;
+            record.failed = event.step;
+            record.error = event.error;
+            record.step = undefined;
+          }
+        },
         dryRun,
         providerFactories,
         approvalHandler: createInboxApprovalHandler({
@@ -112,7 +134,21 @@ export async function openProjectState({ root = process.cwd(), env = process.env
     // more sharply: one runs 'git status' per worktree, the other crosses the
     // network. A poll every second must do neither.
     worktrees: () => readWorktrees({ root: projectRoot, config: current }),
-    removeWorktree: (name) => new WorktreeManager(projectRoot).removeIfClean(name),
+    // What a worktree is holding, so 'it keeps unsaved work' can be read as a
+    // list of files rather than a number to be taken on trust.
+    async worktreeChanges(name) {
+      const manager = worktreeManager(projectRoot, current);
+      const entry = (await manager.describe()).find((candidate) => candidate.name === name);
+      if (!entry) throw new TypeError(`'${name}' is not a worktree of this project.`);
+      if (entry.readable === false) {
+        return { name, path: entry.path, entries: [], total: 0, blocking: 0, unreadable: true };
+      }
+      return { name, branch: entry.branch, ...await manager.changesAt(entry.path) };
+    },
+    removeWorktree: (name) => worktreeManager(projectRoot, current).removeIfClean(name),
+    // What the provider cost. Read on demand and only when the telemetry file
+    // has changed, because it is the whole file every time.
+    usage: () => readUsage({ root: projectRoot, config: current }),
     mergeRequests: (options) => readMergeRequests({ root: projectRoot, config: current, env }, options),
     // Changing a setting from any surface goes through the same module the
     // CLI uses, so every surface is refused for the same reason.
@@ -156,7 +192,15 @@ export async function collectState(
 }
 
 function presentRun(record) {
-  return { task: record.task, agent: record.agent, startedAt: record.startedAt };
+  return {
+    task: record.task,
+    agent: record.agent,
+    startedAt: record.startedAt,
+    ...(record.steps ? { steps: record.steps, done: record.done } : {}),
+    ...(record.step ? { step: record.step, stepSince: record.stepSince } : {}),
+    ...(record.stepAgent ? { stepAgent: record.stepAgent } : {}),
+    ...(record.failed ? { failedStep: record.failed, error: record.error } : {}),
+  };
 }
 
 // A local settings file that the loader refuses must not black out the rest of
@@ -203,6 +247,67 @@ export async function readRuns(directory, { limit = 20 } = {}) {
   return runs;
 }
 
+// Why a run ended the way it did, from what the receipt already holds. Both
+// surfaces ask this module rather than each reading the entries their own way,
+// so neither can give a different answer about the same run.
+export function describeOutcome(receipt) {
+  const terminal = receipt?.terminal ?? {};
+  const summary = terminal.summary ?? {};
+  const steps = Object.entries(summary.steps ?? {}).map(([id, step]) => ({ id, ...step }));
+  const failed = steps.filter((step) => step.status === "failed");
+  const blocked = steps.filter((step) => step.status === "blocked");
+  const rejected = receipt?.entries?.flatMap((entry) => entry.approvals ?? [])
+    .filter((approval) => approval.decision && approval.decision !== "approve-once") ?? [];
+  const reasons = [];
+  // The fatal error first: it is what actually stopped the run.
+  if (summary.error) reasons.push({ kind: "error", text: summary.error });
+  for (const step of failed) reasons.push({ kind: "step", step: step.id, text: step.error ?? "failed", attempts: step.attempts });
+  for (const step of blocked) {
+    reasons.push({
+      kind: "blocked",
+      step: step.id,
+      text: step.reason === "dependency-failed"
+        ? "never ran: a step it needs failed"
+        : step.reason === "fail-fast"
+          ? "never ran: the workflow stops at the first failure"
+          : step.reason ?? "never ran",
+    });
+  }
+  for (const approval of rejected) {
+    reasons.push({
+      kind: "approval",
+      text: `${approval.operationKind ?? "an operation"} was ${approval.decision}`
+        + (approval.evidence?.reason ? `: ${approval.evidence.reason}` : ""),
+    });
+  }
+  if (terminal.content?.verificationError) {
+    reasons.push({ kind: "content", text: `content verification: ${terminal.content.verificationError}` });
+  }
+  // Not published is not a failure, but it is the first thing a reviewer asks.
+  const publication = terminal.publication;
+  if (publication && publication.published === false) {
+    reasons.push({ kind: "publication", text: publicationReason(publication) });
+  }
+  if (terminal.terminal !== true && terminal.status === undefined) {
+    reasons.push({ kind: "incomplete", text: "the receipt was never sealed: the run stopped before it could finish" });
+  }
+  return {
+    status: terminal.status ?? summary.status ?? "unknown",
+    steps,
+    reasons,
+    usage: terminal.observability?.summary,
+    ...(terminal.cleanup ? { cleanup: terminal.cleanup } : {}),
+  };
+}
+
+function publicationReason(publication) {
+  if (publication.reason === "workflow-not-succeeded") return "not published: the workflow did not succeed";
+  if (publication.reason === "merge-conflict") {
+    return `not published: it would conflict with ${(publication.conflicts ?? []).join(", ") || "the target branch"}`;
+  }
+  return `not published: ${publication.reason ?? "no reason recorded"}`;
+}
+
 export async function readReceipt(directory, file) {
   if (typeof file !== "string" || file.includes("/") || file.includes("\\") || !file.endsWith(".jsonl")) {
     throw new TypeError(`'${file}' is not a receipt file in this project.`);
@@ -216,7 +321,8 @@ export async function readReceipt(directory, file) {
       entries.push({ malformed: true });
     }
   }
-  return { file, entries, terminal: entries.findLast((entry) => entry.terminal === true) };
+  const receipt = { file, entries, terminal: entries.findLast((entry) => entry.terminal === true) };
+  return { ...receipt, outcome: describeOutcome(receipt) };
 }
 
 function countApprovals(lines) {
@@ -234,8 +340,34 @@ function countApprovals(lines) {
 // The worktrees this repository has, with ETNPilot's own marked and the
 // branches they hold. A run works in one of these, so what is on disk is part
 // of the same evidence as the receipt it wrote.
+function worktreeManager(root, config) {
+  return new WorktreeManager(root, config?.git?.worktreeRoot ?? ".etnpilot/worktrees");
+}
+
+// Tokens and cost for this project, as recorded by the runs themselves. A
+// surface that never shows this leaves a budget nobody can see.
+let usageCache;
+export async function readUsage({ root, config }) {
+  const file = resolve(root, config?.observability?.file ?? ".etnpilot/state/telemetry.jsonl");
+  const stats = await stat(file).catch(() => undefined);
+  if (!stats) {
+    return {
+      available: false,
+      reason: config?.observability?.enabled === true
+        ? "No telemetry has been written yet; usage appears once a run records it."
+        : "observability.enabled is false, so nothing records what a run costs.",
+    };
+  }
+  const key = `${file}:${stats.mtimeMs}:${stats.size}`;
+  if (usageCache?.key === key) return usageCache.value;
+  const summary = await summarizeTelemetryFile(file);
+  const value = { available: true, file, ...summary, budgets: config?.observability?.budgets ?? {} };
+  usageCache = { key, value };
+  return value;
+}
+
 export async function readWorktrees({ root, config }) {
-  const manager = new WorktreeManager(root, config?.git?.worktreeRoot ?? ".etnpilot/worktrees");
+  const manager = worktreeManager(root, config);
   try {
     const entries = await manager.describe();
     return {

@@ -184,3 +184,72 @@ async function runnableProject() {
   await git(["commit", "-m", "initial"], { cwd: root });
   return root;
 }
+
+test("a run that failed says why, with its steps, and what it cost", async () => {
+  const root = await runnableProject();
+  const review = await createReviewServer({ root });
+  const start = review.state.startRun.bind(review.state);
+  review.state.startRun = (options) => start({
+    ...options,
+    providerFactories: {
+      fake: (name) => ({ name, invoke: () => { throw new Error("the provider gave up"); } }),
+    },
+  });
+  try {
+    const call = await caller(review);
+    await call("/api/runs/start", { method: "POST", body: JSON.stringify({ task: "break please" }) });
+    const state = await waitFor(call, (payload) => payload.runs.length === 1, "the run to be recorded");
+    const run = state.runs[0];
+    assert.equal(run.status, "failed");
+
+    const receipt = await (await call(`/api/runs/${encodeURIComponent(run.receiptFile)}`)).json();
+    // The reason is the failing step's own error, not 'it failed'.
+    const failure = receipt.outcome.reasons.find((reason) => reason.kind === "step");
+    assert.equal(failure.step, "build");
+    assert.match(failure.text, /gave up/);
+    assert.equal(receipt.outcome.status, "failed");
+    assert.equal(receipt.outcome.steps.find((step) => step.id === "build").status, "failed");
+  } finally {
+    await review.close();
+  }
+});
+
+test("a run in progress says which step it is in, and which agent", async () => {
+  const root = await runnableProject();
+  const review = await createReviewServer({ root });
+  const asked = [];
+  withFakeProvider(review, asked);
+  try {
+    const call = await caller(review);
+    await call("/api/runs/start", { method: "POST", body: JSON.stringify({ task: "watch me" }) });
+    // While it waits for its approval, the state says where it is.
+    const working = await waitFor(call, (payload) => payload.active[0]?.step !== undefined, "the step to start");
+    const [run] = working.active;
+    assert.equal(run.step, "build");
+    assert.equal(run.stepAgent, "worker");
+    assert.deepEqual(run.steps, ["build"]);
+    assert.equal(run.done, 0);
+    assert.ok(Date.parse(run.stepSince) > 0);
+
+    const pending = working.approvals.pending[0] ?? (await waitFor(call, (payload) => payload.approvals.pending.length === 1, "the approval")).approvals.pending[0];
+    await call("/api/approvals/decide", { method: "POST", body: JSON.stringify({ id: pending.id, decision: "approve" }) });
+    await waitFor(call, (payload) => payload.active.length === 0, "the run to finish");
+  } finally {
+    await review.close();
+  }
+});
+
+test("usage is served, and says why there is none when nothing records it", async () => {
+  const root = await runnableProject();
+  const review = await createReviewServer({ root });
+  try {
+    const call = await caller(review);
+    const usage = await (await call("/api/usage")).json();
+    // This project has observability off, so the answer names that rather
+    // than showing a zero that looks like a measurement.
+    assert.equal(usage.available, false);
+    assert.match(usage.reason, /observability\.enabled is false/);
+  } finally {
+    await review.close();
+  }
+});

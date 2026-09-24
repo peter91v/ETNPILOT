@@ -78,6 +78,45 @@ export class WorktreeManager {
     };
   }
 
+  // What a worktree is actually holding. The surfaces ask for this when a
+  // person opens one, so 'it keeps unsaved work' can be read as a list of
+  // files rather than as a number they have to take on trust.
+  async changesAt(path, { ignoredUntracked = DEFAULT_IGNORED_UNTRACKED, limit = 500 } = {}) {
+    // Untrimmed: the first of the two status columns is a space for a change
+    // that is not staged, and trimming it would shift every path by one.
+    const status = await git(["status", "--porcelain"], { cwd: path, trim: false });
+    const lines = status.stdout.split("\n").filter(Boolean);
+    const entries = lines.slice(0, limit).map((line) => {
+      const index = line[0];
+      const worktree = line[1];
+      const rest = line.slice(3);
+      // A rename is recorded as 'old -> new'; the new name is the file now.
+      const [from, to] = rest.includes(" -> ") ? rest.split(" -> ") : [undefined, rest];
+      return {
+        path: unquote(to),
+        ...(from ? { renamedFrom: unquote(from) } : {}),
+        index: index === " " ? undefined : index,
+        worktree: worktree === " " ? undefined : worktree,
+        label: describeStatus(index, worktree),
+        // The artifacts ETNPilot writes into a workspace are listed, but
+        // marked, because they are not a person's unsaved work.
+        ignorable: isIgnorableUntracked(line, ignoredUntracked),
+      };
+    });
+    return {
+      path,
+      entries,
+      total: lines.length,
+      blocking: lines.filter((line) => !isIgnorableUntracked(line, ignoredUntracked)).length,
+      ...(lines.length > entries.length ? { truncated: lines.length } : {}),
+    };
+  }
+
+  async changes(name, options = {}) {
+    assertRef(name, "worktree name");
+    return this.changesAt(this.#path(name), options);
+  }
+
   async removeIfClean(name, { ignoredUntracked = DEFAULT_IGNORED_UNTRACKED } = {}) {
     assertRef(name, "worktree name");
     const path = this.#path(name);
@@ -108,6 +147,32 @@ export class WorktreeManager {
     if (!path.startsWith(`${this.worktreeRoot}${sep}`)) throw new Error("Worktree path escapes its root.");
     return path;
   }
+}
+
+const STATUS_LABELS = Object.freeze({
+  M: "modified",
+  A: "added",
+  D: "deleted",
+  R: "renamed",
+  C: "copied",
+  U: "unmerged",
+  T: "type changed",
+  "?": "untracked",
+  "!": "ignored",
+});
+
+function describeStatus(index, worktree) {
+  if (index === "?" || worktree === "?") return "untracked";
+  const staged = index && index !== " " ? STATUS_LABELS[index] ?? index : undefined;
+  const unstaged = worktree && worktree !== " " ? STATUS_LABELS[worktree] ?? worktree : undefined;
+  if (staged && unstaged && staged !== unstaged) return `${staged}, then ${unstaged}`;
+  return staged ?? unstaged ?? "changed";
+}
+
+// git quotes a path that contains unusual characters; the quotes are the
+// report's, not the file's.
+function unquote(value) {
+  return value.replace(/^"(.*)"$/, "$1");
 }
 
 function isIgnorableUntracked(entry, ignoredUntracked) {

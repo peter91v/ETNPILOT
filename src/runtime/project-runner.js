@@ -56,6 +56,7 @@ export async function runProject({
   signal,
   metadata = {},
   secretResolver,
+  onEvent,
 } = {}) {
   if (!input) throw new TypeError("A task prompt is required.");
   const repositoryRoot = resolve(root);
@@ -76,6 +77,10 @@ export async function runProject({
     policy,
     secrets,
   });
+  // A surface that started this run can watch it: which step is working and
+  // which agent is inside it. An observer never changes the run — the event
+  // bus contains a listener that throws.
+  if (onEvent) harness.events.on("*", onEvent);
   let config;
   let gitLabToken;
   let receiptSigner;
@@ -194,6 +199,10 @@ export async function runProject({
       fallback: config.defaultAgent ?? "orchestrator",
     });
     assertWorkflowAgents(harness, workflow);
+    await harness.events.emit("workflow.planned", {
+      runId,
+      steps: workflow.steps.map((step) => step.id),
+    });
   } catch (error) {
     codegraph?.graph.close();
     await harness.close();

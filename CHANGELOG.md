@@ -26,6 +26,40 @@ pre-1.0, so breaking changes may appear in any release.
 - The page also lists the worktrees and the project's merge requests, with the
   same `removeIfClean` behaviour as the other surfaces.
 
+### Added — four things the surfaces were not saying
+
+- **Settings offer the values they accept.** Where a setting takes one of a
+  known list, the page shows a dropdown; where it takes a set, checkboxes; the
+  terminal interface names the same values under the editor. The lists are the
+  ones the code validates against, and `test/settings.test.js` checks each
+  offered value against its own validator, so a surface cannot suggest a value
+  a run would then refuse. Providers come from the project's own
+  configuration rather than from a fixed list.
+- **A worktree says which files it is holding.** Opening one lists them with
+  what happened to each, and marks the state ETNPilot writes itself apart from
+  a person's work — so "1 unsaved, removing refused" can be read rather than
+  taken on trust.
+- **A run says why it ended.** Opening a receipt leads with the failing step
+  and its own error, the steps that never ran because of it, a rejected
+  approval, and whether it was published, followed by every step with its
+  attempts and duration.
+- **Usage is shown.** Tokens sent, tokens read from cache, provider calls and
+  estimated cost: per run in its receipt, and for the project on the overview.
+  Where `observability.enabled` is false, the surfaces say so instead of
+  showing a zero that looks like a measurement.
+- **A run in progress says where it is**: which step, which agent inside it,
+  and how far along the plan — from the events the harness already emits,
+  which `runProject` now lets a caller observe.
+
+### Fixed
+
+- `git()` no longer trims output where a column matters: the first status
+  column of `git status --porcelain` is a space for an unstaged change, and
+  trimming it shifted every path in the first line by one character.
+- The terminal interface reads an input chunk as the keys it contains. A
+  terminal delivers what it has, so typing quickly or pasting a task arrived
+  as one chunk and every character in it was dropped.
+
 ### Changed — the review page follows the GUI draft
 
 - The page is a shell now: a sidebar of views (Overview, Approvals, Queue,

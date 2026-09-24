@@ -34,12 +34,25 @@ teaches the wrong thing about what this can do.
   screen teaches an action that cannot happen. Resuming an `orphaned` job is a
   second, explicit decision, exactly as `--force` is in the CLI.
 - **Runs** with their status, mode, whether the receipt is sealed and signed,
-  and the receipt hash. Opening one reads the receipt itself: the branch and
-  sandbox, the merge rehearsal and what it would collide with, every approval
-  with who decided it, and which settings layers were in effect.
+  and the receipt hash. Opening one reads the receipt itself and leads with
+  **why it ended**: the failing step and its own error, the steps that never
+  ran because of it, an approval that was rejected, and whether it was
+  published. Under that, every step with its attempts and duration, what the
+  run cost in tokens and money, the branch and sandbox, the merge rehearsal
+  and what it would collide with, every approval with who decided it, and
+  which settings layers were in effect.
+- **What a run is doing right now**: the overview shows each run this page
+  started, which step it is in, which agent is inside that step, and how far
+  along the plan it is.
+- **Usage**: tokens sent, tokens read from cache, provider calls and the
+  estimated cost, across every run the project recorded. Where
+  `observability.enabled` is false the cards say that rather than showing a
+  zero that looks like a measurement.
 - **Worktrees**: which branch each holds, which ones a run made, and what
-  removing one would throw away. `Remove` goes through the same `removeIfClean`
-  the CLI and the TUI use, so a worktree holding unsaved work is kept.
+  removing one would throw away. Opening one lists the files it is holding,
+  each marked as a person's work or as state ETNPilot wrote itself, so the
+  refusal to remove it can be read rather than taken on trust. `Remove` goes
+  through the same `removeIfClean` the CLI and the TUI use.
 - **Merge requests**: ETNPilot's own first, told apart by their `etnpilot/`
   branch, with everyone else's beside them. This is the only part of the page
   that needs the network and a token; it is read when the page loads and on
@@ -47,7 +60,9 @@ teaches the wrong thing about what this can do.
   GitLab itself is missing.
 - **Settings**, against the same layers the CLI and the TUI use: the value, the
   layer it came from, and whether it may be changed (`open`, `stricter-only`,
-  `locked`). The value is YAML, as everywhere else. A refusal appears where the
+  `locked`). Where a setting accepts only certain values, they are offered —
+  a dropdown for one of them, checkboxes for a set — and the list is the one
+  the code validates against. Anything else is YAML, as everywhere else. A refusal appears where the
   change was made, with the reason, and the input keeps what was typed. Nothing
   changed here is ever committed — it goes to `.etnpilot/etnpilot.local.yaml`
   or `~/.config/etnpilot/config.yaml`. Local settings the loader refuses are

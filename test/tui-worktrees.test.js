@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createStyle, stripAnsi } from "../src/tui/ansi.js";
-import { mergeEntries, renderApp, renderMerges, renderWorktrees } from "../src/tui/render.js";
+import { mergeEntries, renderApp, renderMerges, renderWorktreeChanges, renderWorktrees } from "../src/tui/render.js";
 import { createTuiApp } from "../src/tui/app.js";
 import { git } from "../src/git/command.js";
 import { WorktreeManager } from "../src/git/worktrees.js";
@@ -255,3 +255,78 @@ function fakeOutput() {
   output.write = (text) => output.written.push(text);
   return output;
 }
+
+test("opening a worktree says which files it is holding", async () => {
+  const root = await createRepository();
+  const manager = new WorktreeManager(root);
+  await manager.create({ name: "run-dirty", branch: "etnpilot/run-dirty" });
+  const workspace = join(root, ".etnpilot", "worktrees", "run-dirty");
+  await writeFile(join(workspace, "draft.txt"), "unsaved\n");
+  await writeFile(join(workspace, "README.md"), "# changed\n");
+  await mkdir(join(workspace, ".etnpilot", "state"), { recursive: true });
+  await writeFile(join(workspace, ".etnpilot", "state", "runs.jsonl"), "{}\n");
+
+  const state = await openProjectState({ root });
+  try {
+    const changes = await state.worktreeChanges("run-dirty");
+    const byPath = Object.fromEntries(changes.entries.map((entry) => [entry.path, entry]));
+    // A modification is not an addition, and the artifacts ETNPilot writes
+    // into a workspace are listed but marked as not a person's work.
+    assert.equal(byPath["README.md"].label, "modified");
+    assert.equal(byPath["README.md"].ignorable, false);
+    assert.equal(byPath["draft.txt"].label, "untracked");
+    assert.equal(byPath[".etnpilot/state/"].ignorable, true);
+    assert.equal(changes.blocking, 2);
+
+    // A name that is not a worktree of this project never reaches the disk.
+    await assert.rejects(() => state.worktreeChanges("../elsewhere"), TypeError);
+    await assert.rejects(() => state.worktreeChanges("run-absent"), TypeError);
+
+    const app = createTuiApp({ state, output: fakeOutput(), input: new EventEmitter() });
+    try {
+      await app.refresh();
+      await app.handle("5");
+      await app.handle("g");
+      const index = app.worktrees.entries.findIndex((entry) => entry.name === "run-dirty");
+      await moveTo(app, index);
+      await app.handle("\r");
+      assert.equal(app.detail, true);
+      const screen = stripAnsi(app.frame().join("\n"));
+      assert.match(screen, /README\.md/);
+      assert.match(screen, /untracked\s+draft\.txt/);
+      assert.match(screen, /2 unsaved; removing is refused/);
+      // Leaving the detail drops what it was showing rather than keeping it.
+      await app.handle("\u001B");
+      assert.equal(app.detail, false);
+      assert.equal(app.worktreeChanges, undefined);
+    } finally {
+      app.stop();
+    }
+  } finally {
+    state.close();
+  }
+});
+
+test("a clean worktree says there is nothing to lose", async () => {
+  const root = await createRepository();
+  const manager = new WorktreeManager(root);
+  await manager.create({ name: "run-clean", branch: "etnpilot/run-clean" });
+  const state = await openProjectState({ root });
+  try {
+    const changes = await state.worktreeChanges("run-clean");
+    assert.deepEqual(changes.entries, []);
+    assert.equal(changes.blocking, 0);
+    const worktrees = await state.worktrees();
+    const frame = renderWorktreeChanges({}, {
+      style,
+      width: 90,
+      height: 14,
+      cursor: worktrees.entries.findIndex((entry) => entry.name === "run-clean"),
+      worktrees,
+      changes: { ...changes, name: "run-clean" },
+    }).join("\n");
+    assert.match(frame, /Nothing changed here/);
+  } finally {
+    state.close();
+  }
+});

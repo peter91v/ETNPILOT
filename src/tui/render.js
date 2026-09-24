@@ -44,7 +44,8 @@ export function renderApp(state, options = {}) {
   ];
 
   const context = {
-    style, width, height: body, cursor, now, editor, filter, filtering, scope, receipt, worktrees, merges, active,
+    style, width, height: body, cursor, now, editor, filter, filtering, scope, receipt,
+    worktrees, changes: options.worktreeChanges, merges, active,
   };
   const rendered = help
     ? renderHelp({ style, width, height: body, offset: helpOffset })
@@ -52,7 +53,9 @@ export function renderApp(state, options = {}) {
       ? renderApprovalDetail(state, context)
       : detail && view === "runs"
         ? renderRunDetail(state, context)
-        : renderView(view, state, context);
+        : detail && view === "worktrees"
+          ? renderWorktreeChanges(state, context)
+          : renderView(view, state, context);
   for (const line of rendered.slice(0, body)) lines.push(truncate(line, width));
   while (lines.length < height - (input ? 2 : 1)) lines.push("");
   if (input) {
@@ -86,7 +89,9 @@ function header(state, { style, width, view, project, active = [] }) {
     return name === view ? style.bold(style.accent(label)) : style.dim(label);
   }).join(style.dim("  ·  "));
   const left = `${style.bold(style.accent("ETNPILOT"))}  ${tabs}`;
-  const right = style.dim(`${project}${project ? "  " : ""}${running} running`);
+  const working = active.find((run) => run.step);
+  const where = working ? ` ${working.step}${working.stepAgent ? `/${working.stepAgent}` : ""}` : "";
+  const right = style.dim(`${project}${project ? "  " : ""}${running} running${where}`);
   const gap = Math.max(1, width - displayWidth(left) - displayWidth(right));
   return left + " ".repeat(gap) + right;
 }
@@ -111,8 +116,9 @@ function footerKeys({ view, detail, editor, prompt, help }) {
   if (view === "queue") {
     return [["↑↓", "move"], ["c", "cancel"], ["R", "resume"], ["n", "run"], ["tab", "view"], ["q", "quit"]];
   }
+  if (detail && view === "worktrees") return [["esc", "back"], ["x", "remove if clean"], ["g", "reread"], ["q", "quit"]];
   if (view === "worktrees") {
-    return [["↑↓", "move"], ["x", "remove if clean"], ["g", "reread"], ["n", "run"], ["tab", "view"], ["q", "quit"]];
+    return [["↑↓", "move"], ["enter", "what it holds"], ["x", "remove if clean"], ["g", "reread"], ["tab", "view"], ["q", "quit"]];
   }
   if (view === "merges") {
     return [["↑↓", "move"], ["g", "reread"], ["n", "run"], ["tab", "view"], ["?", "help"], ["q", "quit"]];
@@ -210,6 +216,37 @@ function renderQueue(state, { style, width, height, cursor, now }) {
 // The worktrees on disk: which branch each holds, which ones a run made, and
 // whether removing one would throw away work. A worktree is where a run's
 // changes physically are, so it is evidence as much as the receipt is.
+// The files a worktree is holding: a number is a claim, the list is the
+// evidence, and it is what removing the worktree would throw away.
+export function renderWorktreeChanges(state, { style, width, height, cursor, worktrees, changes }) {
+  const entries = worktrees?.entries ?? [];
+  const entry = entries[clamp(cursor, entries.length)];
+  if (!entry) return [style.dim("No worktrees are registered.")];
+  const lines = [
+    `${style.bold(style.ink(entry.name))} ${style.muted(entry.branch ?? "")}`,
+    "",
+  ];
+  if (!changes || changes.name !== entry.name) return [...lines, style.dim("Reading what it holds…")];
+  if (changes.unreadable) {
+    return [...lines, style.bad("Its directory cannot be read; 'git worktree prune' clears it.")];
+  }
+  if (changes.entries.length === 0) {
+    return [...lines, style.ok("Nothing changed here. Removing it throws nothing away.")];
+  }
+  const room = Math.max(1, height - lines.length - 3);
+  for (const change of changes.entries.slice(0, room)) {
+    const name = change.renamedFrom ? `${change.renamedFrom} → ${change.path}` : change.path;
+    lines.push(`  ${style.tone(pad(change.label, 12), change.ignorable ? "muted" : "warn")} ${style.ink(truncate(name, width - 18))}`);
+  }
+  if (changes.entries.length > room) {
+    lines.push(style.dim(`  … ${changes.entries.length - room} more`));
+  }
+  lines.push("", changes.blocking === 0
+    ? style.ok("None of this is a person's work, so this worktree can be removed.")
+    : style.warn(`${changes.blocking} unsaved; removing is refused while they are here.`));
+  return lines;
+}
+
 export function renderWorktrees(state, { style, width, height, cursor, worktrees }) {
   if (worktrees === undefined) return [style.dim("Reading the worktrees…")];
   if (worktrees.available === false) {
@@ -397,6 +434,13 @@ function kindLabel(kind, style) {
   return style.tone(padStart(text, 7), tone);
 }
 
+function stepTone(status) {
+  if (status === "succeeded") return "ok";
+  if (status === "failed") return "bad";
+  if (status === "blocked") return "warn";
+  return "muted";
+}
+
 function statusTone(status) {
   if (status === "succeeded") return "ok";
   if (status === "failed") return "bad";
@@ -426,6 +470,37 @@ function renderRunDetail(state, { style, width, height, cursor, receipt }) {
     for (const piece of wrap(String(value), width - 2)) lines.push(`  ${style.ink(piece)}`);
     lines.push("");
   };
+  const outcome = receipt.outcome ?? { reasons: [], steps: [] };
+  if (outcome.reasons.length > 0) {
+    lines.push(style.dim(run.status === "succeeded" ? "Worth knowing" : "Why it ended"));
+    for (const reason of outcome.reasons) {
+      const text = `${reason.step ? `${reason.step}: ` : ""}${reason.text}`;
+      const tone = reason.kind === "publication" || reason.kind === "blocked" ? "warn" : "bad";
+      for (const [index, piece] of wrap(text, width - 4).entries()) {
+        lines.push(`  ${index === 0 ? style.tone(piece, tone) : style.muted(piece)}`);
+      }
+    }
+    lines.push("");
+  }
+  if (outcome.steps.length > 1) {
+    lines.push(style.dim("Steps"));
+    for (const step of outcome.steps) {
+      lines.push(`  ${style.tone(pad(step.status, 10), stepTone(step.status))} ${style.ink(pad(step.id, 18))} ${style.muted(step.error ?? "")}`);
+    }
+    lines.push("");
+  }
+  // What the providers cost. A surface that never shows this leaves a budget
+  // nobody can see.
+  const usage = outcome.usage;
+  if (usage?.invocations) {
+    const cost = usage.estimatedCost === undefined
+      ? "not priced"
+      : `${usage.currency ? `${usage.currency} ` : ""}${usage.estimatedCost.toFixed(4)}`;
+    lines.push(style.dim("Usage"));
+    lines.push(`  ${style.ink(`${(usage.inputTokens + usage.outputTokens).toLocaleString()} tokens`)} ${style.muted(`${usage.inputTokens.toLocaleString()} in · ${usage.outputTokens.toLocaleString()} out · ${usage.cacheReadTokens.toLocaleString()} cached`)}`);
+    lines.push(`  ${style.ink(`${usage.invocations} provider calls`)} ${style.muted(cost)}`);
+    lines.push("");
+  }
   field("Branch", terminal.workspace?.branch);
   field("Sandbox", terminal.workspace?.sandbox?.image);
   if (terminal.git?.mergeRehearsal) {
@@ -527,7 +602,7 @@ const HELP_SECTIONS = Object.freeze([
   ]],
   ["Runs", [["enter", "open the receipt"]]],
   ["Queue", [["c", "request cancellation"], ["R", "resume a failed job"]]],
-  ["Worktrees", [["x", "remove it, if it is clean"], ["g", "read them again"]]],
+  ["Worktrees", [["enter", "the files it holds"], ["x", "remove it, if it is clean"], ["g", "read them again"]]],
   ["Merge requests", [["↑↓", "ours first, then others"], ["g", "ask GitLab again"]]],
   ["Settings", [
     ["enter", "edit"],
@@ -626,9 +701,14 @@ function inputState({ prompt, editor, filtering, filter }) {
       prefix: `set ${editor.entry.path}`,
       value: editor.buffer,
       bad: Boolean(editor.error),
+      // Where a setting accepts only certain values, those values are the
+      // useful fact and they take the place of the default, which is one of
+      // them. The line is cut from the right, so nothing else may grow.
       hint: editor.error ?? [
         editor.entry.mode,
-        `default ${settingValue(editor.entry.defaultValue)}`,
+        editor.entry.choices
+          ? `${editor.entry.choices.kind === "set" ? "any of" : "one of"}: ${editor.entry.choices.values.map((value) => JSON.stringify(value)).join(", ")}`
+          : `default ${settingValue(editor.entry.defaultValue)}`,
         `writing ${editor.scope === "global" ? "~/.config" : "this project, locally"}`,
         "enter saves · esc cancels",
       ].join(" · "),

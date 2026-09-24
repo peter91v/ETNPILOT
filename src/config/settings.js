@@ -19,6 +19,48 @@ import {
 
 const SCOPES = Object.freeze(["local", "global"]);
 
+// The values a setting actually accepts, so a surface can offer them instead
+// of asking a person to remember them. Every list here is the one the code
+// validates against — 'test/settings.test.js' checks that each choice is
+// still accepted and that a rejected value is not listed.
+const CHOICES = Object.freeze({
+  "workspace.mode": ["worktree", "in-place"],
+  "workspace.cleanup": ["never", "on-success", "after-publish"],
+  "content.provenance.mode": ["off", "enforce"],
+  "observability.failureMode": ["ignore", "fail"],
+  "sandbox.runtime": ["docker", "podman"],
+  "sandbox.network": ["none", "bridge", "host"],
+  "git.issueTrigger.approvals.source": ["inbox", "gitlab"],
+  "policy.operations.default": ["allow", "human", "deny"],
+  "policy.providers.default": ["allow", "deny"],
+});
+
+// The same, for settings that hold a set rather than one value.
+const SET_CHOICES = Object.freeze({
+  "approval.allow": ["read", "write", "shell", "network"],
+  "approval.requireHuman": ["read", "write", "shell", "network"],
+});
+
+const PROVIDER_TYPES = Object.freeze(["github-copilot", "openai-compatible"]);
+
+// Some choices are the project's own: which provider to route to is whichever
+// providers it configures, and a fixed list would go stale the moment one is
+// added.
+function choicesFor(path, value, config) {
+  if (CHOICES[path]) return { kind: "one", values: [...CHOICES[path]] };
+  if (SET_CHOICES[path]) return { kind: "set", values: [...SET_CHOICES[path]] };
+  if (typeof value === "boolean") return { kind: "one", values: [true, false] };
+  const providers = Object.keys(config?.providers ?? {});
+  if (path === "defaultProvider" && providers.length > 0) return { kind: "one", values: providers };
+  if (path === "routing.defaults" && providers.length > 0) return { kind: "set", values: providers };
+  if (/^providers\.[^.]+\.type$/.test(path)) return { kind: "one", values: [...PROVIDER_TYPES] };
+  return undefined;
+}
+
+export function settingChoices(path, { value, config } = {}) {
+  return choicesFor(path, value, config);
+}
+
 export class SettingsRefused extends Error {
   constructor(path, reason) {
     super(`Cannot change '${path}': ${reason}.`);
@@ -55,6 +97,7 @@ export async function describeSettings({ root = process.cwd(), env = process.env
       defaultValue: getIn(project.data, path),
       source: merged.sources.get(path) ?? "project",
       mode: modeFor(path, merged.modes),
+      ...(choicesFor(path, value, merged.config) ? { choices: choicesFor(path, value, merged.config) } : {}),
     }));
   return {
     entries,
