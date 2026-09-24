@@ -189,8 +189,26 @@ The route is, in order: the agent's own `provider`, then `routing.rules`, then
 provider takes `defaultProvider` too, so one provider does not have to be repeated in every
 agent.
 
-Built-in GitHub Copilot sessions provide `chat`, `tools`, `permissions`, and `skills`; the
-OpenAI-compatible adapter currently provides `chat`. ETNPilot skips unavailable or incompatible
+`etnpilot init` configures all three built-in providers, so switching is one setting and
+not an edit to every agent manifest:
+
+| Provider | `type` | Credential | Notes |
+| --- | --- | --- | --- |
+| `github-copilot` | `github-copilot` | a Copilot subscription, through the Copilot SDK | `chat`, `tools`, `permissions`, `skills`. No SDK build exists for Android. |
+| `anthropic` | `anthropic` | `ANTHROPIC_API_KEY` (secret `anthropic.apiKey`) | The Messages API, spoken directly. `chat`, and `tools` when `tools: true`. |
+| `openai` | `openai-compatible` | `ETNPILOT_PROVIDER_API_KEY` (secret `provider.apiKey`) | Any OpenAI-compatible endpoint, including a model server on this machine, which needs no key. |
+
+```sh
+export ANTHROPIC_API_KEY=sk-ant-...
+npm run etnpilot -- config set defaultProvider anthropic
+```
+
+The generated `routing.defaults` is empty on purpose, so `defaultProvider` alone decides and
+nothing quietly outranks it. A key is read when the provider is used, not when it is
+configured: a project can configure all three and run with one of them. A provider that is
+reached without its key says so by name, and says which variable to set.
+
+ETNPilot skips unavailable or incompatible
 providers. It retries with another provider only when the adapter marks the failure as both
 retryable and safe to replay. The selected provider and all routing attempts are stored in the run
 receipt.

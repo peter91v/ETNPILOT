@@ -193,7 +193,10 @@ test("a setting that only accepts certain values offers them, and they are accep
   assert.deepEqual(byPath["approval.allow"].choices, { kind: "set", values: ["read", "write", "shell", "network"] });
   // The choice list is the project's own where the project decides it: which
   // provider to route to is whichever providers this project configures.
-  assert.deepEqual(byPath["defaultProvider"].choices, { kind: "one", values: ["github-copilot"] });
+  assert.deepEqual(byPath["defaultProvider"].choices, {
+    kind: "one",
+    values: ["github-copilot", "anthropic", "openai"],
+  });
   // A free-text setting is left alone rather than given a made-up list.
   assert.equal(byPath["git.committer.name"].choices, undefined);
 

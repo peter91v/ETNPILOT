@@ -34,6 +34,7 @@ The built-in consumers use these default logical names:
 | GitLab legacy webhook token | `gitlab.webhookToken` | none |
 | GitHub Copilot | `github.token` | `providers.<name>.tokenSecret` |
 | OpenAI-compatible provider | `provider.apiKey` | `providers.<name>.apiKeySecret` |
+| Anthropic provider | `anthropic.apiKey` | `providers.<name>.apiKeySecret` |
 | Receipt signing | user-defined | `receipts.signing.privateKeySecret` |
 
 Existing environment names remain fallback inputs for compatibility. Named mappings are preferred

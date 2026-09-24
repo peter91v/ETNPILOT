@@ -1,3 +1,4 @@
+import { createAnthropicProvider } from "./anthropic.js";
 import { createCopilotProvider } from "./copilot.js";
 import { createOpenAICompatibleProvider } from "./openai-compatible.js";
 import { createScriptedProvider } from "./scripted.js";
@@ -16,6 +17,21 @@ const BUILTIN_FACTORIES = {
       required: Boolean(config.tokenSecret),
     }),
   }),
+  anthropic: async (name, config, context) => createAnthropicProvider({
+    ...config,
+    name,
+    workingDirectory: config.workingDirectory ?? context.workingDirectory,
+    sandbox: context.sandbox,
+    apiKey: config.apiKey ?? await resolveProviderSecret({
+      resolver: context.secretResolver,
+      name: config.apiKeySecret ?? "anthropic.apiKey",
+      fallbackKey: "ANTHROPIC_API_KEY",
+      // Not required here: a project may configure several providers and use
+      // one of them. A key that is missing is reported by the provider that
+      // needs it, when it is used, and not by failing every run that does not.
+      required: false,
+    }),
+  }),
   "openai-compatible": async (name, config, context) => createOpenAICompatibleProvider({
     ...config,
     name,
@@ -25,7 +41,9 @@ const BUILTIN_FACTORIES = {
       resolver: context.secretResolver,
       name: config.apiKeySecret ?? "provider.apiKey",
       fallbackKey: "ETNPILOT_PROVIDER_API_KEY",
-      required: Boolean(config.apiKeySecret),
+      // See above: a provider that is configured but not used must not fail
+      // the run. A local model server needs no key at all.
+      required: false,
     }),
   }),
   scripted: async (name, config, context) => createScriptedProvider({

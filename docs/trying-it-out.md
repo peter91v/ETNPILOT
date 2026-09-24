@@ -42,8 +42,8 @@ policy:
       - { id: configured-rehearsal, effect: allow, providers: [rehearsal] }
 ```
 
-Im Agent-Manifest `.etnpilot/agents/orchestrator.yaml` noch
-`provider: rehearsal` setzen, dann:
+Das Agent-Manifest `.etnpilot/agents/orchestrator.yaml` nennt keinen Provider,
+folgt also `defaultProvider` — mehr ist nicht nötig. Dann:
 
 ```bash
 etnpilot content lock
@@ -103,4 +103,58 @@ eine Falschaussage.
 Der `scripted`-Provider ist **kein Agent**. Er entscheidet nichts; die Schritte
 standen schon in der Konfiguration. Seine Receipts führen das Modell als
 `scripted`, damit niemand später einen Modelllauf hineinliest. Für echte Arbeit
-brauchen Sie `github-copilot` oder `openai-compatible`.
+brauchen Sie ein Modell — siehe den nächsten Abschnitt.
+
+## Mit einem echten Modell: Anthropic oder OpenAI
+
+`etnpilot init` konfiguriert alle drei eingebauten Provider. Welcher läuft,
+entscheidet die **eine** Einstellung `defaultProvider`; `routing.defaults` ist
+absichtlich leer, damit nichts sie still überstimmt.
+
+| Provider | Schlüssel | woher |
+|---|---|---|
+| `github-copilot` | GitHub-Login des Copilot-SDK | Copilot-Abo |
+| `anthropic` | `ANTHROPIC_API_KEY` | console.anthropic.com |
+| `openai` | `ETNPILOT_PROVIDER_API_KEY` | platform.openai.com |
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+etnpilot config set defaultProvider anthropic
+etnpilot run "Fasse dieses Repository zusammen."
+```
+
+Der Schlüssel wird gelesen, wenn der Provider **benutzt** wird, nicht wenn er
+konfiguriert wird. Ein Projekt darf alle drei eintragen und mit einem davon
+laufen; ein Provider ohne Schlüssel sagt beim Aufruf, welche Variable fehlt,
+statt jeden Run zu verhindern.
+
+Beide Adapter arbeiten über dieselben vermittelten Werkzeuge (`tools: true`):
+Lesen, Schreiben und Befehle laufen durch denselben Genehmigungsweg wie bei
+Copilot. Nichts geschieht ohne Ihre Zusage.
+
+### Auf Android (Tablet, Telefon)
+
+Für `github-copilot` gibt es **keinen SDK-Build für Android** — `npm install
+@github/copilot-sdk` meldet Erfolg und installiert nichts. Auf einem Tablet
+nehmen Sie deshalb `anthropic` oder `openai`; beide sind reine HTTPS-Aufrufe
+und brauchen nichts Plattformabhängiges. In Termux:
+
+```bash
+pkg install nodejs git
+export ANTHROPIC_API_KEY=sk-ant-...
+etnpilot config set defaultProvider anthropic
+etnpilot ui            # öffnet den Browser mit der neuen Sitzung
+```
+
+`ANTHROPIC_API_KEY` steht bereits in `secrets.providers.env.allow`; ohne diesen
+Eintrag liest der env-Backend die Variable nicht.
+
+### Ein anderes Modell oder ein eigener Endpunkt
+
+```bash
+etnpilot config set providers.anthropic.model claude-sonnet-5
+etnpilot config set providers.openai.baseUrl http://127.0.0.1:11434/v1
+```
+
+Ein Modellserver auf diesem Rechner braucht keinen Schlüssel: bei einer
+Loopback-`baseUrl` verlangt der OpenAI-kompatible Adapter keinen.

@@ -21,13 +21,39 @@ settings:
     "approval.requireHuman": stricter-only
     "checks.envAllow": stricter-only
     "sandbox.enabled": stricter-only
+# Which provider a run uses when neither the agent nor 'routing.rules' names
+# one. Change it on your own machine with 'etnpilot settings set
+# defaultProvider anthropic' (or in the Settings view) — the change stays
+# local and is never committed. Every provider below is configured; the one
+# that is used is the one named here, and it needs its own credential:
+#   github-copilot  a GitHub Copilot subscription, through the Copilot SDK.
+#                   The SDK has no build for Android, so on a tablet or phone
+#                   use 'anthropic' or 'openai'.
+#   anthropic       ANTHROPIC_API_KEY, from console.anthropic.com
+#   openai          ETNPILOT_PROVIDER_API_KEY, from platform.openai.com
 defaultProvider: github-copilot
 providers:
   github-copilot:
     type: github-copilot
     model: auto
+  anthropic:
+    type: anthropic
+    baseUrl: https://api.anthropic.com
+    model: claude-opus-5
+    # The provider reads and writes files and runs commands through the
+    # harness's own tools, so every effect goes through the approval path.
+    tools: true
+    maxTokens: 8192
+  openai:
+    type: openai-compatible
+    baseUrl: https://api.openai.com/v1
+    model: gpt-5
+    tools: true
 routing:
-  defaults: [github-copilot]
+  # Empty on purpose: with no list here the route is 'defaultProvider', so
+  # changing that one setting is enough to switch provider. Name providers
+  # here to try them in a fixed order instead.
+  defaults: []
   fallback:
     enabled: true
     maxAttempts: 2
@@ -90,6 +116,7 @@ secrets:
         - ETNPILOT_GITLAB_WEBHOOK_TOKEN
         - ETNPILOT_GITHUB_TOKEN
         - ETNPILOT_PROVIDER_API_KEY
+        - ANTHROPIC_API_KEY
         - ETNPILOT_OTLP_HEADERS
     local:
       type: file
@@ -100,7 +127,10 @@ secrets:
     gitlab.webhookSigningSecret: { provider: env, key: ETNPILOT_GITLAB_WEBHOOK_SIGNING_SECRET }
     gitlab.webhookToken: { provider: env, key: ETNPILOT_GITLAB_WEBHOOK_TOKEN }
     github.token: { provider: env, key: ETNPILOT_GITHUB_TOKEN }
+    # 'provider.apiKey' is what every OpenAI-compatible provider reads unless
+    # it names another with 'apiKeySecret'.
     provider.apiKey: { provider: env, key: ETNPILOT_PROVIDER_API_KEY }
+    anthropic.apiKey: { provider: env, key: ANTHROPIC_API_KEY }
     observability.otlpHeaders: { provider: env, key: ETNPILOT_OTLP_HEADERS }
 receipts:
   signing:
@@ -176,9 +206,9 @@ policy:
   providers:
     default: deny
     rules:
-      - id: configured-copilot
+      - id: configured-providers
         effect: allow
-        providers: [github-copilot]
+        providers: [github-copilot, anthropic, openai]
 checks:
   # Checks run agent-authored code. They inherit only these variables, so
   # repository and provider credentials stay out of their environment.
@@ -238,9 +268,10 @@ secrets/
 *.sqlite-wal
 `;
 
+// No 'provider' and no 'model': the agent follows the project's
+// 'defaultProvider' and that provider's own model, so switching provider is
+// one setting and not an edit to every manifest.
 const STARTER_AGENT = `name: orchestrator
-provider: github-copilot
-model: auto
 promptRef: orchestrator
 skills: []
 requires: [chat]

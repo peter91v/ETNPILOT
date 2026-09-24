@@ -77,6 +77,7 @@ test("the OpenAI-compatible provider runs an approved tool loop", async () => {
   ];
   const provider = createOpenAICompatibleProvider({
     baseUrl: "https://models.example.invalid/v1",
+    apiKey: "key",
     model: "test-model",
     tools: true,
     workingDirectory: root,
@@ -112,6 +113,7 @@ test("the tool loop is bounded", async () => {
   const root = await mkdtemp(join(tmpdir(), "etnpilot-tool-bound-"));
   const provider = createOpenAICompatibleProvider({
     baseUrl: "https://models.example.invalid/v1",
+    apiKey: "key",
     tools: true,
     workingDirectory: root,
     maxToolIterations: 2,

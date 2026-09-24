@@ -41,7 +41,7 @@ const SET_CHOICES = Object.freeze({
   "approval.requireHuman": ["read", "write", "shell", "network"],
 });
 
-const PROVIDER_TYPES = Object.freeze(["github-copilot", "openai-compatible"]);
+const PROVIDER_TYPES = Object.freeze(["github-copilot", "anthropic", "openai-compatible"]);
 
 // Some choices are the project's own: which provider to route to is whichever
 // providers it configures, and a fixed list would go stale the moment one is

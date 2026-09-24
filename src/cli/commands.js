@@ -50,6 +50,9 @@ export const CLI_OPTIONS = Object.freeze({
   "cleanup-worktree": { type: "boolean", default: false },
   publish: { type: "boolean", default: false },
   "dry-run": { type: "boolean", default: false },
+  // 'etnpilot ui' opens a browser; both spellings the help names must parse.
+  open: { type: "boolean", default: false },
+  "no-open": { type: "boolean", default: false },
   host: { type: "string" },
   port: { type: "string" },
   status: { type: "string" },

@@ -128,6 +128,7 @@ test("Copilot provider attaches local CodeGraph MCP and classifies its allow-lis
 test("OpenAI-compatible provider exposes retry-safe transient failures", async () => {
   const provider = createOpenAICompatibleProvider({
     baseUrl: "https://models.example.invalid/v1",
+    apiKey: "key",
     fetchImpl: async () => ({ ok: false, status: 503, text: async () => "busy" }),
   });
   await assert.rejects(

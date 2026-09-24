@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { test } from "node:test";
 import { browserCandidates, openInBrowser } from "../src/ui/open-browser.js";
-import { shouldOpenBrowser } from "../src/cli/commands.js";
+import { parseArgs } from "node:util";
+import { CLI_OPTIONS, shouldOpenBrowser } from "../src/cli/commands.js";
 
 // Starting a program outside ETNPilot is the one thing this module does, so
 // what it starts, with what, and what happens when it is not there are all
@@ -102,3 +103,17 @@ function runner({ error, exitCode }) {
   else if (exitCode !== undefined) setImmediate(() => child.emit("exit", exitCode));
   return child;
 }
+
+// A flag the help text names and the code reads, that the parser then rejects,
+// is a flag that does not exist.
+test("the flags that decide it are flags the command line accepts", () => {
+  const { values } = parseArgs({
+    args: ["ui", "--no-open"],
+    allowPositionals: true,
+    options: CLI_OPTIONS,
+  });
+  assert.equal(values["no-open"], true);
+  assert.equal(shouldOpenBrowser(values, {}, { isTTY: true }), false);
+  const { values: opening } = parseArgs({ args: ["ui", "--open"], allowPositionals: true, options: CLI_OPTIONS });
+  assert.equal(shouldOpenBrowser(opening, {}, { isTTY: false }), true);
+});

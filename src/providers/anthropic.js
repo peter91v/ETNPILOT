@@ -2,12 +2,20 @@ import { ProviderError } from "./router.js";
 import { createWorkspaceTools } from "./workspace-tools.js";
 
 const DEFAULT_MAX_TOOL_ITERATIONS = 12;
+const DEFAULT_BASE_URL = "https://api.anthropic.com";
+const DEFAULT_MODEL = "claude-opus-5";
+const DEFAULT_MAX_TOKENS = 8192;
+const API_VERSION = "2023-06-01";
 
-export function createOpenAICompatibleProvider({
-  name = "openai-compatible",
-  baseUrl,
+// The Anthropic Messages API, spoken directly. This project depends on no SDK
+// on purpose: every adapter takes an injectable 'fetchImpl', which is what the
+// tests, the replay fixtures, and the offline paths use.
+export function createAnthropicProvider({
+  name = "anthropic",
+  baseUrl = DEFAULT_BASE_URL,
   apiKey,
-  model,
+  model = DEFAULT_MODEL,
+  maxTokens = DEFAULT_MAX_TOKENS,
   tools = false,
   workingDirectory,
   toolLimits,
@@ -16,26 +24,27 @@ export function createOpenAICompatibleProvider({
   fetchImpl = globalThis.fetch,
   toolsImpl,
 }) {
-  if (!baseUrl) throw new TypeError("baseUrl is required.");
   if (tools && !workingDirectory && !toolsImpl) {
     throw new TypeError("Tool support requires a workingDirectory.");
   }
   if (!Number.isInteger(maxToolIterations) || maxToolIterations < 1) {
     throw new TypeError("maxToolIterations must be a positive integer.");
   }
-  const endpoint = `${baseUrl.replace(/\/$/, "")}/chat/completions`;
-  // A model server on this machine needs no key; a hosted one always does,
-  // and a 401 says less about a missing key than this does.
-  const needsApiKey = !apiKey && !isLoopback(baseUrl);
+  if (!Number.isInteger(maxTokens) || maxTokens < 1) {
+    throw new TypeError("maxTokens must be a positive integer.");
+  }
+  const endpoint = `${baseUrl.replace(/\/$/, "")}/v1/messages`;
 
   return {
     name,
     capabilities: tools ? ["chat", "tools"] : ["chat"],
     async invoke(context) {
       context.signal?.throwIfAborted();
-      if (needsApiKey) {
+      // A key that is absent is the most common reason this provider cannot
+      // run, and a 401 from the API says less about it than this does.
+      if (!apiKey) {
         throw new ProviderError(
-          `Provider '${name}' has no API key. Set ETNPILOT_PROVIDER_API_KEY in the environment`
+          `Provider '${name}' has no API key. Set ANTHROPIC_API_KEY in the environment`
           + ` (allowed under 'secrets.providers.env.allow'), or point`
           + ` 'providers.${name}.apiKeySecret' at a configured secret.`,
           { code: "missing_api_key", retryable: false, safeToRetry: false },
@@ -49,34 +58,33 @@ export function createOpenAICompatibleProvider({
           sandbox,
         })
         : undefined;
-      const messages = [
-        { role: "system", content: buildSystemMessage(context) },
-        { role: "user", content: String(context.input) },
-      ];
+      const messages = [{ role: "user", content: String(context.input) }];
+      const system = buildSystemMessage(context);
       const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
       const toolCalls = [];
-      let payload;
       let responseModel;
 
       for (let iteration = 0; iteration <= maxToolIterations; iteration += 1) {
-        payload = await request({
+        const payload = await request({
           endpoint,
           apiKey,
           fetchImpl,
           context,
           body: {
             model: context.agent.model ?? model,
+            max_tokens: maxTokens,
+            ...(system ? { system } : {}),
             messages,
-            ...(workspaceTools ? { tools: toolSchema(workspaceTools.definitions), tool_choice: "auto" } : {}),
+            ...(workspaceTools ? { tools: toolSchema(workspaceTools.definitions) } : {}),
           },
         });
         addUsage(usage, payload.usage);
         responseModel = payload.model ?? responseModel;
-        const message = payload.choices?.[0]?.message ?? {};
-        const requested = workspaceTools ? message.tool_calls ?? [] : [];
+        const content = Array.isArray(payload.content) ? payload.content : [];
+        const requested = workspaceTools ? content.filter((block) => block?.type === "tool_use") : [];
         if (requested.length === 0) {
           return {
-            text: message.content ?? "",
+            text: textOf(content),
             raw: payload,
             model: responseModel ?? context.agent.model ?? model,
             usage,
@@ -90,19 +98,21 @@ export function createOpenAICompatibleProvider({
             safeToRetry: false,
           });
         }
-        messages.push(message);
+        messages.push({ role: "assistant", content });
+        const results = [];
         for (const call of requested) {
           context.signal?.throwIfAborted();
-          const toolName = call.function?.name ?? call.name;
-          const result = await workspaceTools.invoke(toolName, call.function?.arguments ?? call.arguments, context);
-          toolCalls.push({ tool: toolName, ok: result.ok === true, ...(result.error ? { error: result.error } : {}) });
-          messages.push({
-            role: "tool",
-            tool_call_id: call.id,
+          const result = await workspaceTools.invoke(call.name, call.input ?? {}, context);
+          toolCalls.push({ tool: call.name, ok: result.ok === true, ...(result.error ? { error: result.error } : {}) });
+          results.push({
+            type: "tool_result",
+            tool_use_id: call.id,
+            ...(result.ok === true ? {} : { is_error: true }),
             // The model sees the same bounded result the receipt records.
             content: JSON.stringify(result),
           });
         }
+        messages.push({ role: "user", content: results });
       }
       throw new ProviderError("Provider tool loop did not terminate.", { code: "tool_loop_error" });
     },
@@ -117,7 +127,8 @@ async function request({ endpoint, apiKey, fetchImpl, context, body }) {
       signal: context.signal,
       headers: {
         "content-type": "application/json",
-        ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
+        "anthropic-version": API_VERSION,
+        ...(apiKey ? { "x-api-key": apiKey } : {}),
       },
       body: JSON.stringify(body),
     });
@@ -125,10 +136,8 @@ async function request({ endpoint, apiKey, fetchImpl, context, body }) {
     // A cancelled step must not be replayed by the router; the workflow
     // engine owns timeouts and aborts.
     if (context.signal?.aborted) throw context.signal.reason ?? error;
-    // The cause is what a person needs — a refused connection names the host
-    // and port they typed into 'providers.<name>.baseUrl'.
     // fetch's own message is 'fetch failed'; what a person needs is one level
-    // below it, where the host and port they configured are named.
+    // below it, where the host they cannot reach is named.
     const detail = error?.cause?.message ?? error?.message ?? String(error);
     throw new ProviderError(`Provider network request failed: ${detail}`, {
       code: "network_error",
@@ -139,28 +148,44 @@ async function request({ endpoint, apiKey, fetchImpl, context, body }) {
   }
   if (!response.ok) {
     const retryable = response.status === 429 || response.status >= 500;
-    await response.text();
-    throw new ProviderError(`Provider request failed (${response.status}).`, {
-      code: `http_${response.status}`,
-      retryable,
-      // A failed call that already ran tools is not safe to replay blindly.
-      safeToRetry: retryable && !bodyHasToolResults(body),
-    });
+    // The API answers with '{"error":{"type","message"}}'; an expired key and a
+    // model that does not exist both arrive as 400, and only the message says
+    // which.
+    const detail = await errorDetail(response);
+    throw new ProviderError(
+      `Provider request failed (${response.status})${detail ? `: ${detail}` : "."}`,
+      {
+        code: `http_${response.status}`,
+        retryable,
+        // A failed call that already ran tools is not safe to replay blindly.
+        safeToRetry: retryable && !bodyHasToolResults(body),
+      },
+    );
   }
   return response.json();
 }
 
-function isLoopback(baseUrl) {
+async function errorDetail(response) {
+  const text = await response.text().catch(() => "");
+  if (!text) return "";
   try {
-    const { hostname } = new URL(baseUrl);
-    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
+    const parsed = JSON.parse(text);
+    return String(parsed?.error?.message ?? parsed?.message ?? text).slice(0, 300);
   } catch {
-    return false;
+    return text.slice(0, 300);
   }
 }
 
 function bodyHasToolResults(body) {
-  return (body.messages ?? []).some((message) => message.role === "tool");
+  return (body.messages ?? []).some((message) => Array.isArray(message.content)
+    && message.content.some((block) => block?.type === "tool_result"));
+}
+
+function textOf(content) {
+  return content
+    .filter((block) => block?.type === "text")
+    .map((block) => block.text ?? "")
+    .join("");
 }
 
 function buildSystemMessage(context) {
@@ -171,30 +196,15 @@ function buildSystemMessage(context) {
 
 function toolSchema(definitions) {
   return definitions.map((definition) => ({
-    type: "function",
-    function: {
-      name: definition.name,
-      description: definition.description,
-      parameters: definition.parameters,
-    },
+    name: definition.name,
+    description: definition.description,
+    input_schema: definition.parameters,
   }));
 }
 
 function addUsage(total, usage = {}) {
-  const normalized = normalizeUsage(usage);
-  total.inputTokens += normalized.inputTokens;
-  total.outputTokens += normalized.outputTokens;
-  total.cacheReadTokens += normalized.cacheReadTokens;
-  total.cacheWriteTokens += normalized.cacheWriteTokens;
-}
-
-function normalizeUsage(usage = {}) {
-  return {
-    inputTokens: usage.input_tokens ?? usage.prompt_tokens ?? 0,
-    outputTokens: usage.output_tokens ?? usage.completion_tokens ?? 0,
-    cacheReadTokens: usage.input_tokens_details?.cached_tokens
-      ?? usage.prompt_tokens_details?.cached_tokens
-      ?? 0,
-    cacheWriteTokens: usage.input_tokens_details?.cache_creation_tokens ?? 0,
-  };
+  total.inputTokens += usage.input_tokens ?? 0;
+  total.outputTokens += usage.output_tokens ?? 0;
+  total.cacheReadTokens += usage.cache_read_input_tokens ?? 0;
+  total.cacheWriteTokens += usage.cache_creation_input_tokens ?? 0;
 }

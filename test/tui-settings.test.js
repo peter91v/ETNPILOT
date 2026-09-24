@@ -48,7 +48,7 @@ test("settings are a view of their own, showing where each value comes from", as
   try {
     assert.equal(app.view, "settings");
     const text = screen(app);
-    assert.match(text, /122 settings · none changed · writing to local/);
+    assert.match(text, /133 settings · none changed · writing to local/);
     assert.match(text, /SETTING\s+VALUE\s+FROM\s+CHANGE/);
     // The mode is on screen, so nobody has to guess what they may change.
     assert.match(text, /committed\s+open/);
