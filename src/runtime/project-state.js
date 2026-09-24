@@ -10,6 +10,8 @@ import { GitLabClient } from "../gitlab/client.js";
 import { summarizeTelemetryFile } from "../observability/telemetry.js";
 import { runProject, RUN_BRANCH_PREFIX } from "./project-runner.js";
 import { createSecretResolver } from "../secrets/resolver.js";
+import { resolveConfiguredApiKey } from "../providers/register.js";
+import { knownPriceFor } from "../observability/known-pricing.js";
 import { WorkflowQueue } from "../workflow/queue.js";
 
 // These name files this state opened when it started. Changing one is allowed,
@@ -49,6 +51,32 @@ export async function openProjectState({ root = process.cwd(), env = process.env
       options,
     ),
     settings: () => describeSettings({ root: projectRoot, env }),
+    // The models a configured provider can currently reach, read live — never
+    // cached here, because the answer is the provider's own and changes on
+    // its schedule. Only 'anthropic' and 'openai-compatible' expose a models
+    // endpoint this project knows how to call; anything else says so rather
+    // than guessing at one.
+    async listProviderModels(name) {
+      const providerConfig = current.providers?.[name];
+      if (!providerConfig) throw new TypeError(`'${name}' is not a configured provider.`);
+      const type = providerConfig.type;
+      if (type !== "anthropic" && type !== "openai-compatible") {
+        return { available: false, reason: `'${type}' has no models endpoint this project can call.` };
+      }
+      const resolver = createSecretResolver({ root: projectRoot, config: current, env });
+      const apiKey = providerConfig.apiKey ?? await resolveConfiguredApiKey(type, providerConfig, { secretResolver: resolver, env });
+      const module = type === "anthropic"
+        ? await import("../providers/anthropic.js")
+        : await import("../providers/openai-compatible.js");
+      const all = await module.listModels({ baseUrl: providerConfig.baseUrl, apiKey });
+      // Only ETNPilot's own judgment of which are chat-capable, for the
+      // provider type whose listing endpoint does not separate them itself.
+      const models = type === "openai-compatible" ? all.filter((model) => module.looksLikeChatModel(model.id)) : all;
+      return {
+        available: true,
+        models: models.map((model) => ({ ...model, knownPrice: knownPriceFor(type, model.id) })),
+      };
+    },
     get active() { return [...running].map(presentRun); },
     decide: (id, decision, options) => inbox.decide(id, decision, options),
     cancelJob: (id, options) => queue.requestCancel(id, options),

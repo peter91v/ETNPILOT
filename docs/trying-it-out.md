@@ -78,6 +78,26 @@ Ohne `--approvals inbox` fragt der Run das Terminal, in dem er läuft — und oh
 interaktives Terminal lehnt er **jede** Anfrage ab. Das ist sicher, aber im
 Hintergrund unbrauchbar.
 
+## Modell wählen, statt tippen
+
+In der Einstellungs-Ansicht (Browser) hat jede `providers.<name>.model`-Zeile
+einen Knopf **fetch models** — ein echter Aufruf gegen `/v1/models` des
+jeweiligen Anbieters, mit dem konfigurierten Schlüssel. Bei OpenAI-kompatiblen
+Providern gefiltert auf das, was nach einem Chat-Modell aussieht (die
+Anbieter-API trennt Embedding-, Audio- und Bildmodelle nicht selbst ab — das
+ist eine eigene, dokumentierte Vermutung dieses Projekts, keine Angabe der
+API). Bei Anthropic listet der Endpunkt ohnehin nur aktuell angebotene
+Modelle.
+
+Wird ein Modell gewählt, für das ein Preis bekannt ist, trägt ETNPilot
+`observability.pricing.models.<id>` automatisch ein — mit Quelle und Datum in
+der Meldung, denn **weder OpenAI noch Anthropic liefert Preise über eine
+API**. Es gibt keinen Befehl, der sie live abfragt, weil es diesen Endpunkt
+bei keinem der beiden gibt. Die mitgelieferte Tabelle enthält nur Anthropics
+eigene, veröffentlichte Preise (Stand siehe Meldung); für OpenAI ist sie
+bewusst leer — geratene Dollarbeträge sind schlechter als keine, bei echtem
+Geld.
+
 ## Wo landen die Dateien?
 
 Ein Run arbeitet standardmäßig in einem **eigenen Worktree**, nicht im

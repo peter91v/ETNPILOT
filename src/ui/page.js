@@ -460,6 +460,10 @@ let openRun;
 // Which agent nodes are expanded, in the currently open run. Keyed by runId
 // so opening a different run — or the same one again — starts collapsed.
 let expandedAgents = new Set();
+// A provider's models, fetched live and kept only for this page's lifetime —
+// keyed by provider name. { status: "loading" } while in flight; then either
+// { status: "ready", models } or { status: "error", reason }.
+const modelLists = new Map();
 let openSetting;
 let view = "overview";
 let scope = "local";
@@ -1647,6 +1651,11 @@ function renderSettings() {
 // behind a click on the name: a setting with a list of values is a dropdown in
 // its own row, and everything else opens the editor from the value it shows.
 function valueControl(entry) {
+  // Which model a provider uses: offered as a live dropdown once fetched,
+  // because typing a model id by hand is how a stale, retired, or misspelled
+  // one ends up configured with nothing to say so until a run fails.
+  const modelMatch = entry.mode !== "locked" && /^providers\.([^.]+)\.model$/.exec(entry.path);
+  if (modelMatch) return modelValueControl(entry, modelMatch[1]);
   if (entry.mode === "locked") {
     const shown = shortValue(entry.value);
     return el("span", {
@@ -1691,6 +1700,100 @@ function valueControl(entry) {
     title: shown.title ?? (entry.choices ? "choose from " + entry.choices.values.join(", ") : "edit this value"),
     onClick: () => openEditor(entry),
   });
+}
+
+// The model row for one provider. Free text until fetched — this project has
+// no source for a model list except the provider's own API, so nothing is
+// offered before that call returns.
+function modelValueControl(entry, providerName) {
+  const state = modelLists.get(providerName);
+  const current = describeValue(entry.value);
+
+  if (!state || state.status === "error") {
+    const parts = [
+      button(shortValue(entry.value).text + " ▾", {
+        class: "btn link mono value",
+        title: "edit this value",
+        onClick: () => openEditor(entry),
+      }),
+      button(state ? "retry" : "fetch models", {
+        class: "btn small",
+        onClick: () => fetchProviderModels(providerName),
+      }),
+    ];
+    if (state?.status === "error") parts.push(el("span", { class: "muted wrap", text: state.reason }));
+    return el("span", { class: "row" }, parts);
+  }
+  if (state.status === "loading") {
+    return el("span", { class: "row" }, [
+      shortValue(entry.value).text ? el("span", { class: "mono muted", text: shortValue(entry.value).text }) : null,
+      el("span", { class: "muted", text: "reading models…" }),
+    ].filter(Boolean));
+  }
+
+  // Ready: the live list, as a dropdown — the same control every other
+  // constrained setting uses, so picking a model works the same way here.
+  const select = el("select", { class: "inline", attrs: { "aria-label": entry.path } });
+  for (const model of state.models) {
+    select.append(el("option", { text: model.id, attrs: { value: JSON.stringify(model.id) } }));
+  }
+  if (![...select.options].some((option) => option.value === current)) {
+    select.append(el("option", { text: shortValue(entry.value).text, attrs: { value: current } }));
+  }
+  select.value = current;
+  const priceNote = el("span", { class: "muted" });
+  const setPriceNote = () => {
+    const chosen = state.models.find((model) => JSON.stringify(model.id) === select.value);
+    priceNote.textContent = !chosen
+      ? ""
+      : chosen.knownPrice
+        ? "known price: USD " + chosen.knownPrice.inputPerMillion + "/" + chosen.knownPrice.outputPerMillion + " per M, as of " + chosen.knownPrice.asOf
+        : "no known price for this model — set observability.pricing.models by hand";
+  };
+  setPriceNote();
+  select.addEventListener("change", async () => {
+    const chosenId = JSON.parse(select.value);
+    const model = state.models.find((candidate) => candidate.id === chosenId);
+    select.disabled = true;
+    try {
+      await applySetting(entry.path, select.value, scope);
+      // Automatic, and never silent about where the number came from: a
+      // price nobody can trace back is not something to spend real money on.
+      if (model?.knownPrice) {
+        await applySetting(
+          "observability.pricing.models." + chosenId,
+          JSON.stringify({ inputPerMillion: model.knownPrice.inputPerMillion, outputPerMillion: model.knownPrice.outputPerMillion }),
+          scope,
+        );
+        toast(
+          "Priced '" + chosenId + "' at USD " + model.knownPrice.inputPerMillion + "/" + model.knownPrice.outputPerMillion
+            + " per M, from " + model.knownPrice.source + " (as of " + model.knownPrice.asOf + ") — verify against the provider.",
+          "ok",
+        );
+      }
+    } catch (error) {
+      select.value = current;
+      toast(error.message, "bad");
+    } finally {
+      select.disabled = false;
+      setPriceNote();
+    }
+  });
+  return el("span", { class: "row" }, [select, priceNote]);
+}
+
+async function fetchProviderModels(providerName) {
+  modelLists.set(providerName, { status: "loading" });
+  renderSettings();
+  try {
+    const result = await api("/api/providers/" + encodeURIComponent(providerName) + "/models");
+    modelLists.set(providerName, result.available
+      ? { status: "ready", models: result.models }
+      : { status: "error", reason: result.reason });
+  } catch (error) {
+    modelLists.set(providerName, { status: "error", reason: error.message });
+  }
+  renderSettings();
 }
 
 // One way in for every change, so the inline control, the editor and the

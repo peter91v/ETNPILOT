@@ -286,3 +286,101 @@ test("a port open to the network is named as such, with an address that works th
     await shared.close();
   }
 });
+
+test("a provider's live models reach the page, and a provider with no key says why not", async () => {
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-ui-models-"));
+  await mkdir(join(root, ".etnpilot", "state", "runs"), { recursive: true });
+  await writeFile(join(root, ".etnpilot", "etnpilot.yaml"), [
+    "version: 1",
+    "providers:",
+    "  openai:",
+    "    type: openai-compatible",
+    "    baseUrl: https://api.openai.example/v1",
+    "    apiKeySecret: openai.apiKey",
+    "  local-copilot:",
+    "    type: github-copilot",
+    "secrets:",
+    "  providers:",
+    "    env: { type: env, allow: [OPENAI_TEST_KEY] }",
+    "  values:",
+    "    openai.apiKey: { provider: env, key: OPENAI_TEST_KEY }",
+    "",
+  ].join("\n"));
+
+  const review = await createReviewServer({ root, env: { ...process.env, OPENAI_TEST_KEY: "sk-live-test" } });
+  const originalFetch = globalThis.fetch;
+  let seenAuth;
+  globalThis.fetch = async (url, options) => {
+    // The test's own calls to the local review server share this same global
+    // with the provider call listModels() makes; only the latter is stubbed.
+    if (String(url).startsWith("http://127.0.0.1")) return originalFetch(url, options);
+    seenAuth = options.headers.authorization;
+    assert.equal(url, "https://api.openai.example/v1/models");
+    return new Response(JSON.stringify({
+      data: [
+        { id: "gpt-5", owned_by: "openai" },
+        { id: "text-embedding-3-large", owned_by: "openai" },
+      ],
+    }), { status: 200 });
+  };
+  try {
+    const address = await review.listen({ port: 0 });
+    const base = `http://127.0.0.1:${address.port}`;
+    const call = (path) => fetch(base + path, { headers: { "x-etnpilot-token": review.token } });
+
+    const openai = await (await call("/api/providers/openai/models")).json();
+    assert.equal(seenAuth, "Bearer sk-live-test");
+    assert.equal(openai.available, true);
+    // Only the chat-capable one reached the page.
+    assert.deepEqual(openai.models.map((m) => m.id), ["gpt-5"]);
+    // OpenAI has no known-price entry: honest about it, not a guessed number.
+    assert.equal(openai.models[0].knownPrice, undefined);
+
+    // A provider type with no models endpoint says so by name.
+    const copilot = await (await call("/api/providers/local-copilot/models")).json();
+    assert.equal(copilot.available, false);
+    assert.match(copilot.reason, /github-copilot.*no models endpoint/);
+
+    // A provider that does not exist is a bad request, not a server fault.
+    const missing = await call("/api/providers/nope/models");
+    assert.equal(missing.status, 400);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await review.close();
+  }
+});
+
+test("a known Anthropic price rides along with its model", async () => {
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-ui-anthropic-models-"));
+  await mkdir(join(root, ".etnpilot", "state", "runs"), { recursive: true });
+  await writeFile(join(root, ".etnpilot", "etnpilot.yaml"), [
+    "version: 1",
+    "providers:",
+    "  claude:",
+    "    type: anthropic",
+    "secrets:",
+    "  providers:",
+    "    env: { type: env, allow: [ANTHROPIC_TEST_KEY] }",
+    "  values:",
+    "    anthropic.apiKey: { provider: env, key: ANTHROPIC_TEST_KEY }",
+    "",
+  ].join("\n"));
+  const review = await createReviewServer({ root, env: { ...process.env, ANTHROPIC_TEST_KEY: "sk-ant-test" } });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options) => {
+    if (String(url).startsWith("http://127.0.0.1")) return originalFetch(url, options);
+    return new Response(JSON.stringify({
+      data: [{ id: "claude-opus-5", display_name: "Claude Opus 5" }],
+    }), { status: 200 });
+  };
+  try {
+    const address = await review.listen({ port: 0 });
+    const call = (path) => fetch(`http://127.0.0.1:${address.port}${path}`, { headers: { "x-etnpilot-token": review.token } });
+    const result = await (await call("/api/providers/claude/models")).json();
+    assert.equal(result.models[0].knownPrice.inputPerMillion, 5);
+    assert.match(result.models[0].knownPrice.source, /anthropic\.com/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await review.close();
+  }
+});

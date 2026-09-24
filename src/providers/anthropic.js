@@ -114,6 +114,38 @@ export function createAnthropicProvider({
   };
 }
 
+// The models this account can currently reach. Anthropic's own /v1/models
+// only lists what is currently offered — nothing retired — so unlike the
+// OpenAI-compatible listing this needs no chat/non-chat filter.
+export async function listModels({ baseUrl = DEFAULT_BASE_URL, apiKey, fetchImpl = globalThis.fetch } = {}) {
+  const endpoint = `${baseUrl.replace(/\/$/, "")}/v1/models`;
+  let response;
+  try {
+    response = await fetchImpl(endpoint, {
+      headers: {
+        "anthropic-version": API_VERSION,
+        ...(apiKey ? { "x-api-key": apiKey } : {}),
+      },
+    });
+  } catch (error) {
+    const detail = error?.cause?.message ?? error?.message ?? String(error);
+    throw new ProviderError(`Provider network request failed: ${detail}`, {
+      code: "network_error", retryable: true, safeToRetry: true, cause: error,
+    });
+  }
+  if (!response.ok) {
+    const detail = await errorDetail(response);
+    throw new ProviderError(`Provider request failed (${response.status})${detail ? `: ${detail}` : "."}`, {
+      code: `http_${response.status}`, retryable: response.status === 429 || response.status >= 500,
+    });
+  }
+  const payload = await response.json();
+  return (payload.data ?? [])
+    .map((entry) => ({ id: entry.id, displayName: entry.display_name, created: entry.created_at }))
+    .filter((entry) => typeof entry.id === "string")
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
 async function request({ endpoint, apiKey, fetchImpl, context, body }) {
   let response;
   try {

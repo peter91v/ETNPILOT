@@ -341,3 +341,53 @@ test("a named secret with nothing behind it says so, instead of reading another 
     globalThis.fetch = originalFetch;
   }
 });
+
+test("the models an OpenAI-compatible endpoint currently offers, filtered to the chat-capable ones", async () => {
+  const { listModels, looksLikeChatModel } = await import("../src/providers/openai-compatible.js");
+  let seenAuth;
+  const all = await listModels({
+    baseUrl: "https://api.openai.example/v1",
+    apiKey: "sk-test",
+    fetchImpl: async (url, options) => {
+      seenAuth = options.headers.authorization;
+      assert.equal(url, "https://api.openai.example/v1/models");
+      return new Response(JSON.stringify({
+        data: [
+          { id: "gpt-5", object: "model", owned_by: "openai" },
+          { id: "text-embedding-3-large", object: "model", owned_by: "openai" },
+          { id: "whisper-1", object: "model", owned_by: "openai" },
+          { id: "gpt-5-mini", object: "model", owned_by: "openai" },
+        ],
+      }), { status: 200 });
+    },
+  });
+  assert.equal(seenAuth, "Bearer sk-test");
+  assert.deepEqual(all.map((m) => m.id), ["gpt-5", "gpt-5-mini", "text-embedding-3-large", "whisper-1"]);
+
+  // The chat filter is this project's own judgment, applied by the caller —
+  // not something '/v1/models' states.
+  assert.equal(looksLikeChatModel("gpt-5"), true);
+  assert.equal(looksLikeChatModel("gpt-5-mini"), true);
+  assert.equal(looksLikeChatModel("text-embedding-3-large"), false);
+  assert.equal(looksLikeChatModel("whisper-1"), false);
+  assert.equal(looksLikeChatModel("dall-e-3"), false);
+});
+
+test("a refused models request keeps the server's own message", async () => {
+  const { listModels } = await import("../src/providers/openai-compatible.js");
+  await assert.rejects(
+    () => listModels({
+      baseUrl: "https://api.openai.example/v1",
+      apiKey: "sk-bad",
+      fetchImpl: async () => new Response(
+        JSON.stringify({ error: { message: "Incorrect API key provided." } }),
+        { status: 401 },
+      ),
+    }),
+    (error) => {
+      assert.equal(error.code, "http_401");
+      assert.match(error.message, /Incorrect API key provided/);
+      return true;
+    },
+  );
+});

@@ -93,6 +93,18 @@ export async function createReviewServer({
       if (request.method === "GET" && url.pathname === "/api/usage") {
         return send(response, 200, await state.usage());
       }
+      // A provider's models, read live from its own API — never cached here,
+      // so the list is what the account can reach right now, not a memory of
+      // it. A provider whose key is missing or refused says so; that is not
+      // a server fault.
+      if (request.method === "GET" && url.pathname.startsWith("/api/providers/") && url.pathname.endsWith("/models")) {
+        const name = decodeURIComponent(url.pathname.slice("/api/providers/".length, -"/models".length));
+        const result = await state.listProviderModels(name).catch((error) => {
+          if (error instanceof TypeError) throw badRequest(error.message);
+          return { available: false, reason: error.message };
+        });
+        return send(response, 200, result);
+      }
       if (request.method === "GET" && url.pathname === "/api/merges") {
         const status = url.searchParams.get("status");
         return send(response, 200, await state.mergeRequests(status ? { state: status } : undefined));

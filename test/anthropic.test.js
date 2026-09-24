@@ -242,3 +242,26 @@ test("the generated project configures all three providers, and one setting swit
   const routed = await router.invoke(context({ agent: { name: "orchestrator", requires: ["chat"] } }));
   assert.equal(routed.provider, "anthropic");
 });
+
+test("the models this account can currently reach", async () => {
+  const { listModels } = await import("../src/providers/anthropic.js");
+  let seenHeaders;
+  const models = await listModels({
+    apiKey: "sk-ant-test",
+    fetchImpl: async (url, options) => {
+      seenHeaders = options.headers;
+      assert.equal(url, "https://api.anthropic.com/v1/models");
+      return new Response(JSON.stringify({
+        data: [
+          { id: "claude-opus-5", display_name: "Claude Opus 5", created_at: "2026-01-01T00:00:00Z" },
+          { id: "claude-haiku-4-5", display_name: "Claude Haiku 4.5", created_at: "2025-10-01T00:00:00Z" },
+        ],
+        has_more: false,
+      }), { status: 200 });
+    },
+  });
+  assert.equal(seenHeaders["x-api-key"], "sk-ant-test");
+  assert.equal(seenHeaders["anthropic-version"], "2023-06-01");
+  assert.deepEqual(models.map((m) => m.id), ["claude-haiku-4-5", "claude-opus-5"]);
+  assert.equal(models.find((m) => m.id === "claude-opus-5").displayName, "Claude Opus 5");
+});

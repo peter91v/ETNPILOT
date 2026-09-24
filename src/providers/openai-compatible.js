@@ -153,6 +153,48 @@ async function request({ endpoint, apiKey, fetchImpl, context, body }) {
   return response.json();
 }
 
+// Every id this endpoint returns, including embedding, image, audio and
+// moderation models it never separates out — 'GET /v1/models' has no
+// chat/non-chat field. This name list is this project's own judgment call,
+// not something the API states, and it is applied by the caller, not here,
+// so a project whose server names its chat models differently is not
+// silently emptied.
+const NON_CHAT_MODEL_PATTERN = /embed|whisper|tts|dall-e|image|moderation|davinci|curie|babbage|instruct$|realtime|audio|transcribe|speech/i;
+
+export function looksLikeChatModel(id) {
+  return typeof id === "string" && !NON_CHAT_MODEL_PATTERN.test(id);
+}
+
+// The models an OpenAI-compatible endpoint currently offers. Read live, on
+// request — never cached here — because the answer changes on the server's
+// own schedule, not this project's.
+export async function listModels({ baseUrl, apiKey, fetchImpl = globalThis.fetch } = {}) {
+  if (!baseUrl) throw new TypeError("baseUrl is required.");
+  const endpoint = `${baseUrl.replace(/\/$/, "")}/models`;
+  let response;
+  try {
+    response = await fetchImpl(endpoint, {
+      headers: { ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) },
+    });
+  } catch (error) {
+    const detail = error?.cause?.message ?? error?.message ?? String(error);
+    throw new ProviderError(`Provider network request failed: ${detail}`, {
+      code: "network_error", retryable: true, safeToRetry: true, cause: error,
+    });
+  }
+  if (!response.ok) {
+    const detail = await errorDetail(response);
+    throw new ProviderError(`Provider request failed (${response.status})${detail ? `: ${detail}` : "."}`, {
+      code: `http_${response.status}`, retryable: response.status === 429 || response.status >= 500,
+    });
+  }
+  const payload = await response.json();
+  return (payload.data ?? [])
+    .map((entry) => ({ id: entry.id, ownedBy: entry.owned_by, created: entry.created }))
+    .filter((entry) => typeof entry.id === "string")
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
 export function missingApiKey(name, source, fallbackEnv) {
   const secret = source?.secret;
   // A named secret with nothing behind it is a different problem from an

@@ -78,7 +78,17 @@ teaches the wrong thing about what this can do.
   layer it came from, and whether it may be changed (`open`, `stricter-only`,
   `locked`). The control is in the row: a setting that takes one of a known
   list is a dropdown there, and choosing saves at once; a refusal puts the row
-  back. Everything else shows its value with a caret that opens the editor —
+  back. A `providers.<name>.model` row additionally offers **fetch models** —
+  a live call to that provider's own `/v1/models`, filtered to the
+  chat-capable ones for an OpenAI-compatible provider (that endpoint mixes in
+  embedding, audio and image models with no field to tell them apart; Anthropic's
+  lists only what it currently offers). Picking one that has a published rate
+  this project knows fills in `observability.pricing.models.<id>` at the same
+  time — named where the rate came from and when, in a toast, because neither
+  provider publishes prices through an API and a number nobody can trace back
+  is not one to spend real money on. Today that known-rate table only has
+  Anthropic's own published prices; an OpenAI model says so and asks for the
+  rate by hand. Everything else shows its value with a caret that opens the editor —
   checkboxes for a set of values, a YAML field otherwise. A `locked` setting
   has no control at all and says why when you ask. A refusal appears where the
   change was made, with the reason, and the input keeps what was typed. Nothing

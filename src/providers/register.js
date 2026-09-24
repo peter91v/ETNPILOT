@@ -81,6 +81,29 @@ function describeApiKeySource(config, context, defaultSecret, fallbackKey) {
   return { secret, env: config.apiKeySecret ? undefined : fallbackKey, mapped: false };
 }
 
+// The same key resolution the anthropic/openai-compatible factories use,
+// available on its own — for listing a provider's models, which needs the
+// key but not a running provider instance.
+export async function resolveConfiguredApiKey(type, config, context) {
+  if (type === "anthropic") {
+    return config.apiKey ?? await resolveProviderSecret({
+      resolver: context.secretResolver,
+      name: config.apiKeySecret ?? "anthropic.apiKey",
+      fallbackKey: describeApiKeySource(config, context, "anthropic.apiKey", "ANTHROPIC_API_KEY").env,
+      required: false,
+    });
+  }
+  if (type === "openai-compatible") {
+    return config.apiKey ?? await resolveProviderSecret({
+      resolver: context.secretResolver,
+      name: config.apiKeySecret ?? "provider.apiKey",
+      fallbackKey: describeApiKeySource(config, context, "provider.apiKey", "ETNPILOT_PROVIDER_API_KEY").env,
+      required: false,
+    });
+  }
+  return undefined;
+}
+
 async function resolveProviderSecret({ resolver, name, fallbackKey, required }) {
   if (!resolver) return undefined;
   return resolver.get(name, {
