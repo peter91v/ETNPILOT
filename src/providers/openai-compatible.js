@@ -154,8 +154,18 @@ async function request({ endpoint, apiKey, fetchImpl, context, body }) {
 }
 
 export function missingApiKey(name, source, fallbackEnv) {
-  const variable = source?.env ?? fallbackEnv;
   const secret = source?.secret;
+  // A named secret with nothing behind it is a different problem from an
+  // unset variable, and sending someone to the wrong file costs an hour.
+  if (source && !source.env) {
+    return new ProviderError(
+      `Provider '${name}' has no API key: its secret '${secret}' is not mapped under 'secrets.values'.`
+      + ` Map it to an environment variable there, or remove`
+      + ` 'providers.${name}.apiKeySecret' to use the default.`,
+      { code: "missing_api_key", retryable: false, safeToRetry: false },
+    );
+  }
+  const variable = source?.env ?? fallbackEnv;
   return new ProviderError(
     `Provider '${name}' has no API key. Set ${variable} in the environment`
     + (secret ? ` (secret '${secret}', allowed under 'secrets.providers.env.allow')` : "")

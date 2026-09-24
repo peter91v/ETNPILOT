@@ -302,3 +302,40 @@ test("the openai provider reads OPENAI_API_KEY, and says so when it is missing",
     },
   );
 });
+
+test("a named secret with nothing behind it says so, instead of reading another one", async () => {
+  // The trap this closes: 'apiKeySecret: openai.apiKey' in a project that maps
+  // no such secret used to fall through to the adapter's generic variable —
+  // reading a key nobody pointed at, and naming the wrong one when unset.
+  const harness = new Harness();
+  const resolver = createSecretResolver({
+    env: { ETNPILOT_PROVIDER_API_KEY: "sk-generic" },
+    config: { secrets: { values: {} } },
+  });
+  let authorization = "unset";
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, options) => {
+    authorization = options.headers.authorization;
+    return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), { status: 200 });
+  };
+  try {
+    await registerConfiguredProviders(harness, {
+      openai: {
+        type: "openai-compatible",
+        baseUrl: "https://api.openai.example/v1",
+        apiKeySecret: "openai.apiKey",
+      },
+    }, { secretResolver: resolver, env: {} });
+    await assert.rejects(
+      () => harness.providers.get("openai").invoke({ agent: { name: "w", prompt: "p" }, input: "hi", instructions: [] }),
+      (error) => {
+        assert.equal(error.code, "missing_api_key");
+        assert.match(error.message, /secret 'openai\.apiKey' is not mapped under 'secrets\.values'/);
+        return true;
+      },
+    );
+    assert.equal(authorization, "unset", "nothing was sent with the wrong key");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
