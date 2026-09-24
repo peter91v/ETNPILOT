@@ -4,10 +4,13 @@ import YAML from "yaml";
 import { loadConfig } from "../config/load.js";
 import { describeSettings, setSetting, unsetSetting } from "../config/settings.js";
 import { ApprovalInbox, createInboxApprovalHandler } from "../core/approval-inbox.js";
+import { verifyReceiptFile } from "../core/receipt-store.js";
+import { loadReceiptVerifiers } from "../core/receipt-signing.js";
 import { escapeControlCharacters } from "../core/text-safety.js";
 import { WorktreeManager } from "../git/worktrees.js";
 import { GitLabClient } from "../gitlab/client.js";
 import { summarizeTelemetryFile } from "../observability/telemetry.js";
+import { listChecks, runCheck } from "./project-checks.js";
 import { runProject, RUN_BRANCH_PREFIX } from "./project-runner.js";
 import { createSecretResolver } from "../secrets/resolver.js";
 import { resolveConfiguredApiKey } from "../providers/register.js";
@@ -211,6 +214,16 @@ export async function openProjectState({ root = process.cwd(), env = process.env
     // instead of asking a person to remember how they spelled one.
     agents: () => readAgents({ root: projectRoot, config: current }),
     mergeRequests: (options) => readMergeRequests({ root: projectRoot, config: current, env }, options),
+    // The checks that used to be CLI-only. Listing them is free; running one
+    // is not, so it happens when a person asks — never in a poll — and every
+    // surface calls this same registry rather than reimplementing a check per
+    // window.
+    checks: () => listChecks(),
+    runCheck: (id) => runCheck(id, { root: projectRoot, config: current }),
+    // Whether a receipt is what it claims: the hash chain, and the signature
+    // where the project signs. The same name check 'readReceipt' applies, for
+    // the same reason — a file name from a surface never decides what is read.
+    verifyReceipt: (file) => verifyProjectReceipt(runsDirectory, file, { root: projectRoot, config: current }),
     // Changing a setting from any surface goes through the same module the
     // CLI uses, so every surface is refused for the same reason.
     async setSetting(path, value, options = {}) {
@@ -538,10 +551,27 @@ function publicationReason(publication) {
   return `not published: ${publication.reason ?? "no reason recorded"}`;
 }
 
-export async function readReceipt(directory, file) {
+// Verifying is a different question from reading: the chain and the signature,
+// rather than what the run did. A receipt whose chain is broken still reads —
+// that is exactly why this answer has to be available next to it.
+export async function verifyProjectReceipt(directory, file, { root, config } = {}) {
+  assertReceiptName(file);
+  const configured = config?.receipts?.signing?.publicKeyFile;
+  const verifiers = configured
+    ? await loadReceiptVerifiers([resolve(root, configured)]).catch(() => undefined)
+    : undefined;
+  const report = await verifyReceiptFile(join(directory, file), { ...(verifiers ? { verifiers } : {}) });
+  return { file, ...report, signaturesChecked: Boolean(verifiers) };
+}
+
+function assertReceiptName(file) {
   if (typeof file !== "string" || file.includes("/") || file.includes("\\") || !file.endsWith(".jsonl")) {
     throw new TypeError(`'${file}' is not a receipt file in this project.`);
   }
+}
+
+export async function readReceipt(directory, file) {
+  assertReceiptName(file);
   const content = await readFile(join(directory, file), "utf8");
   const entries = [];
   for (const line of content.split("\n").filter(Boolean)) {
