@@ -273,7 +273,12 @@ export async function runProject({
           workflowRunId: runId,
         });
       }
-      throw new Error(`Unsupported workflow step type: '${step.type}'.`);
+      // Which step, and what it may be: 'type: undefined' on its own leaves
+      // someone reading a workflow file with no idea which line is wrong.
+      throw new Error(
+        `Workflow step '${step.id}' has an unsupported type: '${step.type}'.`
+        + " Every step needs one of 'agent', 'quorum' or 'check'.",
+      );
     }, { signal, context: { runId, workspace } });
     contentEvidence = await verifyContentAfterRun(workspace.path, config, contentEvidence);
   } catch (error) {
@@ -451,7 +456,22 @@ export async function runProject({
   };
 }
 
-const DEFAULT_CHECK_ENV_ALLOW = Object.freeze(["PATH", "HOME", "LANG", "LC_ALL", "TZ", "TMPDIR"]);
+// PATH and the locale are what any command needs; PREFIX, LD_LIBRARY_PATH and
+// the ANDROID_* pair are what one needs on Termux, where the loader and every
+// wrapper script read them and a command without them exits 126 before it
+// runs. None of them carry credentials, which is what this list keeps out.
+const DEFAULT_CHECK_ENV_ALLOW = Object.freeze([
+  "PATH",
+  "HOME",
+  "LANG",
+  "LC_ALL",
+  "TZ",
+  "TMPDIR",
+  "PREFIX",
+  "LD_LIBRARY_PATH",
+  "ANDROID_DATA",
+  "ANDROID_ROOT",
+]);
 
 // Checks execute code the agent just wrote. They inherit an allow-listed
 // environment so repository and provider credentials cannot be read by them.
