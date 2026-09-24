@@ -47,10 +47,15 @@ teaches the wrong thing about what this can do.
   and the receipt hash. Opening one reads the receipt itself and leads with
   **why it ended**: the failing step and its own error, the steps that never
   ran because of it, an approval that was rejected, and whether it was
-  published. Under that, every step with its attempts and duration, what the
-  run cost in tokens and money, the branch and sandbox, the merge rehearsal
-  and what it would collide with, every approval with who decided it, and
-  which settings layers were in effect.
+  published. Under that, **the agents that ran, as the tree they actually ran
+  in** — a subagent a manifest declares nests under the agent that spawned it
+  rather than being listed beside it — with each row clickable to read that
+  agent's full text exactly as the receipt holds it, whatever it called and
+  what came back, and what it cost. Then every step with its attempts and
+  duration, what the run cost in tokens and money, the branch and workspace
+  path, the sandbox, the merge rehearsal and what it would collide with or
+  why it never ran, every approval with who decided it, and which settings
+  layers were in effect.
 - **What a run is doing right now**: the overview shows each run this page
   started, which step it is in, which agent is inside that step, and how far
   along the plan it is.

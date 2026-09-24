@@ -169,6 +169,13 @@ Im Browser (`etnpilot ui`): **Runs** → auf die Run-ID tippen. Im Terminal
 (`etnpilot tui`): **runs**, Zeile wählen, Enter. Beide zeigen dasselbe
 „Why it ended", dieselben Schritte und dieselbe Nutzung.
 
+Welche Agenten liefen — als Baum, ein Subagent unter dem Agenten eingerückt,
+der ihn gestartet hat, nicht daneben aufgelistet — und der volle Text, den
+jeder Agent tatsächlich produziert hat: im Browser als aufklappbare Zeilen
+unter „Agents"; im Terminal `a` zum Auswählen, `Enter` öffnet die volle
+Antwort eines Agenten; auf der Kommandozeile steht derselbe Baum ungekürzt
+unter `agents` im JSON von `receipt show`.
+
 ## Was danach im Receipt steht
 
 ```

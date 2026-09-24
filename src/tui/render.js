@@ -34,6 +34,7 @@ export function renderApp(state, options = {}) {
     active = [],
   } = options;
   const worktreeDiffOpen = Boolean(options.worktreeDiff);
+  const agentTextOpen = Boolean(options.agentText);
   const style = createStyle({ color });
   // Typing happens on the bottom line, the way a terminal tool has always done
   // it, so whatever you were looking at stays on screen while you type.
@@ -47,13 +48,16 @@ export function renderApp(state, options = {}) {
   const context = {
     style, width, height: body, cursor, now, editor, filter, filtering, scope, receipt,
     worktrees, changes: options.worktreeChanges, changeCursor: options.changeCursor, merges, active,
+    agentMode: options.agentMode, agentCursor: options.agentCursor,
   };
   const rendered = help
     ? renderHelp({ style, width, height: body, offset: helpOffset })
     : detail && view === "approvals"
       ? renderApprovalDetail(state, context)
       : detail && view === "runs"
-        ? renderRunDetail(state, context)
+        ? (agentTextOpen
+            ? renderAgentText(state, { ...context, agentText: options.agentText, offset: options.agentTextOffset })
+            : renderRunDetail(state, context))
         : detail && view === "worktrees"
           ? (options.worktreeDiff
               ? renderDiff(state, { ...context, diff: options.worktreeDiff, offset: options.diffOffset })
@@ -65,7 +69,10 @@ export function renderApp(state, options = {}) {
     lines.push(truncate(input.bad ? style.bad(input.hint) : style.dim(input.hint), width));
     lines.push(inputLine(input, { style, width }));
   } else {
-    lines.push(footer({ style, width, view, detail, message, editor, prompt, help, diff: worktreeDiffOpen }));
+    lines.push(footer({
+      style, width, view, detail, message, editor, prompt, help, diff: worktreeDiffOpen,
+      agentMode: options.agentMode, agentText: agentTextOpen,
+    }));
   }
   return lines.slice(0, height).map((line) => truncate(line, width));
 }
@@ -101,13 +108,13 @@ function header(state, { style, width, view, project, active = [] }) {
 
 function footer({ style, width, view, detail, message, editor, prompt, help, ...options }) {
   if (message) return truncate(style.warn(message), width);
-  const keys = footerKeys({ view, detail, editor, prompt, help, diff: options.diff });
+  const keys = footerKeys({ view, detail, editor, prompt, help, diff: options.diff, agentMode: options.agentMode, agentText: options.agentText });
   return truncate(keys.map(([key, label]) => `${style.accent(key)} ${style.dim(label)}`).join(style.dim("  ")), width);
 }
 
 // Whatever is on screen decides which keys the footer promises. A key it names
 // has to do something here, or the footer is teaching the wrong thing.
-function footerKeys({ view, detail, editor, prompt, help, diff }) {
+function footerKeys({ view, detail, editor, prompt, help, diff, agentMode, agentText }) {
   if (help) return [["↑↓", "scroll"], ["?", "close"], ["esc", "close"], ["q", "quit"]];
   if (prompt) return [["enter", "start"], ["tab", "agent"], ["esc", "cancel"], ["^u", "clear"]];
   if (editor) {
@@ -115,7 +122,9 @@ function footerKeys({ view, detail, editor, prompt, help, diff }) {
       ? [["← →", "choose"], ["enter", "save"], ["esc", "cancel"]]
       : [["enter", "save"], ["esc", "cancel"], ["^u", "clear"]];
   }
-  if (detail && view === "runs") return [["esc", "back"], ["↑↓", "move"], ["n", "run"], ["q", "quit"]];
+  if (agentText && view === "runs") return [["↑↓", "scroll"], ["esc", "back"], ["q", "quit"]];
+  if (agentMode && view === "runs") return [["↑↓", "move"], ["enter", "read"], ["esc", "back"], ["q", "quit"]];
+  if (detail && view === "runs") return [["a", "agents"], ["esc", "back"], ["n", "run"], ["q", "quit"]];
   if (diff && view === "worktrees") return [["↑↓", "scroll"], ["esc", "back"], ["q", "quit"]];
   if (detail && view === "worktrees") {
     return [["↑↓", "move"], ["enter", "what changed"], ["esc", "back"], ["x", "remove if clean"], ["q", "quit"]];
@@ -300,6 +309,48 @@ export function renderDiff(state, { style, width, height, diff, offset = 0 }) {
   return [...head, ...body, footer];
 }
 
+// One agent's full reasoning, exactly as the receipt holds it — the same
+// text the page shows when a row is opened there. Scrolls like the diff
+// viewer, because it is read the same way: too long to fit, so a footer says
+// how much more there is rather than cutting it silently.
+export function renderAgentText(state, { style, width, height, agentText, offset = 0 }) {
+  if (!agentText) return [style.dim("Reading…")];
+  const label = (agentText.workflowStep ? `${agentText.workflowStep} · ` : "") + agentText.agent;
+  const head = [
+    `${style.bold(style.ink(label))} ${style.tone(agentText.status, statusTone(agentText.status))} `
+      + style.muted(`${agentText.provider ?? "—"} · ${duration(agentText.durationMs)}`),
+    "",
+  ];
+  const lines = [];
+  const text = agentText.text || (agentText.error ? "" : "It produced no text.");
+  for (const paragraph of text.split("\n")) {
+    if (paragraph === "") { lines.push(""); continue; }
+    for (const piece of wrap(paragraph, width - 2)) lines.push(style.ink(piece));
+  }
+  if (agentText.error) {
+    lines.push("", style.dim("Error"));
+    for (const piece of wrap(agentText.error, width - 2)) lines.push(style.bad(piece));
+  }
+  if (agentText.toolCalls?.length > 0) {
+    lines.push("", style.dim("Tool calls"));
+    for (const call of agentText.toolCalls) {
+      const tone = call.ok === false ? "bad" : "ok";
+      lines.push(`  ${style.tone(pad(call.ok === false ? "refused" : "ran", 8), tone)} ${style.ink(pad(call.tool ?? "—", 14))} ${style.muted(call.error ?? "")}`);
+    }
+  }
+  if (agentText.usage) {
+    const usage = agentText.usage;
+    lines.push("", style.dim("Usage"));
+    lines.push(`  ${style.ink(`${(usage.inputTokens ?? 0).toLocaleString()} in · ${(usage.outputTokens ?? 0).toLocaleString()} out`)}`);
+  }
+  const room = Math.max(1, height - head.length - 1);
+  const start = Math.min(Math.max(0, offset), Math.max(0, lines.length - room));
+  const body = lines.slice(start, start + room);
+  const hidden = lines.length - start - body.length;
+  const bottom = hidden > 0 ? style.dim(`↑↓ scroll · ${hidden} more lines`) : style.dim("the end");
+  return [...head, ...body, bottom];
+}
+
 export function renderWorktrees(state, { style, width, height, cursor, worktrees }) {
   if (worktrees === undefined) return [style.dim("Reading the worktrees…")];
   if (worktrees.available === false) {
@@ -442,6 +493,17 @@ function table(rows, columns, { style, width, height, cursor }) {
 }
 
 // Keeps the selected row on screen without redrawing the world around it.
+// The same tree the page renders as nested, clickable rows — flattened, with
+// each row's depth, so the terminal interface can move a cursor over it.
+export function flattenAgents(nodes, depth = 0) {
+  const rows = [];
+  for (const node of nodes) {
+    rows.push({ node, depth });
+    rows.push(...flattenAgents(node.children, depth + 1));
+  }
+  return rows;
+}
+
 export function window(items, cursor, size) {
   if (items.length <= size) return items;
   const selected = clamp(cursor, items.length);
@@ -507,7 +569,7 @@ function queueTone(status) {
   return "muted";
 }
 
-function renderRunDetail(state, { style, width, height, cursor, receipt }) {
+function renderRunDetail(state, { style, width, height, cursor, receipt, agentMode = false, agentCursor = 0 }) {
   const runs = state.runs ?? [];
   const run = runs[clamp(cursor, runs.length)];
   if (!run) return [style.dim("No runs have been recorded yet.")];
@@ -532,6 +594,23 @@ function renderRunDetail(state, { style, width, height, cursor, receipt }) {
       for (const [index, piece] of wrap(text, width - 4).entries()) {
         lines.push(`  ${index === 0 ? style.tone(piece, tone) : style.muted(piece)}`);
       }
+    }
+    lines.push("");
+  }
+  // The agents that ran, as the tree they ran in. In agent mode this list is
+  // what 'enter' opens; ETNPilot never invents a hierarchy that did not run —
+  // today every provider is flat, so this reads as one row per step, and
+  // nests the day a provider actually spawns a subagent.
+  const flatAgents = flattenAgents(outcome.agents ?? []);
+  if (flatAgents.length > 0) {
+    lines.push(style.dim(agentMode ? "Agents — ↑↓ move, enter to read" : "Agents — press 'a'"));
+    const selected = agentMode ? clamp(agentCursor, flatAgents.length) : -1;
+    for (const [index, row] of flatAgents.entries()) {
+      const marker = agentMode && index === selected ? style.accent("›") : " ";
+      const indent = "  ".repeat(row.depth);
+      const label = (row.node.workflowStep ? `${row.node.workflowStep} · ` : "") + row.node.agent;
+      lines.push(`${marker} ${indent}${style.tone(pad(row.node.status, 10), stepTone(row.node.status))} `
+        + `${style.ink(truncate(label, width - 30))} ${style.muted(duration(row.node.durationMs))}`);
     }
     lines.push("");
   }
@@ -665,7 +744,7 @@ const HELP_SECTIONS = Object.freeze([
     ["a / r", "approve once / reject"],
     ["esc", "back to the list"],
   ]],
-  ["Runs", [["enter", "open the receipt"]]],
+  ["Runs", [["enter", "open the receipt"], ["a", "its agents, as a tree — enter reads one"]]],
   ["Queue", [["c", "request cancellation"], ["R", "resume a failed job"]]],
   ["Worktrees", [
     ["enter", "the files it holds, then one file's diff"],

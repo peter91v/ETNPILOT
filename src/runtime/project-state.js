@@ -379,6 +379,7 @@ export function describeOutcome(receipt, { running = false } = {}) {
     // reported one.
     status: terminal.status ?? summary.status ?? (receipt?.terminal ? "unknown" : running ? "running" : "incomplete"),
     sealed: Boolean(receipt?.terminal),
+    agents: agentTree(receipt),
     steps,
     reasons,
     usage: terminal.observability?.summary,
@@ -432,6 +433,53 @@ function describeRehearsal(rehearsal) {
   return conflicts.length > 0
     ? { state: "conflicts", text: `conflicts with ${target}: ${conflicts.join(", ")}`, conflicts }
     : { state: "conflicts", text: `does not merge into ${target}, with no file named`, conflicts };
+}
+
+// The agents that ran, as the tree they actually ran in rather than a flat
+// list of lines: each invocation's own runId and parentRunId are what link a
+// subagent call to the agent that spawned it. Every surface reads this tree
+// instead of the raw entries, so a run opened on the phone and one read from
+// the terminal show the same shape.
+//
+// Today every built-in provider is flat — none call the 'spawn' a manifest's
+// 'subagents' declares — so this renders as one row per workflow step. It
+// nests correctly the day one does, without either surface changing.
+export function agentTree(receipt) {
+  const entries = (receipt?.entries ?? [])
+    .filter((entry) => typeof entry.agent === "string" && typeof entry.runId === "string");
+  const byId = new Map(entries.map((entry) => [entry.runId, agentNode(entry)]));
+  const roots = [];
+  for (const entry of entries) {
+    const node = byId.get(entry.runId);
+    const parent = entry.parentRunId ? byId.get(entry.parentRunId) : undefined;
+    if (parent) parent.children.push(node);
+    else roots.push(node);
+  }
+  return roots;
+}
+
+function agentNode(entry) {
+  const result = entry.result ?? {};
+  // The scripted provider records its steps under 'steps' rather than
+  // 'toolCalls' — the same shape under another name, read the same way here
+  // as it already is for 'Tools it used'.
+  const toolCalls = result.toolCalls ?? result.steps ?? [];
+  return {
+    runId: entry.runId,
+    agent: entry.agent,
+    ...(entry.workflowStep ? { workflowStep: entry.workflowStep } : {}),
+    provider: entry.provider,
+    status: entry.status ?? "unknown",
+    durationMs: entry.durationMs,
+    // The full text, untruncated: it is already what the receipt holds, and
+    // reading it back is the point of showing this at all.
+    text: result.text ?? "",
+    toolCalls,
+    ...(entry.usage ? { usage: entry.usage } : {}),
+    ...(entry.error ? { error: entry.error } : {}),
+    approvals: entry.approvals?.length ?? 0,
+    children: [],
+  };
 }
 
 function publicationReason(publication) {

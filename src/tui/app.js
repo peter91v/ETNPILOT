@@ -1,6 +1,6 @@
 import { screen, shortId } from "./ansi.js";
 import { parseSettingValue } from "../config/settings.js";
-import { clamp, mergeEntries, renderApp, settingEntries, settingLiteral, settingValue, viewList } from "./render.js";
+import { clamp, flattenAgents, mergeEntries, renderApp, settingEntries, settingLiteral, settingValue, viewList } from "./render.js";
 
 const VIEWS = viewList();
 
@@ -39,6 +39,12 @@ export function createTuiApp({
   let changeCursor = 0;
   let worktreeDiff;
   let diffOffset = 0;
+  // Reading one agent's full reasoning, inside an open run: 'agentMode'
+  // selects a row in the tree, 'agentText' is the one currently open.
+  let agentMode = false;
+  let agentCursor = 0;
+  let agentText;
+  let agentTextOffset = 0;
   let worktreesReadAt = 0;
   let merges;
   let messageTimer;
@@ -63,6 +69,8 @@ export function createTuiApp({
     get worktrees() { return worktrees; },
     get worktreeChanges() { return worktreeChanges; },
     get worktreeDiff() { return worktreeDiff; },
+    get agentMode() { return agentMode; },
+    get agentText() { return agentText; },
     get merges() { return merges; },
     // What is running is tracked in the shared state, because the page needs
     // the same answer; this is a view of it, not a second copy.
@@ -83,8 +91,12 @@ export function createTuiApp({
         cursor,
         detail,
         message,
-        width: output.columns ?? 100,
-        height: output.rows ?? 30,
+        // A pty reports 0×0 before its first resize event lands — a real
+        // sequence on Android terminal apps, and '?? 100' does not catch 0,
+        // which is falsy but not nullish. Rendering at that size draws
+        // nothing at all, silently, with no error to say why.
+        width: output.columns || 100,
+        height: output.rows || 30,
         color: output.isTTY === true && !process.env.NO_COLOR,
         now: now(),
         editor,
@@ -100,6 +112,10 @@ export function createTuiApp({
         changeCursor,
         worktreeDiff,
         diffOffset,
+        agentMode,
+        agentCursor,
+        agentText,
+        agentTextOffset,
         merges,
         active: snapshot.active ?? [],
         project: state.config?.git?.project ?? "",
@@ -167,26 +183,39 @@ export function createTuiApp({
         scope = scope === "local" ? "global" : "local";
         note(`Changes will be written ${scope === "global" ? "to ~/.config, for every project" : "to this project, locally"}.`);
       } else if (key === "\u001B[B" || key === "j") {
-        if (worktreeDiff) diffOffset += 1;
+        if (agentText) agentTextOffset += 1;
+        else if (agentMode) agentCursor = clamp(agentCursor + 1, agentRows().length);
+        else if (worktreeDiff) diffOffset += 1;
         else if (detail && view === "worktrees") changeCursor = clamp(changeCursor + 1, changeCount());
         else cursor = clamp(cursor + 1, selection().length);
       } else if (key === "\u001B[A" || key === "k") {
-        if (worktreeDiff) diffOffset = Math.max(0, diffOffset - 1);
+        if (agentText) agentTextOffset = Math.max(0, agentTextOffset - 1);
+        else if (agentMode) agentCursor = clamp(agentCursor - 1, agentRows().length);
+        else if (worktreeDiff) diffOffset = Math.max(0, diffOffset - 1);
         else if (detail && view === "worktrees") changeCursor = clamp(changeCursor - 1, changeCount());
         else cursor = clamp(cursor - 1, selection().length);
       } else if (key === "\r" || key === "\n") {
-        if (view === "approvals" && selection().length > 0) detail = true;
-        else if (view === "runs" && selection().length > 0) await openRun();
+        if (agentMode && !agentText) openAgentText();
+        else if (view === "approvals" && selection().length > 0) detail = true;
+        else if (view === "runs" && !detail && selection().length > 0) await openRun();
         else if (view === "worktrees" && detail && !worktreeDiff) await openFileDiff();
         else if (view === "worktrees" && selection().length > 0) await openWorktree();
       } else if (key === "\u001B") {
-        if (worktreeDiff) {
+        if (agentText) {
+          agentText = undefined;
+          agentTextOffset = 0;
+        } else if (agentMode) {
+          agentMode = false;
+        } else if (worktreeDiff) {
           worktreeDiff = undefined;
           diffOffset = 0;
         } else {
           detail = false;
           worktreeChanges = undefined;
         }
+      } else if (key === "a" && detail && view === "runs" && !agentMode && agentRows().length > 0) {
+        agentMode = true;
+        agentCursor = 0;
       } else if (key === "a" || key === "r") {
         await decide(key === "a" ? "approved" : "rejected");
       } else if (key === "c" && view === "queue") {
@@ -411,12 +440,33 @@ export function createTuiApp({
     if (!run) return;
     detail = true;
     receipt = undefined;
+    agentMode = false;
+    agentCursor = 0;
+    agentText = undefined;
+    agentTextOffset = 0;
     try {
       receipt = await state.readReceipt(run.receiptFile);
     } catch (error) {
       note(error.message);
       detail = false;
     }
+  }
+
+  // The same tree the run detail shows, flattened for the cursor to move
+  // over — recomputed from whatever receipt is on screen, never cached, so it
+  // never drifts from what the panel above it says.
+  function agentRows() {
+    return flattenAgents(receipt?.outcome?.agents ?? []);
+  }
+
+  // What 'enter' opens: the full text this agent invocation produced, already
+  // sitting in the receipt this session has read — nothing more to fetch.
+  function openAgentText() {
+    const rows = agentRows();
+    const row = rows[clamp(agentCursor, rows.length)];
+    if (!row) return;
+    agentText = row.node;
+    agentTextOffset = 0;
   }
 
   // What a worktree holds is read when it is opened, not in the poll: it is

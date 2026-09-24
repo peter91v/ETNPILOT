@@ -171,6 +171,11 @@ export function renderReviewPage(token) {
   .panel-body { padding: 16px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .panel-body > .btn, .view > .btn { justify-self: start; }
   .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .agent-tree { display: grid; gap: 2px; }
+  .agent-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; min-width: 0; }
+  .agent-toggle { text-align: left; }
+  .agent-detail { display: grid; gap: 10px; padding-top: 4px; padding-bottom: 10px; border-left: 2px solid var(--line); margin-left: 6px; }
+  .agent-text { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px var(--mono); background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px; margin: 0; max-height: 420px; overflow: auto; }
   .grow { flex: 1 1 auto; min-width: 0; }
   .clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .wrap { overflow-wrap: anywhere; }
@@ -452,6 +457,9 @@ let merges;
 let usage;
 let agents;
 let openRun;
+// Which agent nodes are expanded, in the currently open run. Keyed by runId
+// so opening a different run — or the same one again — starts collapsed.
+let expandedAgents = new Set();
 let openSetting;
 let view = "overview";
 let scope = "local";
@@ -735,7 +743,7 @@ function renderPageActions() {
   host.replaceChildren();
   if (view === "worktrees") host.append(button("Read again", { class: "btn", onClick: () => loadWorktrees({ notify: true }) }));
   if (view === "merges") host.append(button("Ask GitLab", { class: "btn", onClick: () => loadMerges({ notify: true }) }));
-  if (view === "runs" && openRun) host.append(button("Close the receipt", { class: "btn", onClick: () => { openRun = undefined; render(); } }));
+  if (view === "runs" && openRun) host.append(button("Close the receipt", { class: "btn", onClick: () => { openRun = undefined; expandedAgents = new Set(); render(); } }));
   host.append(button("Refresh", { class: "btn", onClick: () => refresh({ force: true }) }));
 }
 
@@ -1100,6 +1108,61 @@ function pricingHint(described) {
     : calls + " no rate: set observability.pricing.models for " + named + more;
 }
 
+// One row per agent invocation, indented by how deep it was spawned. Each
+// row is a button: opening it does not navigate anywhere, it reveals the full
+// text this agent produced — the receipt already holds it, untruncated, so
+// there is nothing left to fetch.
+function agentTreeRows(nodes, depth) {
+  const rows = [];
+  for (const node of nodes) {
+    const expanded = expandedAgents.has(node.runId);
+    const label = (node.workflowStep ? node.workflowStep + " · " : "") + node.agent
+      + (node.provider ? " (" + node.provider + ")" : "");
+    const row = el("div", { class: "agent-row", attrs: { style: "padding-left:" + (depth * 20) + "px" } }, [
+      button((expanded ? "▾ " : "▸ ") + label, {
+        class: "btn link agent-toggle",
+        onClick: () => {
+          if (expanded) expandedAgents.delete(node.runId); else expandedAgents.add(node.runId);
+          render();
+        },
+      }),
+      pill(node.status, node.status === "succeeded" ? "ok" : node.status === "failed" ? "bad" : "warn"),
+      el("span", { class: "muted", text: agentDuration(node.durationMs) }),
+    ]);
+    rows.push(row);
+    if (expanded) rows.push(agentDetail(node, depth));
+    if (node.children.length > 0) rows.push(...agentTreeRows(node.children, depth + 1));
+  }
+  return rows;
+}
+
+function agentDuration(durationMs) {
+  return typeof durationMs === "number" ? (durationMs / 1000).toFixed(1) + "s" : "—";
+}
+
+// The full reasoning, exactly as the agent produced it and the receipt holds
+// it — not a preview, not a truncation. What it called and what came back
+// from each call sits right beside it.
+function agentDetail(node, depth) {
+  const parts = [];
+  parts.push(node.text
+    ? el("pre", { class: "agent-text", text: node.text })
+    : el("p", { class: "muted", text: node.error ? "It produced no text; see the error below." : "It produced no text." }));
+  if (node.error) parts.push(el("p", { class: "notice bad", text: node.error }));
+  if (node.toolCalls?.length > 0) {
+    parts.push(table([
+      { label: "Tool", value: (call) => call.tool ?? "—", mono: true },
+      { label: "Result", value: (call) => pill(call.ok === false ? "refused" : "ran", call.ok === false ? "bad" : "ok") },
+      { label: "Reason", value: (call) => ({ text: call.error ?? "", class: "bad" }) },
+    ], node.toolCalls, "No tool calls."));
+  }
+  if (node.usage) parts.push(usagePanelBody(node.usage));
+  return el("div", {
+    class: "agent-detail",
+    attrs: { style: "padding-left:" + (depth * 20 + 20) + "px" },
+  }, parts);
+}
+
 function usagePanelBody(summary) {
   const described = describeUsage(summary);
   if (!described) return el("p", { class: "muted", text: "No provider usage was recorded for this run." });
@@ -1120,6 +1183,7 @@ function openReceipt(run) {
   return button(run.runId, { class: "btn link", onClick: async () => {
     try {
       openRun = { file: run.receiptFile, run, receipt: await api("/api/runs/" + encodeURIComponent(run.receiptFile)) };
+      expandedAgents = new Set();
       clearError();
       render();
       renderPageActions();
@@ -1179,6 +1243,13 @@ function renderRunDetail() {
       { label: "Error", value: (step) => ({ text: step.error ?? "", class: "bad" }) },
     ], outcome.steps, "None recorded."));
   }
+  // The agents that ran, as the tree they ran in: each row is what one agent
+  // invocation actually did, click it open to read the full text rather than
+  // the one-line summary above.
+  if (outcome.agents?.length > 0) {
+    body.push(el("p", { class: "muted", text: "Agents" }));
+    body.push(el("div", { class: "agent-tree" }, agentTreeRows(outcome.agents, 0)));
+  }
   // What it did, not only that it succeeded: a run told to write a file that
   // wrote none is a run whose 'succeeded' needs reading twice.
   if (outcome.tools) {
@@ -1229,7 +1300,7 @@ function renderRunDetail() {
       : el("p", { class: "warn", text: overrides.length + " changed locally: " + overrides.join(", ") }));
   }
   if (terminal.error) body.push(detailBlock("Error", terminal.error));
-  body.push(el("div", { class: "row" }, [button("Close", { onClick: () => { openRun = undefined; render(); renderPageActions(); } })]));
+  body.push(el("div", { class: "row" }, [button("Close", { onClick: () => { openRun = undefined; expandedAgents = new Set(); render(); renderPageActions(); } })]));
   // What the panel says about the receipt has to be what the receipt is: the
   // header claimed 'sealed' over a note saying it never was.
   const meta = sealed ? "sealed receipt" : status === "running" ? "still running" : "receipt not sealed";

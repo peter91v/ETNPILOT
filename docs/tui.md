@@ -168,6 +168,36 @@ Why it ended
   not published: the workflow did not succeed
 ```
 
+Then the agents that ran, as the tree they actually ran in — a subagent a
+manifest declares nests under the agent that spawned it, rather than being
+listed beside it:
+
+```
+Agents — press 'a'
+  succeeded  plan · orchestrator 21.8s
+  succeeded  build · builder 9.6s
+    failed     linter 1.4s
+  succeeded  review · reviewer 8.0s
+```
+
+`a` selects it, `↑↓` moves, `enter` opens the one under the cursor — its full
+text exactly as the receipt holds it, whatever it called and what came back:
+
+```
+linter failed openai · 1.4s
+
+Error
+lint failed: unexpected token at line 12
+
+Tool calls
+  refused  run_command    exit code 2
+```
+
+`esc` backs out one layer at a time: the text, then the tree, then the run.
+The same tree and the same full text are what the review page shows when a
+row there is clicked, and what `etnpilot receipt show` prints under `agents`
+— one receipt, read the same way everywhere.
+
 Then every step with its attempts, what the run cost:
 
 ```

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -281,4 +281,98 @@ test("a run says where its files are and what it did to them", async () => {
   assert.match(screen, /\/repo\/\.etnpilot\/worktrees\/run-20260101000004-eeee/);
   assert.match(screen, /write_file\s+1 ran/);
   assert.match(screen, /read_file\s+0 ran\s+1 refused/);
+});
+
+test("the agents that ran are read back as a tree, not a flat list of lines", async () => {
+  // What the request was: see the agents that worked, hierarchically, and
+  // click each one to read the full text of what it did. Every surface reads
+  // this from the same place, so it agrees.
+  const directory = await runsDirectory({
+    "20260101000005-ffff.jsonl": [
+      {
+        runId: "agent-plan",
+        agent: "orchestrator",
+        workflowStep: "plan",
+        provider: "openai",
+        status: "succeeded",
+        durationMs: 1200,
+        approvals: [],
+        result: { text: "1. Read README.md\n2. Write CHANGES.md", toolCalls: [] },
+      },
+      {
+        runId: "agent-build",
+        agent: "builder",
+        workflowStep: "build",
+        provider: "openai",
+        status: "succeeded",
+        durationMs: 3400,
+        approvals: [{ operationKind: "write", decision: "approve-once" }],
+        usage: { inputTokens: 500, outputTokens: 80, invocations: 1 },
+        result: { text: "Wrote CHANGES.md.", toolCalls: [{ tool: "write_file", ok: true }] },
+      },
+      // A subagent the builder spawned mid-step: same shape, nested by
+      // parentRunId rather than by workflowStep.
+      {
+        runId: "agent-build-sub",
+        parentRunId: "agent-build",
+        agent: "linter",
+        provider: "openai",
+        status: "failed",
+        durationMs: 400,
+        approvals: [],
+        error: "lint failed: unexpected token",
+        result: { text: "", toolCalls: [] },
+      },
+      {
+        type: "workflow",
+        terminal: true,
+        runId: "20260101000005-ffff",
+        status: "succeeded",
+        summary: { status: "succeeded", steps: { plan: { status: "succeeded" }, build: { status: "succeeded" } } },
+      },
+    ],
+  });
+  const receipt = await readReceipt(directory, "20260101000005-ffff.jsonl");
+  const agents = receipt.outcome.agents;
+
+  assert.equal(agents.length, 2, "two workflow steps ran an agent, at the top level");
+  const [plan, build] = agents;
+  assert.equal(plan.workflowStep, "plan");
+  assert.equal(plan.agent, "orchestrator");
+  assert.match(plan.text, /Write CHANGES\.md/);
+  assert.deepEqual(plan.children, []);
+
+  assert.equal(build.workflowStep, "build");
+  assert.equal(build.toolCalls[0].tool, "write_file");
+  assert.equal(build.usage.inputTokens, 500);
+  // The subagent nests under the agent that spawned it, not beside it.
+  assert.equal(build.children.length, 1);
+  assert.equal(build.children[0].agent, "linter");
+  assert.equal(build.children[0].workflowStep, undefined);
+  assert.equal(build.children[0].status, "failed");
+  assert.match(build.children[0].error, /lint failed/);
+
+  // The same tree reaches the CLI, untruncated: a real project, with this
+  // receipt dropped into its own runs directory.
+  const { runCli } = await import("../src/cli/commands.js");
+  const { initializeProject } = await import("../src/config/init.js");
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-agents-cli-"));
+  await initializeProject(root);
+  const projectRuns = join(root, ".etnpilot", "state", "runs");
+  await mkdir(projectRuns, { recursive: true });
+  await writeFile(
+    join(projectRuns, "20260101000005-ffff.jsonl"),
+    await readFile(join(directory, "20260101000005-ffff.jsonl"), "utf8"),
+    "utf8",
+  );
+  const printed = [];
+  const log = console.log;
+  console.log = (line) => printed.push(line);
+  try {
+    await runCli(["receipt", "show", "20260101000005-ffff.jsonl"], { root });
+  } finally {
+    console.log = log;
+  }
+  const shown = JSON.parse(printed.at(-1));
+  assert.equal(shown.agents[1].children[0].agent, "linter");
 });

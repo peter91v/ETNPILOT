@@ -439,6 +439,7 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
         // Where the files are, and what it did to them.
         ...(outcome.workspace ? { workspace: outcome.workspace } : {}),
         ...(outcome.tools ? { tools: outcome.tools } : {}),
+        ...(outcome.agents.length > 0 ? { agents: outcome.agents } : {}),
         ...(outcome.rehearsal ? { mergeRehearsal: outcome.rehearsal } : {}),
         ...(outcome.usage ? { usage: outcome.usage } : {}),
         ...(outcome.cleanup ? { cleanup: outcome.cleanup } : {}),

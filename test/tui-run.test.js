@@ -311,3 +311,83 @@ test("a receipt file outside this project's runs is refused", async () => {
     state.close();
   }
 });
+
+test("the agents in a run are a navigable tree, and 'a' then enter reads one's full text", async () => {
+  // What was asked: see the agents that worked hierarchically, and open each
+  // one to read its full reasoning. The receipt already holds it, untruncated
+  // — this only has to be reachable.
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-tui-agents-"));
+  await mkdir(join(root, ".etnpilot", "state", "runs"), { recursive: true });
+  await writeFile(join(root, ".etnpilot", "etnpilot.yaml"), "version: 1\n");
+  const store = new JsonlReceiptStore(join(root, ".etnpilot", "state", "runs", "20260924160000-tree01.jsonl"));
+  await store.append({
+    runId: "agent-plan", agent: "orchestrator", workflowStep: "plan", provider: "openai",
+    status: "succeeded", durationMs: 21_800, approvals: [],
+    result: { text: "1. Read README\n2. Delegate the write to the builder.", toolCalls: [] },
+  });
+  await store.append({
+    runId: "agent-build", agent: "builder", workflowStep: "build", provider: "openai",
+    status: "succeeded", durationMs: 9_600, approvals: [],
+    result: { text: "Wrote CHANGES.md.", toolCalls: [{ tool: "write_file", ok: true }] },
+  });
+  // A subagent the builder spawned: nested under it by parentRunId, not
+  // listed as its own workflow step.
+  await store.append({
+    runId: "agent-build-lint", parentRunId: "agent-build", agent: "linter", provider: "openai",
+    status: "failed", durationMs: 1_400, approvals: [],
+    error: "lint failed: unexpected token at line 12",
+    result: { text: "", toolCalls: [{ tool: "run_command", ok: false, error: "exit code 2" }] },
+  });
+  await store.append({
+    type: "workflow", terminal: true, runId: "20260924160000-tree01", status: "succeeded", mode: "execute",
+    durationMs: 40_800, workspace: { branch: "etnpilot/run-tree01" },
+    summary: { status: "succeeded", steps: { plan: { status: "succeeded" }, build: { status: "succeeded" } } },
+  });
+
+  const state = await openProjectState({ root });
+  const app = createTuiApp({ state, output: fakeOutput(), input: new EventEmitter() });
+  try {
+    await app.refresh();
+    await app.handle("2"); // switch to the runs view
+    await app.handle("\r"); // open the run
+    await waitFor(() => screen(app).includes("Agents"), "the receipt to load");
+
+    // Collapsed: one row per invocation, the subagent indented under its
+    // parent rather than listed as a sibling.
+    const collapsed = screen(app);
+    assert.match(collapsed, /Agents — press 'a'/);
+    assert.match(collapsed, /plan · orchestrator/);
+    assert.match(collapsed, /^ {4}failed\s+linter/m, "the subagent is indented under its parent, not listed beside it");
+    assert.equal(app.agentMode, false);
+
+    await app.handle("a");
+    assert.equal(app.agentMode, true);
+    const inMode = screen(app);
+    assert.match(inMode, /Agents — ↑↓ move, enter to read/);
+    assert.match(inMode, /›.*plan · orchestrator/, "the cursor starts on the first row");
+
+    // Down twice: plan -> build -> linter.
+    await app.handle("\u001B[B");
+    await app.handle("\u001B[B");
+    assert.match(screen(app), /›.*failed\s+linter/);
+
+    await app.handle("\r");
+    const opened = screen(app);
+    assert.match(opened, /linter failed openai · 1\.4s/);
+    assert.match(opened, /lint failed: unexpected token at line 12/);
+    assert.match(opened, /refused\s+run_command\s+exit code 2/);
+    assert.equal(app.agentText.agent, "linter");
+
+    // Esc backs out one layer at a time: text, then agent mode, then the run.
+    await app.handle("\u001B");
+    assert.equal(app.agentText, undefined);
+    assert.equal(app.agentMode, true);
+    await app.handle("\u001B");
+    assert.equal(app.agentMode, false);
+    assert.equal(app.detail, true);
+    await app.handle("\u001B");
+    assert.equal(app.detail, false);
+  } finally {
+    state.close();
+  }
+});

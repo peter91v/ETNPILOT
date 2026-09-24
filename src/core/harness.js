@@ -177,6 +177,11 @@ export class Harness {
         runId,
         parentRunId,
         agent: agentName,
+        // Which workflow step this invocation belongs to, when it is one — a
+        // subagent spawned from inside an agent carries none, and nests under
+        // its parent instead. This is what lets a run's agents be read back
+        // as the tree they actually ran in, rather than a flat list of lines.
+        ...(metadata.workflowStep ? { workflowStep: metadata.workflowStep } : {}),
         provider: routed.provider,
         providerAttempts: routed.attempts,
         status: "succeeded",
@@ -201,6 +206,7 @@ export class Harness {
         runId,
         parentRunId,
         agent: agentName,
+        ...(metadata.workflowStep ? { workflowStep: metadata.workflowStep } : {}),
         provider: error.provider ?? agent.provider,
         providerAttempts: error.providerAttempts ?? [],
         status: "failed",
