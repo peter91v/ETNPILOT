@@ -24,9 +24,10 @@ const SEALED = [
 ];
 
 const UNSEALED = [
-  { runId: "20260101000001-bbbb", type: "start", mode: "execute" },
+  // The agent's own id, not the run's: a receipt carries both.
+  { runId: "1d0f6b1e-0000-4000-8000-00000000aaaa", type: "start", mode: "execute" },
   // The last thing it managed to write: one step, which succeeded.
-  { runId: "20260101000001-bbbb", step: "agent", status: "succeeded", hash: "entry-hash-9", durationMs: 12 },
+  { runId: "1d0f6b1e-0000-4000-8000-00000000aaaa", step: "agent", status: "succeeded", hash: "entry-hash-9", durationMs: 12 },
 ];
 
 async function runsDirectory(files) {
@@ -59,7 +60,9 @@ test("an unsealed receipt is not reported as a run that succeeded", async () => 
   assert.equal(unsealed.terminal, false);
   assert.equal(unsealed.hash, undefined, "an unsealed receipt has no hash of its own");
   assert.equal(unsealed.durationMs, undefined);
-  assert.equal(unsealed.runId, "20260101000001-bbbb", "the id comes from the run, not the file name");
+  // Each agent invocation writes an id of its own; the run's id is the one
+  // every surface names, and the one the file is called.
+  assert.equal(unsealed.runId, "20260101000001-bbbb", "the run's id, not an agent's");
 });
 
 test("the receipt reader and the run list agree about the same file", async () => {
@@ -121,7 +124,7 @@ test("'receipt show' gives the terminal the answer the other surfaces give", asy
     assert.equal(newest.receipt, "20260101000001-bbbb.jsonl");
     assert.equal(newest.status, "incomplete");
     assert.equal(newest.sealed, false);
-    assert.deepEqual(newest.why, ["the receipt was never sealed: the run stopped before it could finish"]);
+    assert.match(newest.why.join(""), /^the receipt has no terminal record/);
 
     await runCli(["receipt", "show", "20260101000000-aaaa.jsonl"], { root });
     const named = JSON.parse(printed.at(-1));
@@ -148,4 +151,60 @@ test("'receipt show' gives the terminal the answer the other surfaces give", asy
   } finally {
     console.log = log;
   }
+});
+
+test("a run that is still going is not a run that stopped", async () => {
+  // What was reported: a row read 'incomplete' at 13:20 and 'succeeded' at
+  // 13:21, with nobody touching anything. The receipt had simply not been
+  // sealed yet. A surface that says 'the run stopped before it could finish'
+  // about a run it is running right now is inventing what it cannot see.
+  const { collectState } = await import("../src/runtime/project-state.js");
+  const directory = await runsDirectory({ "20260101000001-bbbb.jsonl": UNSEALED });
+  const inbox = { list: () => [], close() {} };
+  const queue = { counts: () => ({}), list: () => [], close() {} };
+  const running = new Set([{ runId: "20260101000001-bbbb", task: "t", startedAt: "now", done: 0 }]);
+
+  const live = await collectState({ inbox, queue, runsDirectory: directory, running });
+  assert.equal(live.runs[0].status, "running");
+  assert.equal(live.runs[0].running, true);
+
+  // The same file, once this surface is no longer running it.
+  const abandoned = await collectState({ inbox, queue, runsDirectory: directory, running: new Set() });
+  assert.equal(abandoned.runs[0].status, "incomplete");
+  assert.equal(abandoned.runs[0].running, undefined);
+
+  // And the sentence itself no longer claims what it cannot know.
+  const receipt = await readReceipt(directory, "20260101000001-bbbb.jsonl");
+  assert.match(
+    receipt.outcome.reasons[0].text,
+    /^the receipt has no terminal record: the run stopped before it could finish, or it is still going/,
+  );
+});
+
+test("a rehearsal that is not clean names its files or says it named none", async () => {
+  // 'CONFLICTS:' with nothing after it is a claim with no evidence.
+  const directory = await runsDirectory({
+    "20260101000002-cccc.jsonl": [
+      { runId: "20260101000002-cccc", type: "start" },
+      {
+        runId: "20260101000002-cccc",
+        terminal: true,
+        status: "succeeded",
+        git: { mergeRehearsal: { clean: false, conflicts: [] } },
+        summary: { status: "succeeded", steps: {} },
+      },
+    ],
+  });
+  const receipt = await readReceipt(directory, "20260101000002-cccc.jsonl");
+  const rehearsal = receipt.terminal.git.mergeRehearsal;
+  assert.equal(rehearsal.clean, false);
+  assert.deepEqual(rehearsal.conflicts, [], "the receipt records what it found, empty or not");
+  // The surfaces are what must not turn that into 'conflicts:' and a blank.
+  const { renderApp } = await import("../src/tui/render.js");
+  const screen = renderApp(
+    { runs: [{ runId: "20260101000002-cccc", status: "succeeded", mode: "execute", receiptFile: "20260101000002-cccc.jsonl" }] },
+    { view: "runs", detail: true, color: false, receipt, width: 100, height: 40 },
+  ).join("\n");
+  assert.match(screen, /not clean\s+no file was named/);
+  assert.equal(/conflicts\s*$/m.test(screen), false, "no 'conflicts' with nothing after it");
 });

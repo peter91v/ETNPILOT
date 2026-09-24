@@ -1124,7 +1124,7 @@ function renderRunDetail() {
   const status = receipt.outcome?.status ?? run.status;
   const body = [
     pairs([
-      ["Status", status, status === "succeeded" ? "ok" : status === "incomplete" ? "warn" : "bad"],
+      ["Status", status, status === "succeeded" ? "ok" : status === "incomplete" || status === "running" ? "warn" : "bad"],
       ["Mode", run.mode],
       ["Branch", terminal.workspace?.branch ?? "—"],
       ["Sandbox", terminal.workspace?.sandbox?.image ?? "—"],
@@ -1165,9 +1165,13 @@ function renderRunDetail() {
   if (rehearsal) {
     body.push(el("div", { class: "row" }, [
       el("span", { class: "muted", text: "Merge rehearsal" }),
+      // 'conflicts:' with nothing after it is a claim with no evidence: the
+      // rehearsal names the files it could not merge, or says it named none.
       rehearsal.clean
         ? pill("clean into " + (rehearsal.targetBranch ?? "the target branch"), "ok")
-        : pill("conflicts: " + (rehearsal.conflicts ?? []).join(", "), "bad"),
+        : pill((rehearsal.conflicts ?? []).length > 0
+          ? "conflicts: " + rehearsal.conflicts.join(", ")
+          : "not clean" + (rehearsal.reason ? ": " + rehearsal.reason : ", with no file named"), "bad"),
     ]));
   }
   const train = terminal.git?.mergeTrain;
@@ -1201,7 +1205,8 @@ function renderRunDetail() {
   body.push(el("div", { class: "row" }, [button("Close", { onClick: () => { openRun = undefined; render(); renderPageActions(); } })]));
   // What the panel says about the receipt has to be what the receipt is: the
   // header claimed 'sealed' over a note saying it never was.
-  return panel(run.runId, { meta: sealed ? "sealed receipt" : "receipt not sealed", body, open: true });
+  const meta = sealed ? "sealed receipt" : status === "running" ? "still running" : "receipt not sealed";
+  return panel(run.runId, { meta, body, open: true });
 }
 
 async function loadWorktrees({ notify = false } = {}) {

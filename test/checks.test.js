@@ -117,3 +117,34 @@ test("the environment a check inherits carries what Termux needs to exec at all"
   assert.equal("ETNPILOT_GITLAB_TOKEN" in inherited, false);
   assert.equal(inherited.ETNPILOT_CHECK, "1");
 });
+
+test("'dependencies are missing' is said only where nothing above the worktree has them", async () => {
+  // A worktree inside the project resolves to the checkout's own node_modules,
+  // exactly as Node does, so claiming they are missing there would be an
+  // invention. The walk up is done rather than assumed.
+  const { dependenciesMissingForTest } = await import("../src/runtime/project-runner.js");
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-deps-"));
+  const { mkdir, writeFile: write } = await import("node:fs/promises");
+  await write(join(root, "package.json"), "{}", "utf8");
+  await mkdir(join(root, "node_modules"), { recursive: true });
+
+  // Where ETNPilot puts them: inside the project.
+  const inside = join(root, ".etnpilot", "worktrees", "run-1");
+  await mkdir(inside, { recursive: true });
+  await write(join(inside, "package.json"), "{}", "utf8");
+  assert.equal(await dependenciesMissingForTest(inside, root), false, "the checkout's own are found by walking up");
+
+  // Somewhere else entirely, with nothing above it.
+  const elsewhere = await mkdtemp(join(tmpdir(), "etnpilot-elsewhere-"));
+  const detached = join(elsewhere, "run-2");
+  await mkdir(detached, { recursive: true });
+  await write(join(detached, "package.json"), "{}", "utf8");
+  assert.equal(await dependenciesMissingForTest(detached, root), true);
+
+  // A project with no manifest is not a project missing dependencies.
+  const bare = join(elsewhere, "run-3");
+  await mkdir(bare, { recursive: true });
+  assert.equal(await dependenciesMissingForTest(bare, root), false);
+  // And a run in the checkout itself never is.
+  assert.equal(await dependenciesMissingForTest(root, root), false);
+});

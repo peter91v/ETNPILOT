@@ -559,9 +559,12 @@ function renderRunDetail(state, { style, width, height, cursor, receipt }) {
   if (terminal.git?.mergeRehearsal) {
     const rehearsal = terminal.git.mergeRehearsal;
     lines.push(style.dim("Merge rehearsal"));
+    const conflicts = rehearsal.conflicts ?? [];
     lines.push(rehearsal.clean
       ? `  ${style.ok("clean")} ${style.muted(`into ${rehearsal.targetBranch ?? "the target branch"}`)}`
-      : `  ${style.bad("conflicts")} ${style.muted((rehearsal.conflicts ?? []).join(", "))}`);
+      : conflicts.length > 0
+        ? `  ${style.bad("conflicts")} ${style.muted(conflicts.join(", "))}`
+        : `  ${style.bad("not clean")} ${style.muted(rehearsal.reason ?? "no file was named")}`);
     lines.push("");
   }
   // Which settings were in effect is evidence, so it belongs next to the run

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { join, resolve } from "node:path";
+import { access } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { loadConfig } from "../config/load.js";
 import { settingsEvidence } from "../config/layers.js";
 import { loadProject } from "../content/load-project.js";
@@ -265,6 +266,7 @@ export async function runProject({
         if (dryRun) return { name: step.name ?? step.id, command: step.command, skipped: true, reason: "dry-run" };
         return runObservedCheck(step, {
           cwd: workspace.path,
+          root,
           signal: execution.signal,
           env: checkEnv,
           sandbox,
@@ -642,7 +644,28 @@ async function runSequentially(agents, run) {
   return receipts;
 }
 
-async function runObservedCheck(step, { cwd, signal, env, telemetry, trace, workflowRunId, sandbox }) {
+// A linked worktree is a fresh checkout: it has the repository's files and no
+// 'node_modules' of its own. That is only a problem when nothing above it has
+// one either — a worktree inside the project, which is where ETNPilot puts
+// them, resolves to the checkout's own, exactly as Node does. Saying
+// 'dependencies are missing' about a worktree that finds them would be the
+// same invention this file keeps removing, so the walk up is done rather than
+// assumed.
+export const dependenciesMissingForTest = (cwd, root) => dependenciesMissing(cwd, root);
+
+async function dependenciesMissing(cwd, root) {
+  if (resolve(cwd) === resolve(root)) return false;
+  if (!await access(join(cwd, "package.json")).then(() => true, () => false)) return false;
+  let directory = resolve(cwd);
+  for (;;) {
+    if (await access(join(directory, "node_modules")).then(() => true, () => false)) return false;
+    const parent = dirname(directory);
+    if (parent === directory) return true;
+    directory = parent;
+  }
+}
+
+async function runObservedCheck(step, { cwd, signal, env, telemetry, trace, workflowRunId, sandbox, root }) {
   const span = telemetry?.startSpan("etnpilot.check", {
     traceId: trace.traceId,
     parentSpanId: trace.parentSpanId,
@@ -666,6 +689,12 @@ async function runObservedCheck(step, { cwd, signal, env, telemetry, trace, work
         "etnpilot.duration_ms": Date.now() - startedAt,
       },
     });
+    if (root && await dependenciesMissing(cwd, root)) {
+      error.message += `\nThis ran in ${cwd}, a linked worktree with a 'package.json' and no`
+        + " 'node_modules' in it or above it, so the project's dependencies are not installed"
+        + " where the check ran. Install them there, or run in the checkout itself with"
+        + " 'etnpilot config set workspace.mode in-place' — that stays local.";
+    }
     throw error;
   }
 }

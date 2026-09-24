@@ -79,7 +79,10 @@ export async function openProjectState({ root = process.cwd(), env = process.env
         signal: controller.signal,
         // Where the run is, so a surface can say more than 'working'.
         onEvent: (event) => {
-          if (event.type === "workflow.planned") record.steps = event.steps;
+          if (event.type === "workflow.planned") {
+            record.runId = event.runId;
+            record.steps = event.steps;
+          }
           if (event.type === "workflow.step.started") {
             record.step = event.step;
             record.stepSince = event.at;
@@ -130,7 +133,17 @@ export async function openProjectState({ root = process.cwd(), env = process.env
     },
     // Receipts are read on demand rather than in every poll: a detail view is
     // opened now and then, and the files grow with the run.
-    readReceipt: (file) => readReceipt(runsDirectory, file),
+    readReceipt: async (file) => {
+      const receipt = await readReceipt(runsDirectory, file);
+      // Whether the run is still going is not in the file: a receipt with no
+      // terminal record looks the same while it is being written and after it
+      // was abandoned. This surface knows what it started, so it says so.
+      const runId = file.replace(/\.jsonl$/, "");
+      const active = runId !== undefined && [...running].some((record) => record.runId === runId);
+      return active
+        ? { ...receipt, outcome: describeOutcome(receipt, { running: true }) }
+        : receipt;
+    },
     // Worktrees and merge requests are read on demand for the same reason,
     // more sharply: one runs 'git status' per worktree, the other crosses the
     // network. A poll every second must do neither.
@@ -207,8 +220,20 @@ export async function collectState(
       recent: inbox.list({ status: "all", limit: 20 }),
     },
     queue: { counts: queue.counts(), jobs: queue.list({ status: "all", limit: 20 }) },
-    runs: await readRuns(runsDirectory, { limit: runLimit }),
+    // A run this process is running right now has a receipt on disk with no
+    // terminal record yet. Reading that as a run that stopped is how a row
+    // said 'incomplete' one minute and 'succeeded' the next, with nobody
+    // touching anything.
+    runs: markRunning(await readRuns(runsDirectory, { limit: runLimit }), running),
   };
+}
+
+function markRunning(runs, running) {
+  const active = new Set([...running].map((record) => record.runId).filter(Boolean));
+  if (active.size === 0) return runs;
+  return runs.map((run) => (run.terminal || !active.has(run.runId)
+    ? run
+    : { ...run, status: "running", running: true }));
 }
 
 function presentRun(record) {
@@ -259,7 +284,12 @@ export async function readRuns(directory, { limit = 20 } = {}) {
     // else.
     const sealed = parsed.findLast((entry) => entry.terminal === true);
     runs.push({
-      runId: parsed.find((entry) => typeof entry.runId === "string")?.runId ?? file.replace(/\.jsonl$/, ""),
+      // A receipt carries two kinds of id: each agent invocation writes its
+      // own, and the workflow writes the run's. The run's is what every
+      // surface names and what the file is called, so an unsealed receipt
+      // takes it from the file rather than from the first agent that happened
+      // to write a line.
+      runId: sealed?.runId ?? file.replace(/\.jsonl$/, ""),
       status: sealed?.status ?? "incomplete",
       mode: sealed?.mode ?? parsed.find((entry) => typeof entry.mode === "string")?.mode ?? "execute",
       terminal: Boolean(sealed),
@@ -279,7 +309,7 @@ export async function readRuns(directory, { limit = 20 } = {}) {
 // Why a run ended the way it did, from what the receipt already holds. Both
 // surfaces ask this module rather than each reading the entries their own way,
 // so neither can give a different answer about the same run.
-export function describeOutcome(receipt) {
+export function describeOutcome(receipt, { running = false } = {}) {
   const terminal = receipt?.terminal ?? {};
   const summary = terminal.summary ?? {};
   const steps = Object.entries(summary.steps ?? {}).map(([id, step]) => ({ id, ...step }));
@@ -318,13 +348,23 @@ export function describeOutcome(receipt) {
     reasons.push({ kind: "publication", text: publicationReason(publication) });
   }
   if (terminal.terminal !== true && terminal.status === undefined) {
-    reasons.push({ kind: "incomplete", text: "the receipt was never sealed: the run stopped before it could finish" });
+    // A receipt with no terminal record looks the same while it is being
+    // written and after it was abandoned. Saying 'the run stopped' about one
+    // that is still going is the surface inventing what it cannot see: a run
+    // that then seals turns that sentence into a plain falsehood.
+    reasons.push(running
+      ? { kind: "running", text: "the run is still going: its receipt is sealed when it ends" }
+      : {
+        kind: "incomplete",
+        text: "the receipt has no terminal record: the run stopped before it could finish,"
+          + " or it is still going somewhere this surface did not start it",
+      });
   }
   return {
     // 'incomplete' rather than 'unknown': a receipt with no terminal record
     // is not a run whose outcome could not be read, it is a run that never
     // reported one.
-    status: terminal.status ?? summary.status ?? (receipt?.terminal ? "unknown" : "incomplete"),
+    status: terminal.status ?? summary.status ?? (receipt?.terminal ? "unknown" : running ? "running" : "incomplete"),
     sealed: Boolean(receipt?.terminal),
     steps,
     reasons,
