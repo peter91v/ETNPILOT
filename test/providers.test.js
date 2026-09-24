@@ -205,7 +205,9 @@ test("where no Copilot build exists, the advice does not send you in a circle", 
   const advice = copilotSdkAdvice("android", "arm64");
   assert.match(advice, /publishes no Copilot SDK build for android-arm64/);
   assert.doesNotMatch(advice, /^Install/);
-  assert.match(advice, /openai-compatible/);
+  // Nor to a provider the project never listed: policy.providers denies it,
+  // and being stricter-only, no local file can allow it either.
+  assert.match(advice, /another provider this project configures/);
 
   // The runtime failure carries the same advice, not a bare module error.
   const provider = createCopilotProvider({

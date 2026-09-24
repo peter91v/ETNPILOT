@@ -625,9 +625,10 @@ async function diagnoseRoute(root, checks) {
     { rules: config.routing?.rules ?? [], defaults: [...(config.routing?.defaults ?? []), ...(config.defaultProvider ? [config.defaultProvider] : [])] },
   );
   const resolver = createSecretResolver({ root, config, env: process.env });
+  const policy = config.policy ? new PolicyEngine(config.policy) : undefined;
   const route = [];
   for (const provider of providers) {
-    route.push(await diagnoseProvider(provider, config, resolver, checks));
+    route.push(await diagnoseProvider(provider, config, resolver, checks, policy));
   }
   const usable = route.find((entry) => entry.usable)?.name ?? null;
   // A way out beats a diagnosis: where the routed provider cannot run but
@@ -636,7 +637,7 @@ async function diagnoseRoute(root, checks) {
   if (!usable) {
     for (const other of Object.keys(config.providers ?? {})) {
       if (route.some((entry) => entry.name === other)) continue;
-      if ((await diagnoseProvider(other, config, resolver, checks)).usable) alternatives.push(other);
+      if ((await diagnoseProvider(other, config, resolver, checks, policy)).usable) alternatives.push(other);
     }
   }
   return {
@@ -658,9 +659,20 @@ async function diagnoseRoute(root, checks) {
   };
 }
 
-async function diagnoseProvider(name, config, resolver, checks) {
+async function diagnoseProvider(name, config, resolver, checks, policy) {
   const configured = config.providers?.[name];
   if (!configured) return { name, usable: false, reason: "is not configured under 'providers'" };
+  // Policy first: a denied provider cannot run however well it is configured,
+  // and 'policy.**' is stricter-only, so no local file can allow it.
+  const decision = policy?.evaluateProvider(name);
+  if (decision && decision.allowed === false) {
+    return {
+      name,
+      type: configured.type,
+      usable: false,
+      reason: "is denied by policy.providers, which only the committed file can change",
+    };
+  }
   const type = configured.type;
   if (type === "github-copilot") {
     return checks.copilotSdk

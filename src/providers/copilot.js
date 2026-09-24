@@ -15,7 +15,11 @@ export function copilotSdkAdvice(platform = process.platform, arch = process.arc
   return copilotSdkPlatformSupported(platform)
     ? "Install '@github/copilot-sdk' to use the GitHub Copilot provider."
     : `GitHub publishes no Copilot SDK build for ${platform}-${arch}, so it cannot be installed here. `
-      + "Configure an 'openai-compatible' provider instead, or run ETNPilot on a supported machine.";
+      // Not 'configure an openai-compatible provider': a provider the project
+      // has not listed is denied by policy.providers, and that policy is
+      // stricter-only, so it cannot be allowed from a local file either.
+      + "Route to another provider this project configures — 'etnpilot doctor' names the ones "
+      + "that are ready here — or run ETNPilot on a supported machine.";
 }
 
 export function createCopilotProvider(options = {}) {

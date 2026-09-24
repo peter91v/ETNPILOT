@@ -83,3 +83,37 @@ test("an agent that names its own provider is the route, whatever the default sa
     process.env = before;
   }
 });
+
+test("a provider the policy denies is reported as denied, not as ready", async () => {
+  // The trap this closes: the Copilot advice used to say 'configure an
+  // openai-compatible provider instead'. A provider the project never listed
+  // is denied by policy.providers, and 'policy.**' is stricter-only, so no
+  // local file can allow it. The run said 'no provider can satisfy'; the
+  // report now says which rule refused, and what is ready instead.
+  const root = await project(
+    "defaultProvider: openai-compatible\n"
+    + "providers:\n"
+    + "  openai-compatible:\n"
+    + "    type: openai-compatible\n"
+    + "    baseUrl: https://api.openai.com/v1\n"
+    + "    model: gpt-5\n",
+  );
+  const before = process.env;
+  try {
+    process.env = { ...process.env, OPENAI_API_KEY: "sk-test" };
+    const report = await diagnose(root);
+    assert.equal(report.ready, false);
+    assert.match(report.routing.route[0].reason, /denied by policy\.providers/);
+    assert.deepEqual(report.routing.alternatives, ["openai"]);
+  } finally {
+    process.env = before;
+  }
+});
+
+test("the Copilot advice does not send people to a provider the policy will deny", async () => {
+  const { copilotSdkAdvice } = await import("../src/providers/copilot.js");
+  const advice = copilotSdkAdvice("android", "arm64");
+  assert.equal(/Configure an 'openai-compatible' provider/.test(advice), false);
+  assert.match(advice, /another provider this project configures/);
+  assert.match(advice, /etnpilot doctor/);
+});
