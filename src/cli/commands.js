@@ -26,6 +26,8 @@ import { createGitLabWebhookServer } from "../gitlab/webhook-server.js";
 import { openInBrowser } from "../ui/open-browser.js";
 import { createReviewServer } from "../ui/server.js";
 import { createTuiApp } from "../tui/app.js";
+import { createFirstRunApp } from "../tui/first-run.js";
+import { describeProject } from "../runtime/first-run.js";
 import { agentRawResponses, openProjectState, readMergeRequests, readWorktrees } from "../runtime/project-state.js";
 // 'diagnose' moved to the runtime layer, because the TUI and the page run the
 // same check; 'etnpilot doctor' is one of its callers, not its home.
@@ -309,11 +311,28 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     await waitForShutdown();
     await webhookServer.close();
   } else if (command === "tui") {
-    const state = await openProjectState({ root: resolve(values.root) });
+    const root = resolve(values.root);
     if (!process.stdin.isTTY) {
-      state.close();
       throw new Error("The TUI needs an interactive terminal. Use 'etnpilot ui' or the plain commands instead.");
     }
+    // A directory with no project in it used to end here with the ENOENT of a
+    // file nobody had heard of. It now offers to create one, and then opens on
+    // what it created — which is what was being asked for.
+    const project = await describeProject({ root });
+    if (!project.exists) {
+      const setup = createFirstRunApp({ root });
+      try {
+        await setup.start();
+      } finally {
+        setup.stop();
+      }
+      if (!setup.created) {
+        console.log("Nothing was created. 'etnpilot init' does the same thing without the screen.");
+        return 0;
+      }
+      console.log(`Created ${setup.created.configFile} (${setup.created.template}).`);
+    }
+    const state = await openProjectState({ root });
     const app = createTuiApp({ state, actor: values.actor });
     try {
       await app.start();
