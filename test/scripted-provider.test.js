@@ -9,6 +9,7 @@ import { runProject } from "../src/runtime/project-runner.js";
 import { ProviderRouter } from "../src/providers/router.js";
 import { Registry } from "../src/core/registry.js";
 import { PolicyEngine } from "../src/policy/engine.js";
+import { WORKSPACE_TOOL_DEFINITIONS } from "../src/providers/workspace-tools.js";
 
 // A project whose only provider is scripted: no SDK, no endpoint, no key.
 async function scriptedProject(steps) {
@@ -105,7 +106,9 @@ test("a refused step fails the run instead of reporting success over a denial", 
 test("a scripted provider refuses a step it cannot perform, at configuration time", () => {
   assert.throws(
     () => createScriptedProvider({ workingDirectory: "/tmp", steps: [{ tool: "rm_rf" }] }),
-    /step 0 has tool 'rm_rf'\. Available: read_file, list_files, write_file, run_command\./,
+    // The list is the workspace's, not a copy: it was a copy, and it stopped
+    // being true the moment a tool was added.
+    new RegExp(`step 0 has tool 'rm_rf'\\. Available: ${WORKSPACE_TOOL_DEFINITIONS.map((one) => one.name).join(", ")}\\.`),
   );
   assert.throws(
     () => createScriptedProvider({ workingDirectory: "/tmp", steps: ["write NOTES.md"] }),

@@ -62,6 +62,8 @@ export const CLI_OPTIONS = Object.freeze({
   open: { type: "boolean", default: false },
   "no-open": { type: "boolean", default: false },
   events: { type: "string" },
+  cases: { type: "string" },
+  json: { type: "boolean", default: false },
   "rotate-token": { type: "boolean", default: false },
   host: { type: "string" },
   port: { type: "string" },
@@ -141,6 +143,7 @@ Usage:
   etnpilot telemetry summary [workflow-run-id] [--root directory]
   etnpilot doctor [--root directory]
   etnpilot check [name...] [--root directory]
+  etnpilot eval [name...] [--provider name] [--cases directory] [--json]
 
 Exit codes:
   0  the command succeeded
@@ -615,6 +618,37 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"));
     const path = resolve(root, config.observability?.file ?? ".etnpilot/state/telemetry.jsonl");
     console.log(JSON.stringify(await summarizeTelemetryFile(path, { workflowRunId: rest[0] }), null, 2));
+  } else if (command === "eval") {
+    // Whether a run does the job, rather than whether the code runs. Against
+    // the scripted provider this is free and deterministic and measures the
+    // harness; against a real one it costs money and measures the agent.
+    const { listEvalCases, runEvalCase, formatEvalTable, summarizeEvals } = await import("../runtime/evals.js");
+    const { mkdtemp } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const directory = resolve(values.root, values.cases ?? "test/evals");
+    const all = await listEvalCases(directory);
+    if (all.length === 0) throw new Error(`No eval cases in ${directory}.`);
+    const names = [subcommand, ...rest].filter(Boolean);
+    const unknown = names.filter((name) => !all.some((one) => one.id === name));
+    if (unknown.length > 0) {
+      throw new Error(`Unknown eval${unknown.length === 1 ? "" : "s"}: ${unknown.join(", ")}.`
+        + ` Known: ${all.map((one) => one.id).join(", ")}.`);
+    }
+    const wanted = names.length > 0 ? all.filter((one) => names.includes(one.id)) : all;
+    const provider = values.provider ?? "scripted";
+    if (provider !== "scripted") {
+      console.log(`Running ${wanted.length} case(s) against '${provider}'. This spends real tokens.`);
+    }
+    const results = [];
+    for (const one of wanted) {
+      results.push(await runEvalCase(one, { root: await mkdtemp(join(tmpdir(), `etnpilot-eval-${one.id}-`)), provider }));
+    }
+    if (values.json) {
+      console.log(JSON.stringify({ ...summarizeEvals(results), results }, null, 2));
+    } else {
+      console.log(formatEvalTable(results));
+    }
+    return results.every((result) => result.ok) ? 0 : 1;
   } else if (command === "check") {
     // The same registry the TUI and the page list, so 'what can this project
     // check about itself' has one answer, wherever it is asked.
