@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { tail } from "../checks/runner.js";
 import { unifiedDiff } from "./text-diff.js";
+import { git } from "../git/command.js";
 import { readdir, readFile, mkdir, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
@@ -31,6 +32,24 @@ export const WORKSPACE_TOOL_DEFINITIONS = Object.freeze([
     parameters: {
       type: "object",
       properties: { path: { type: "string", description: "Directory relative to the workspace root." } },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "search_files",
+    description:
+      "Find files by name or lines by content, across the files git tracks in the workspace."
+      + " Give 'pattern' as a regular expression to search inside files, or 'glob' to match paths"
+      + " (for example 'src/**/*.js'), or both to search inside the matching paths."
+      + " Far cheaper than listing directories and reading files one by one.",
+    parameters: {
+      type: "object",
+      properties: {
+        pattern: { type: "string", description: "Regular expression matched against each line." },
+        glob: { type: "string", description: "Path pattern, for example 'src/**/*.js' or '*.md'." },
+        ignoreCase: { type: "boolean", description: "Match the pattern without regard to case." },
+        maxResults: { type: "integer", description: "Stop after this many matches (default 100)." },
+      },
       additionalProperties: false,
     },
   },
@@ -99,6 +118,7 @@ export function createWorkspaceTools({ workingDirectory, limits = {}, signal, sa
       switch (name) {
         case "read_file": return readWorkspaceFile(root, bounds, args, context);
         case "list_files": return listWorkspaceFiles(root, bounds, args, context);
+        case "search_files": return searchWorkspaceFiles(root, bounds, args, context, signal);
         case "write_file": return writeWorkspaceFile(root, bounds, args, context);
         case "edit_file": return editWorkspaceFile(root, bounds, args, context);
         case "run_command": return runWorkspaceCommand(root, bounds, args, context, signal, sandbox);
@@ -148,6 +168,122 @@ async function listWorkspaceFiles(root, bounds, args, context) {
   } catch (error) {
     return { ok: false, error: describe(error) };
   }
+}
+
+// Finding something in a repository, without reading all of it. Without this
+// the only way to answer 'where is this called' was to list directories and
+// read every file — impossible on a real project, and ruinous on a metered
+// provider.
+//
+// It searches what git tracks, which is the same set 'scan secrets' uses: it
+// excludes node_modules and build output without a list of exclusions to keep
+// up to date, and it means an untracked file cannot be reached this way.
+async function searchWorkspaceFiles(root, bounds, args, context, signal) {
+  const hasPattern = typeof args.pattern === "string" && args.pattern !== "";
+  const hasGlob = typeof args.glob === "string" && args.glob !== "";
+  if (!hasPattern && !hasGlob) {
+    return { ok: false, error: "Give 'pattern' to search inside files, 'glob' to match paths, or both." };
+  }
+  let matcher;
+  if (hasPattern) {
+    try {
+      matcher = new RegExp(args.pattern, args.ignoreCase === true ? "i" : "");
+    } catch (error) {
+      // The model's own mistake, told plainly so it can fix it.
+      return { ok: false, error: `'pattern' is not a valid regular expression: ${error.message}` };
+    }
+  }
+  const limit = Number.isInteger(args.maxResults) && args.maxResults > 0
+    ? Math.min(args.maxResults, bounds.maxEntries)
+    : 100;
+  const decision = await context.approve({
+    kind: "read",
+    toolName: "search_files",
+    toolArguments: { ...(hasPattern ? { pattern: args.pattern } : {}), ...(hasGlob ? { glob: args.glob } : {}) },
+  });
+  if (decision.kind !== "approve-once") return denied(decision);
+
+  let paths;
+  try {
+    const { stdout } = await git(["ls-files", "-z"], { cwd: root, signal });
+    paths = stdout.split("\0").filter(Boolean);
+  } catch (error) {
+    if (/not a git repository/i.test(error.message)) {
+      return { ok: false, error: "This workspace is not a git checkout, so there are no tracked files to search." };
+    }
+    return { ok: false, error: describe(error) };
+  }
+  if (hasGlob) {
+    const glob = globToRegExp(args.glob);
+    paths = paths.filter((path) => glob.test(path));
+  }
+  // A glob on its own is a question about names: answer it without opening
+  // anything.
+  if (!hasPattern) {
+    return {
+      ok: true,
+      files: paths.slice(0, limit),
+      total: paths.length,
+      truncated: paths.length > limit,
+    };
+  }
+
+  const matches = [];
+  let searched = 0;
+  let truncated = false;
+  for (const relativePath of paths) {
+    signal?.throwIfAborted();
+    if (matches.length >= limit) {
+      truncated = true;
+      break;
+    }
+    const absolute = resolve(root, relativePath);
+    const details = await stat(absolute).catch(() => undefined);
+    if (!details?.isFile() || details.size > bounds.maxFileBytes) continue;
+    const content = await readFile(absolute, "utf8").catch(() => undefined);
+    if (content === undefined || content.includes("\0")) continue;
+    searched += 1;
+    for (const [index, line] of content.split("\n").entries()) {
+      if (matches.length >= limit) {
+        truncated = true;
+        break;
+      }
+      if (!matcher.test(line)) continue;
+      matches.push({
+        path: relativePath,
+        line: index + 1,
+        // Bounded: a minified file has lines nobody wants in a context window.
+        text: line.length > 200 ? `${line.slice(0, 200)}…` : line,
+      });
+    }
+  }
+  return { ok: true, matches, files: searched, truncated };
+}
+
+// A glob, translated rather than shelled out to: '**' crosses directories,
+// '*' does not, '?' is one character. Anything else is matched literally.
+function globToRegExp(pattern) {
+  let source = "";
+  for (let index = 0; index < pattern.length; index += 1) {
+    const character = pattern[index];
+    if (character === "*") {
+      if (pattern[index + 1] === "*") {
+        // '**/' also matches no directory at all, so 'src/**/*.js' finds
+        // 'src/a.js' as well as 'src/deep/a.js'.
+        source += pattern[index + 2] === "/" ? "(?:.*/)?" : ".*";
+        index += pattern[index + 2] === "/" ? 2 : 1;
+      } else {
+        source += "[^/]*";
+      }
+      continue;
+    }
+    if (character === "?") {
+      source += "[^/]";
+      continue;
+    }
+    source += character.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+  }
+  return new RegExp(`^${source}$`);
 }
 
 async function writeWorkspaceFile(root, bounds, args, context) {
