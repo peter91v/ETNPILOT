@@ -101,14 +101,36 @@ export const WORKSPACE_TOOL_DEFINITIONS = Object.freeze([
   },
 ]);
 
-export function createWorkspaceTools({ workingDirectory, limits = {}, signal, sandbox } = {}) {
+// Which tools this agent may use. 'undefined' means all of them, which is what
+// every agent had before: the tools hung on the provider, so a reviewer given
+// a tool-capable provider could write the code it was reviewing.
+//
+// Enforced twice on purpose. The filtered list is what the model is offered,
+// and 'invoke' refuses anything outside it — a model can name a tool nobody
+// showed it, and an offer is not a boundary.
+function allowedDefinitions(allowed) {
+  if (allowed === undefined) return WORKSPACE_TOOL_DEFINITIONS;
+  const wanted = new Set(allowed);
+  return WORKSPACE_TOOL_DEFINITIONS.filter((definition) => wanted.has(definition.name));
+}
+
+export function createWorkspaceTools({ workingDirectory, limits = {}, signal, sandbox, allowed } = {}) {
   if (!workingDirectory) throw new TypeError("Workspace tools require a workingDirectory.");
   const root = resolve(workingDirectory);
   const bounds = { ...DEFAULT_LIMITS, ...limits };
+  const definitions = allowedDefinitions(allowed);
+  const permitted = new Set(definitions.map((definition) => definition.name));
 
   return {
-    definitions: WORKSPACE_TOOL_DEFINITIONS,
+    definitions,
     async invoke(name, rawArguments, context) {
+      if (!permitted.has(name)) {
+        // Named as a refusal rather than as 'unknown tool': the tool exists,
+        // this agent may not use it, and the receipt should say which it was.
+        return WORKSPACE_TOOL_DEFINITIONS.some((definition) => definition.name === name)
+          ? { ok: false, error: `Agent '${context?.agent?.name ?? "this agent"}' may not use '${name}'.`, refused: "not-allowed" }
+          : { ok: false, error: `Unknown tool '${name}'.` };
+      }
       const parsed = parseArguments(rawArguments);
       // Arguments that could not be read used to become an empty object, so
       // the model was told 'content must be a string' when the real answer

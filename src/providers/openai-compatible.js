@@ -56,6 +56,10 @@ export function createOpenAICompatibleProvider({
           limits: toolLimits,
           signal: context.signal,
           sandbox,
+          // What this agent is allowed to use, from its manifest. The tools
+          // used to hang on the provider alone, so every agent sharing one
+          // got all of them.
+          allowed: context.agent.tools,
         })
         : undefined;
       const messages = [

@@ -3,3 +3,5 @@ promptRef: orchestrator
 skills: [evidence, codegraph]
 requires: [chat]
 subagents: [builder, reviewer]
+# It plans and delegates. A planner that writes is a planner that skipped the plan.
+tools: [read_file, list_files, search_files]

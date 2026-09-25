@@ -1,9 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { EventBus } from "./events.js";
 import { Registry } from "./registry.js";
+import { WORKSPACE_TOOL_DEFINITIONS } from "../providers/workspace-tools.js";
 import { telemetryProviderAttributes } from "../observability/telemetry.js";
 
 const DEFAULT_MAX_SUBAGENT_DEPTH = 4;
+
+const WORKSPACE_TOOL_NAMES = new Set(WORKSPACE_TOOL_DEFINITIONS.map((definition) => definition.name));
 
 export class Harness {
   constructor({
@@ -89,6 +92,20 @@ export class Harness {
         `An agent requires name, prompt, and a provider: ${agent?.name ? `'${agent.name}'` : "this manifest"}`
         + " names none, and the project sets no 'defaultProvider' to fall back on.",
       );
+    }
+    if (agent.tools !== undefined) {
+      if (!Array.isArray(agent.tools) || agent.tools.some((name) => typeof name !== "string")) {
+        throw new TypeError(`Agent '${agent.name}': 'tools' must be a list of tool names.`);
+      }
+      // A misspelt name would otherwise read as 'this agent may use nothing',
+      // which looks like a model that refuses to work.
+      const unknown = agent.tools.filter((name) => !WORKSPACE_TOOL_NAMES.has(name));
+      if (unknown.length > 0) {
+        throw new TypeError(
+          `Agent '${agent.name}' lists tools that do not exist: ${unknown.join(", ")}.`
+          + ` Known tools: ${[...WORKSPACE_TOOL_NAMES].join(", ")}.`,
+        );
+      }
     }
     this.agents.register(agent.name, Object.freeze({ skills: [], subagents: [], requires: [], ...agent }));
     return agent;
