@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { createWorkspaceTools } from "../src/providers/workspace-tools.js";
 import { createOpenAICompatibleProvider } from "../src/providers/openai-compatible.js";
+import { WORKSPACE_TOOL_DEFINITIONS } from "../src/providers/workspace-tools.js";
 
 test("workspace tools stay inside the workspace and require approval", async () => {
   const root = await mkdtemp(join(tmpdir(), "etnpilot-tools-"));
@@ -104,7 +105,9 @@ test("the OpenAI-compatible provider runs an approved tool loop", async () => {
   assert.deepEqual(result.usage, { inputTokens: 22, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 });
   // Instructions and skills reach the model, and tool results are fed back.
   assert.match(bodies[0].messages[0].content, /Do the work\.\n\nFollow the checklist\.\n\nSkill text\./);
-  assert.equal(bodies[0].tools.length, 4);
+  // Every tool the workspace offers, rather than a number that goes stale
+  // the next time one is added — which is exactly what happened.
+  assert.equal(bodies[0].tools.length, WORKSPACE_TOOL_DEFINITIONS.length);
   assert.equal(bodies[1].messages.at(-1).role, "tool");
   assert.equal(JSON.parse(bodies[1].messages.at(-1).content).ok, true);
 });

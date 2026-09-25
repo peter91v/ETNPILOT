@@ -12,6 +12,7 @@ import { registerConfiguredProviders } from "../src/providers/register.js";
 import { ProviderError, ProviderRouter } from "../src/providers/router.js";
 import { createSecretResolver } from "../src/secrets/resolver.js";
 import { Harness } from "../src/core/harness.js";
+import { WORKSPACE_TOOL_DEFINITIONS } from "../src/providers/workspace-tools.js";
 
 const context = (overrides = {}) => ({
   agent: { name: "worker", prompt: "Do the work." },
@@ -102,7 +103,9 @@ test("the Anthropic provider runs an approved tool loop", async () => {
   assert.deepEqual(result.usage, { inputTokens: 22, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 });
   // The tools are declared in the API's own shape, and the result goes back as
   // a tool_result block the model can read.
-  assert.equal(bodies[0].tools.length, 4);
+  // Every tool the workspace offers, rather than a number that goes stale
+  // the next time one is added — which is exactly what happened.
+  assert.equal(bodies[0].tools.length, WORKSPACE_TOOL_DEFINITIONS.length);
   assert.equal(bodies[0].tools[0].input_schema.type, "object");
   const back = bodies[1].messages.at(-1);
   assert.equal(back.role, "user");

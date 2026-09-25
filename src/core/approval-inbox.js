@@ -194,8 +194,8 @@ export function createInboxApprovalHandler({
 // original request, so display limits can never change what was identified.
 export function summarizeApprovalRequest(request = {}, { redact = false, maxLength = 8192 } = {}) {
   const details = {};
-  const present = (value) => {
-    const sanitized = sanitizeForDisplay(redact ? redactSecrets(value) : value, { maxLength });
+  const present = (value, { allowNewlines = false } = {}) => {
+    const sanitized = sanitizeForDisplay(redact ? redactSecrets(value) : value, { maxLength, allowNewlines });
     if (sanitized.truncated) details.truncated = true;
     return sanitized.text;
   };
@@ -203,6 +203,12 @@ export function summarizeApprovalRequest(request = {}, { redact = false, maxLeng
   if (request.fullCommandText) details.command = present(request.fullCommandText);
   if (request.toolName) details.tool = present(request.toolName);
   if (request.toolArguments !== undefined) details.arguments = present(stringify(request.toolArguments));
+  // What the change actually is. A write used to be described by its size,
+  // which is not something a person can judge — see src/providers/text-diff.js.
+  // The one field that is several lines by nature: escaping its newlines
+  // turns a diff into one unreadable line, which is what a reviewer was
+  // given before. Everything else in it is still escaped.
+  if (request.diff) details.diff = present(request.diff, { allowNewlines: true });
   if (request.url) {
     details.url = present(request.url);
     details.origin = safeOrigin(request.url);
@@ -215,6 +221,9 @@ export function summarizeApprovalRequest(request = {}, { redact = false, maxLeng
     tool: request.toolName ?? null,
     arguments: request.toolArguments === undefined ? null : stringify(request.toolArguments),
     url: request.url ?? null,
+    // The diff is part of what is being approved, so two writes to the same
+    // path with different content are two different decisions.
+    diff: request.diff ?? null,
   })).digest("hex");
   return details;
 }

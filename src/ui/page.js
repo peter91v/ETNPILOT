@@ -1405,6 +1405,12 @@ function renderApprovals() {
     if (details.url) body.push(detailBlock("URL", details.url));
     if (details.tool) body.push(detailBlock("Tool", details.tool));
     if (details.arguments) body.push(detailBlock("Arguments", details.arguments));
+    // What the change is, not how big it is. Rendered with the same reader the
+    // worktree view uses, so a diff looks like a diff wherever it appears.
+    if (details.diff) {
+      body.push(el("p", { class: "muted", text: "Changes" }));
+      body.push(unifiedDiffView(details.diff));
+    }
     if (details.truncated) {
       body.push(el("p", { class: "muted", text: "Truncated for display; see 'etnpilot approval show " + approval.id + "'." }));
     }
@@ -1905,6 +1911,45 @@ function openDiff(name, change) {
 }
 
 // The lines themselves, with the number each one has on its own side.
+// A unified diff as it arrives in an approval: already text, so it is read by
+// its leading characters rather than by a second copy of the git parser. The
+// line numbers come from the '@@' header, walked forward, which is all this
+// shape needs — it is one hunk written by src/providers/text-diff.js.
+function unifiedDiffView(text) {
+  const rows = el("div", { class: "diff" });
+  let oldLine = 0;
+  let newLine = 0;
+  // Doubled on purpose: this file is one template literal, so an escape here
+  // is consumed when the page is rendered unless it is escaped twice.
+  for (const line of String(text).split("\\n")) {
+    // The '---' and '+++' headers name the file, which the panel says above.
+    if (line.startsWith("---") || line.startsWith("+++")) continue;
+    if (line.startsWith("@@")) {
+      const position = /^@@ -(\\d+)(?:,\\d+)? \\+(\\d+)/.exec(line);
+      if (position) {
+        oldLine = Number(position[1]);
+        newLine = Number(position[2]);
+      }
+      rows.append(el("div", { class: "diff-line hunk" }, [
+        el("span", { class: "diff-gutter", text: "" }),
+        el("span", { class: "diff-gutter", text: "" }),
+        el("span", { class: "diff-text", text: line }),
+      ]));
+      continue;
+    }
+    const kind = line.startsWith("+") ? "add" : line.startsWith("-") ? "remove" : "context";
+    const body = line.slice(1);
+    const left = kind === "add" ? "" : String(oldLine++);
+    const right = kind === "remove" ? "" : String(newLine++);
+    rows.append(el("div", { class: "diff-line " + kind }, [
+      el("span", { class: "diff-gutter", text: left }),
+      el("span", { class: "diff-gutter", text: right }),
+      el("span", { class: "diff-text", text: (kind === "add" ? "+" : kind === "remove" ? "−" : " ") + body }),
+    ]));
+  }
+  return el("div", { class: "scroll" }, [rows]);
+}
+
 function renderDiff() {
   const diff = worktreeDiff;
   const body = [];

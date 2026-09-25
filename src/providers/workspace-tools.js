@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { tail } from "../checks/runner.js";
+import { unifiedDiff } from "./text-diff.js";
 import { readdir, readFile, mkdir, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
@@ -47,6 +48,24 @@ export const WORKSPACE_TOOL_DEFINITIONS = Object.freeze([
     },
   },
   {
+    name: "edit_file",
+    description:
+      "Replace an exact piece of text in a workspace file, leaving everything else byte for byte."
+      + " Prefer this over write_file for changing an existing file. 'old_string' must appear"
+      + " exactly once unless replace_all is true. Requires human approval.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Path relative to the workspace root." },
+        old_string: { type: "string", description: "The exact text to replace, including indentation." },
+        new_string: { type: "string", description: "The text to put in its place." },
+        replace_all: { type: "boolean", description: "Replace every occurrence instead of requiring exactly one." },
+      },
+      required: ["path", "old_string", "new_string"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "run_command",
     description:
       "Run a command in the workspace without a shell. Provide argv as an array, for example"
@@ -81,6 +100,7 @@ export function createWorkspaceTools({ workingDirectory, limits = {}, signal, sa
         case "read_file": return readWorkspaceFile(root, bounds, args, context);
         case "list_files": return listWorkspaceFiles(root, bounds, args, context);
         case "write_file": return writeWorkspaceFile(root, bounds, args, context);
+        case "edit_file": return editWorkspaceFile(root, bounds, args, context);
         case "run_command": return runWorkspaceCommand(root, bounds, args, context, signal, sandbox);
         default: return { ok: false, error: `Unknown tool '${name}'.` };
       }
@@ -137,11 +157,15 @@ async function writeWorkspaceFile(root, bounds, args, context) {
   if (Buffer.byteLength(args.content) > bounds.maxFileBytes) {
     return { ok: false, error: `Content exceeds the ${bounds.maxFileBytes}-byte write limit.` };
   }
+  // What is there now, so the person deciding sees the change rather than its
+  // size. A file that does not exist yet reads as an addition.
+  const before = await readFile(path.absolute, "utf8").catch(() => undefined);
   const decision = await context.approve({
     kind: "write",
     fileName: path.relative,
     toolName: "write_file",
     toolArguments: { path: path.relative, bytes: Buffer.byteLength(args.content) },
+    diff: unifiedDiff(before, args.content, { path: path.relative }).text,
   });
   if (decision.kind !== "approve-once") return denied(decision);
   try {
@@ -151,6 +175,79 @@ async function writeWorkspaceFile(root, bounds, args, context) {
   } catch (error) {
     return { ok: false, error: describe(error) };
   }
+}
+
+// Replacing an exact piece of text, rather than the whole file. Rewriting 800
+// lines to change one costs the output tokens twice, makes the approval
+// unreadable, and is how a model quietly drops a comment it was not asked to
+// touch.
+async function editWorkspaceFile(root, bounds, args, context) {
+  const path = containedPath(root, args.path);
+  if (!path.ok) return path;
+  if (typeof args.old_string !== "string" || args.old_string === "") {
+    return { ok: false, error: "'old_string' must be a non-empty string." };
+  }
+  if (typeof args.new_string !== "string") return { ok: false, error: "'new_string' must be a string." };
+  if (args.old_string === args.new_string) {
+    return { ok: false, error: "'old_string' and 'new_string' are identical; nothing would change." };
+  }
+  const before = await readFile(path.absolute, "utf8").catch((error) => ({ error }));
+  if (typeof before !== "string") {
+    return { ok: false, error: describe(before.error) };
+  }
+  const occurrences = countOccurrences(before, args.old_string);
+  if (occurrences === 0) {
+    // The most common failure, and the one worth explaining: the model is
+    // usually one space or one newline out.
+    return {
+      ok: false,
+      error: `'old_string' does not appear in ${path.relative}. It must match the file exactly, including indentation.`,
+    };
+  }
+  if (occurrences > 1 && args.replace_all !== true) {
+    return {
+      ok: false,
+      error: `'old_string' appears ${occurrences} times in ${path.relative}.`
+        + " Include enough surrounding text to make it unique, or pass replace_all.",
+    };
+  }
+  const after = args.replace_all === true
+    ? before.split(args.old_string).join(args.new_string)
+    : before.replace(args.old_string, args.new_string);
+  if (Buffer.byteLength(after) > bounds.maxFileBytes) {
+    return { ok: false, error: `The result exceeds the ${bounds.maxFileBytes}-byte write limit.` };
+  }
+  const diff = unifiedDiff(before, after, { path: path.relative });
+  const decision = await context.approve({
+    kind: "write",
+    fileName: path.relative,
+    toolName: "edit_file",
+    toolArguments: { path: path.relative, replacements: args.replace_all === true ? occurrences : 1 },
+    diff: diff.text,
+  });
+  if (decision.kind !== "approve-once") return denied(decision);
+  try {
+    await writeFile(path.absolute, after, "utf8");
+    return {
+      ok: true,
+      path: path.relative,
+      replacements: args.replace_all === true ? occurrences : 1,
+      added: diff.added,
+      deleted: diff.deleted,
+    };
+  } catch (error) {
+    return { ok: false, error: describe(error) };
+  }
+}
+
+function countOccurrences(haystack, needle) {
+  let total = 0;
+  let at = haystack.indexOf(needle);
+  while (at !== -1) {
+    total += 1;
+    at = haystack.indexOf(needle, at + needle.length);
+  }
+  return total;
 }
 
 async function runWorkspaceCommand(root, bounds, args, context, signal, sandbox) {
