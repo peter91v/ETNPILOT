@@ -56,6 +56,7 @@ export function createAnthropicProvider({
           // used to hang on the provider alone, so every agent sharing one
           // got all of them.
           allowed: context.agent.tools,
+          fetchImpl,
         })
         : undefined;
       const messages = [{ role: "user", content: String(context.input) }];

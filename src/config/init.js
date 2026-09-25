@@ -289,7 +289,9 @@ subagents: []
 # rarely what you want: an agent that only has to read should not be able to
 # write, and the refusal is mechanical rather than a line in its prompt.
 # Known tools: read_file, list_files, search_files, write_file, edit_file,
-# run_command.
+# run_command, fetch_url. 'fetch_url' is left out below on purpose: it reads
+# text nobody here wrote, so add it to the agent that needs it rather than
+# to all of them, and see 'policy.operations' for which hosts it may reach.
 tools: [read_file, list_files, search_files, write_file, edit_file, run_command]
 `;
 

@@ -61,6 +61,7 @@ export function createOpenAICompatibleProvider({
           // used to hang on the provider alone, so every agent sharing one
           // got all of them.
           allowed: context.agent.tools,
+          fetchImpl,
         })
         : undefined;
       const envelope = createResultEnvelope(context.runId);
