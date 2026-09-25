@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -381,6 +381,104 @@ test("a known Anthropic price rides along with its model", async () => {
     assert.match(result.models[0].knownPrice.source, /anthropic\.com/);
   } finally {
     globalThis.fetch = originalFetch;
+    await review.close();
+  }
+});
+
+test("the page runs the same checks, and verifies the same receipts", async () => {
+  const root = await createProject();
+  const review = await createReviewServer({ root });
+  try {
+    const address = await review.listen({ port: 0 });
+    const base = `http://127.0.0.1:${address.port}`;
+    const call = (path, options = {}) => fetch(base + path, {
+      ...options,
+      headers: { "x-etnpilot-token": review.token, ...(options.body ? { "content-type": "application/json" } : {}) },
+    });
+
+    // The registry, not a second list kept for the page.
+    const { checks } = await (await call("/api/checks")).json();
+    assert.deepEqual(checks.map((check) => check.id), ["doctor", "policy", "content", "deps", "secrets", "telemetry"]);
+
+    const result = await (await call("/api/checks/run", { method: "POST", body: JSON.stringify({ id: "telemetry" }) })).json();
+    assert.equal(result.id, "telemetry");
+    assert.equal(result.ok, undefined, "nothing has run here, so there is no verdict to give");
+
+    const unknown = await call("/api/checks/run", { method: "POST", body: JSON.stringify({ id: "../../etc" }) });
+    assert.equal(unknown.status, 400);
+    assert.equal((await call("/api/checks/run", { method: "POST", body: JSON.stringify({}) })).status, 400);
+
+    // Verifying is its own route, because it rereads and rehashes the file.
+    const verified = await (await call("/api/verify/20260101000000-abcd1234.jsonl")).json();
+    assert.equal(verified.valid, true);
+    assert.equal(verified.signaturesChecked, false);
+    assert.match(verified.text, /The chain holds/);
+    assert.match(verified.text, /Signatures were not checked/);
+
+    // The same name check as reading one: a path from a surface never decides
+    // what is read from disk.
+    assert.equal((await call("/api/verify/" + encodeURIComponent("../../etc/passwd"))).status, 400);
+    assert.equal((await call("/api/verify/notes.txt")).status, 400);
+  } finally {
+    await review.close();
+  }
+});
+
+test("a directory with no project offers to create one, over the same page", async () => {
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-ui-first-"));
+  const review = await createReviewServer({ root });
+  try {
+    const address = await review.listen({ port: 0 });
+    const base = `http://127.0.0.1:${address.port}`;
+    const call = (path, options = {}) => fetch(base + path, {
+      ...options,
+      headers: { "x-etnpilot-token": review.token, ...(options.body ? { "content-type": "application/json" } : {}) },
+    });
+
+    // The setup page, not a stack trace about a file nobody has heard of.
+    const page = await (await fetch(address.url)).text();
+    assert.match(page, /No project here yet/);
+    assert.match(page, /minimal/);
+    // It is still behind the token, like everything else this server serves.
+    assert.equal((await fetch(`${base}/`)).status, 401);
+
+    // Every other route says which state it is in rather than failing on the
+    // missing file.
+    const before = await call("/api/state");
+    assert.equal(before.status, 409);
+    assert.equal((await before.json()).error, "no-project-here");
+
+    const created = await call("/api/project/create", { method: "POST", body: JSON.stringify({ template: "minimal" }) });
+    assert.equal(created.status, 201);
+    assert.equal((await created.json()).template, "minimal");
+
+    // And from then on it is an ordinary project, over the same server.
+    assert.equal((await call("/api/state")).status, 200);
+    assert.match(await (await fetch(address.url)).text(), /ETNPilot Review/);
+    assert.equal(review.state.config.codegraph.enabled, false);
+
+    // Creating one twice is not something this surface offers, and a template
+    // name from anywhere else never reaches the writer.
+    assert.equal((await call("/api/project/create", { method: "POST", body: JSON.stringify({ template: "minimal" }) })).status, 400);
+  } finally {
+    await review.close();
+  }
+});
+
+test("a template name that is not one of the rows is refused before anything is written", async () => {
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-ui-first-bad-"));
+  const review = await createReviewServer({ root });
+  try {
+    const address = await review.listen({ port: 0 });
+    const refused = await fetch(`http://127.0.0.1:${address.port}/api/project/create`, {
+      method: "POST",
+      headers: { "x-etnpilot-token": review.token, "content-type": "application/json" },
+      body: JSON.stringify({ template: "../../etc" }),
+    });
+    assert.equal(refused.status, 400);
+    assert.match((await refused.json()).error, /Unknown project template/);
+    await assert.rejects(access(join(root, ".etnpilot")), /ENOENT/);
+  } finally {
     await review.close();
   }
 });

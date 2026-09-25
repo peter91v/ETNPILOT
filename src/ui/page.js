@@ -17,332 +17,578 @@ export function renderReviewPage(token) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#0b0f13">
+<meta name="theme-color" content="#f5fbf8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0e1513" media="(prefers-color-scheme: dark)">
 <title>ETNPilot Review</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icon.svg">
+<meta name="mobile-web-app-capable" content="yes">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230b0f13'/%3E%3Cpath d='M16 18h32v8H25v8h20v8H25v4h23v8H16z' fill='%233ee6c1'/%3E%3C/svg%3E">
 <style>
+  /* Material Design 3, implemented rather than approximated -------------
+     Tokens first: a colour scheme built from tonal palettes, the type
+     scale, the shape scale, elevation, motion, and the state-layer
+     opacities. Every rule below reads these; nothing hard-codes a colour.
+
+     Two honest departures, because inventing a token silently is worse
+     than naming the gap:
+     - Material 3 has no 'warning' role. ETNPilot needs one — a run that is
+       still going, a setting that is stricter-only, a rehearsal that never
+       ran — so there is one extra pair, built to the same recipe as the
+       others and marked as not being Material's.
+     - The type scale uses the system sans, not Roboto: this page loads
+       nothing from a network, which is a security property of the review
+       surface and outranks the typeface. */
   :root {
     color-scheme: light dark;
-    --bg: #f6f7f9; --surface-0: #eef0f3; --surface-1: #ffffff; --surface-2: #f2f4f7; --surface-3: #e6e9ee;
-    --line: #dde1e7; --line-strong: #c6ccd5;
-    --text: #12171c; --text-soft: #3d474f; --muted: #6b757e;
-    --accent: #0f8f77; --accent-strong: #0b6f5c; --accent-dim: rgba(15, 143, 119, .10);
-    --amber: #9a6200; --amber-dim: rgba(154, 98, 0, .10);
-    --red: #b3261e; --red-dim: rgba(179, 38, 30, .08);
-    --blue: #2f5fd0;
-    --sidebar: 238px; --radius: 10px;
-    --shadow: 0 20px 60px rgba(15, 20, 26, .18);
-    --grid: rgba(15, 20, 26, .028);
+
+    /* Colour — light scheme */
+    --md-primary: #00695c; --md-on-primary: #ffffff;
+    --md-primary-container: #85f6e0; --md-on-primary-container: #002019;
+    --md-secondary: #4a635f; --md-on-secondary: #ffffff;
+    --md-secondary-container: #cce8e3; --md-on-secondary-container: #051f1c;
+    --md-tertiary: #3b5f9e; --md-on-tertiary: #ffffff;
+    --md-tertiary-container: #d7e3ff; --md-on-tertiary-container: #001b3d;
+    --md-error: #b3261e; --md-on-error: #ffffff;
+    --md-error-container: #f9dedc; --md-on-error-container: #410e0b;
+    --md-warning: #7a4f00; --md-on-warning: #ffffff;
+    --md-warning-container: #ffddb0; --md-on-warning-container: #271900;
+    --md-surface: #f5fbf8; --md-on-surface: #171d1b;
+    --md-on-surface-variant: #3f4946; --md-outline: #6f7977; --md-outline-variant: #bfc9c6;
+    --md-surface-container-lowest: #ffffff;
+    --md-surface-container-low: #eff5f2;
+    --md-surface-container: #e9efec;
+    --md-surface-container-high: #e3eae7;
+    --md-surface-container-highest: #dee4e1;
+    --md-inverse-surface: #2b3230; --md-inverse-on-surface: #eff5f2; --md-inverse-primary: #66d9c4;
+    --md-scrim: #000000;
+
+    /* Shape */
+    --md-shape-xs: 4px; --md-shape-sm: 8px; --md-shape-md: 12px;
+    --md-shape-lg: 16px; --md-shape-xl: 28px; --md-shape-full: 999px;
+
+    /* Elevation */
+    --md-elevation-1: 0 1px 2px rgba(0,0,0,.30), 0 1px 3px 1px rgba(0,0,0,.15);
+    --md-elevation-2: 0 1px 2px rgba(0,0,0,.30), 0 2px 6px 2px rgba(0,0,0,.15);
+    --md-elevation-3: 0 1px 3px rgba(0,0,0,.30), 0 4px 8px 3px rgba(0,0,0,.15);
+    --md-elevation-4: 0 2px 3px rgba(0,0,0,.30), 0 6px 10px 4px rgba(0,0,0,.15);
+    --md-elevation-5: 0 4px 4px rgba(0,0,0,.30), 0 8px 12px 6px rgba(0,0,0,.15);
+
+    /* Motion */
+    --md-ease-standard: cubic-bezier(.2, 0, 0, 1);
+    --md-ease-decelerate: cubic-bezier(.05, .7, .1, 1);
+    --md-ease-accelerate: cubic-bezier(.3, 0, .8, .15);
+    --md-duration-short: 200ms; --md-duration-medium: 300ms; --md-duration-long: 500ms;
+
+    /* State layers */
+    --md-state-hover: .08; --md-state-focus: .10; --md-state-press: .10;
+
+    --md-nav-drawer: 280px; --md-nav-rail: 80px;
     --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
     --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #090c0f; --surface-0: #0d1115; --surface-1: #12171c; --surface-2: #171e24; --surface-3: #1e272e;
-      --line: #263139; --line-strong: #34434c;
-      --text: #edf7f5; --text-soft: #aab8b6; --muted: #71807f;
-      --accent: #3ee6c1; --accent-strong: #19caa7; --accent-dim: rgba(62, 230, 193, .11);
-      --amber: #ffbf69; --amber-dim: rgba(255, 191, 105, .12);
-      --red: #ff6b78; --red-dim: rgba(255, 107, 120, .08);
-      --blue: #75a7ff;
-      --shadow: 0 20px 60px rgba(0, 0, 0, .38);
-      --grid: rgba(255, 255, 255, .018);
+      --md-primary: #66d9c4; --md-on-primary: #003730;
+      --md-primary-container: #005046; --md-on-primary-container: #85f6e0;
+      --md-secondary: #b0ccc7; --md-on-secondary: #1c3532;
+      --md-secondary-container: #324b48; --md-on-secondary-container: #cce8e3;
+      --md-tertiary: #abc7ff; --md-on-tertiary: #002f65;
+      --md-tertiary-container: #21457f; --md-on-tertiary-container: #d7e3ff;
+      --md-error: #ffb4ab; --md-on-error: #690005;
+      --md-error-container: #93000a; --md-on-error-container: #ffdad6;
+      --md-warning: #ffb95c; --md-on-warning: #422c00;
+      --md-warning-container: #5e4100; --md-on-warning-container: #ffddb0;
+      --md-surface: #0e1513; --md-on-surface: #dee4e1;
+      --md-on-surface-variant: #bfc9c6; --md-outline: #899390; --md-outline-variant: #3f4946;
+      --md-surface-container-lowest: #090f0e;
+      --md-surface-container-low: #171d1b;
+      --md-surface-container: #1b211f;
+      --md-surface-container-high: #262b2a;
+      --md-surface-container-highest: #313735;
+      --md-inverse-surface: #dee4e1; --md-inverse-on-surface: #2b3230; --md-inverse-primary: #00695c;
     }
   }
-  * { box-sizing: border-box; }
-  html { min-width: 320px; background: var(--bg); }
-  body {
-    margin: 0; min-height: 100vh; color: var(--text); font: 15px/1.45 var(--sans);
-    background: linear-gradient(var(--grid) 1px, transparent 1px),
-      linear-gradient(90deg, var(--grid) 1px, transparent 1px), var(--bg);
-    background-size: 40px 40px;
+
+  /* Type scale. Each role is one custom property applied with 'font:', so a
+     component names the role instead of repeating three numbers. */
+  :root {
+    --md-headline-small: 400 24px/32px var(--sans);
+    --md-title-large: 400 22px/28px var(--sans);
+    --md-title-medium: 500 16px/24px var(--sans);
+    --md-title-small: 500 14px/20px var(--sans);
+    --md-body-large: 400 16px/24px var(--sans);
+    --md-body-medium: 400 14px/20px var(--sans);
+    --md-body-small: 400 12px/16px var(--sans);
+    --md-label-large: 500 14px/20px var(--sans);
+    --md-label-medium: 500 12px/16px var(--sans);
+    --md-label-small: 500 11px/16px var(--sans);
   }
-  button, input, select, textarea { font: inherit; color: inherit; }
-  button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible {
-    outline: 2px solid var(--accent); outline-offset: 2px;
+
+  * { box-sizing: border-box; }
+  html { min-width: 320px; background: var(--md-surface); }
+  body {
+    margin: 0; min-height: 100vh; background: var(--md-surface);
+    color: var(--md-on-surface); font: var(--md-body-medium); letter-spacing: .25px;
+  }
+  button, input, select, textarea { font: inherit; color: inherit; letter-spacing: inherit; }
+  /* Material's focus indicator: a 3px ring in the primary colour, outside
+     the component's own shape, on every focusable thing. */
+  :is(button, input, select, a, [tabindex]):focus-visible {
+    outline: 3px solid var(--md-primary); outline-offset: 2px;
   }
   .sr-only {
     position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-    overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+    overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
   }
-  .shell { min-height: 100vh; display: grid; grid-template-columns: var(--sidebar) minmax(0, 1fr); }
-  /* Collapsed, the sidebar keeps every view reachable as a rail of icons
-     rather than disappearing: what is waiting for you stays countable. */
-  .shell.collapsed { --sidebar: 62px; }
+
+  /* The state layer is what makes a Material control feel like one: the
+     component's own colour, over its surface, at a fixed opacity per state.
+     It is a pseudo-element so it tints the whole shape without touching the
+     text on top of it. */
+  .state { position: relative; isolation: isolate; }
+  .state::after {
+    content: ""; position: absolute; inset: 0; border-radius: inherit;
+    background: currentColor; opacity: 0; pointer-events: none;
+    transition: opacity var(--md-duration-short) var(--md-ease-standard);
+  }
+  .state:hover::after { opacity: var(--md-state-hover); }
+  .state:focus-visible::after { opacity: var(--md-state-focus); }
+  .state:active::after { opacity: var(--md-state-press); }
+  .state:disabled::after { opacity: 0; }
+
+  /* Layout ------------------------------------------------------------- */
+  .shell { min-height: 100vh; display: grid; grid-template-columns: var(--md-nav-drawer) minmax(0, 1fr); }
+  .shell.collapsed { --md-nav-drawer: var(--md-nav-rail); }
   .shell.collapsed .brand span:not(.brand-mark),
   .shell.collapsed .nav-label,
-  .shell.collapsed .nav-item span:not(.count),
   .shell.collapsed .runtime-meta,
   .shell.collapsed #runtime-state { display: none; }
-  .shell.collapsed .sidebar { padding: 18px 10px; align-items: center; }
-  .shell.collapsed .brand { padding: 3px 0 18px; }
-  .shell.collapsed .nav-list { width: 100%; }
-  .shell.collapsed .nav-item { justify-content: center; padding: 0; position: relative; }
-  .shell.collapsed .nav-item .count {
-    position: absolute; top: 3px; right: 6px; margin: 0; font-size: 9px; line-height: 1;
+  /* Collapsed, the drawer becomes a navigation rail: 80dp, icon over label,
+     the active item marked by a pill behind the icon. Every view stays
+     reachable and what is waiting stays countable. */
+  .shell.collapsed .sidebar { padding: 12px 0; align-items: center; }
+  .shell.collapsed .brand { padding: 4px 0 12px; justify-content: center; }
+  .shell.collapsed .nav-list { width: 100%; gap: 8px; }
+  .shell.collapsed .nav-item {
+    flex-direction: column; gap: 4px; height: auto; padding: 0; border-radius: 0;
+    background: none; justify-content: center;
   }
-  .shell.collapsed .runtime-card { padding: 10px; display: grid; place-items: center; }
-  .shell.collapsed .runtime-line { gap: 0; }
+  .shell.collapsed .nav-item .nav-icon {
+    width: 56px; height: 32px; display: grid; place-items: center; border-radius: var(--md-shape-full);
+  }
+  .shell.collapsed .nav-item[aria-current="page"] .nav-icon { background: var(--md-secondary-container); }
+  .shell.collapsed .nav-item .nav-text { font: var(--md-label-medium); letter-spacing: .5px; }
+  .shell.collapsed .nav-item .count {
+    position: absolute; top: -2px; right: 6px; margin: 0; min-width: 16px; height: 16px; padding: 0 4px;
+    display: grid; place-items: center; border-radius: var(--md-shape-full);
+    background: var(--md-error); color: var(--md-on-error); font: var(--md-label-small);
+  }
+  .shell.collapsed .nav-item .nav-text { display: none; }
+  .shell.collapsed .nav-item .nav-text-short {
+    display: block; max-width: 100%; padding: 0 4px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font: var(--md-label-medium); letter-spacing: .5px; text-align: center;
+  }
+  .shell.collapsed .runtime-card { padding: 8px; display: grid; place-items: center; }
 
-  /* Sidebar ---------------------------------------------------------- */
+  /* Navigation drawer -------------------------------------------------- */
   .sidebar {
-    position: fixed; inset: 0 auto 0 0; z-index: 20; width: var(--sidebar); padding: 18px 14px;
-    display: flex; flex-direction: column; gap: 4px;
-    background: var(--surface-1); border-right: 1px solid var(--line); overflow-y: auto;
+    position: fixed; inset: 0 auto 0 0; z-index: 20; width: var(--md-nav-drawer); padding: 12px;
+    display: flex; flex-direction: column; gap: 4px; overflow-y: auto;
+    background: var(--md-surface-container-low); color: var(--md-on-surface-variant);
   }
   .scrim { display: none; }
-  .brand { display: flex; align-items: center; gap: 11px; padding: 3px 8px 18px; }
+  .brand { display: flex; align-items: center; gap: 12px; padding: 4px 16px 16px; }
   .brand-mark {
-    width: 34px; height: 34px; display: grid; place-items: center; border-radius: 8px;
-    background: var(--accent); color: var(--surface-0); font: 800 14px/1 var(--mono);
-    box-shadow: 0 0 0 4px var(--accent-dim);
+    width: 40px; height: 40px; display: grid; place-items: center; border-radius: var(--md-shape-full);
+    background: var(--md-primary-container); color: var(--md-on-primary-container); font: var(--md-title-medium);
   }
-  .brand-name { font-size: 15px; font-weight: 800; letter-spacing: .015em; }
-  .brand-sub { display: block; color: var(--muted); font: 10px/1.3 var(--mono); letter-spacing: .14em; text-transform: uppercase; }
-  .nav-label { padding: 12px 10px 6px; color: var(--muted); font: 11px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+  .brand-name { font: var(--md-title-medium); color: var(--md-on-surface); }
+  .brand-sub { display: block; font: var(--md-label-small); letter-spacing: .5px; text-transform: uppercase; }
+  .nav-label { padding: 16px 16px 8px; font: var(--md-title-small); letter-spacing: .1px; }
   .nav-list { display: grid; gap: 4px; }
+  /* Drawer item: 56dp tall, fully rounded, the active one carried by the
+     secondary container rather than by a border. */
   .nav-item {
-    min-height: 42px; width: 100%; padding: 0 11px; display: flex; align-items: center; gap: 11px;
-    color: var(--text-soft); background: transparent; border: 1px solid transparent; border-radius: 8px;
-    cursor: pointer; text-align: left;
+    height: 56px; width: 100%; padding: 0 16px 0 16px; display: flex; align-items: center; gap: 12px;
+    color: var(--md-on-surface-variant); background: transparent; border: 0;
+    border-radius: var(--md-shape-full); cursor: pointer; text-align: left;
+    font: var(--md-label-large); letter-spacing: .1px;
   }
-  .nav-item:hover { color: var(--text); background: var(--surface-2); }
-  .nav-item[aria-current="page"] { color: var(--text); background: var(--accent-dim); border-color: var(--accent-dim); }
-  .nav-item svg { width: 18px; height: 18px; flex: 0 0 auto; }
-  .nav-item[aria-current="page"] svg { color: var(--accent); }
-  .nav-item .count { margin-left: auto; color: var(--muted); font: 11px var(--mono); }
-  .nav-item .count.alert { color: var(--amber); }
-  .sidebar-footer { margin-top: auto; padding-top: 14px; }
-  .runtime-card { padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); }
-  .runtime-line { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; }
-  .runtime-meta { margin: 6px 0 0 16px; color: var(--muted); font: 11px/1.45 var(--mono); overflow-wrap: anywhere; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px var(--accent-dim); flex: 0 0 auto; }
-  .dot.paused { background: var(--amber); box-shadow: 0 0 0 4px var(--amber-dim); }
-  .dot.bad { background: var(--red); box-shadow: 0 0 0 4px var(--red-dim); }
+  .nav-item[aria-current="page"] { background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
+  .nav-item .nav-icon { position: relative; display: grid; place-items: center; flex: 0 0 auto; }
+  .nav-item svg { width: 24px; height: 24px; }
+  .nav-item .nav-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nav-item .nav-text-short { display: none; }
+  /* The same count twice: on the icon, where the rail and the bottom bar
+     need it, and at the end of the row, where the drawer does. One of the
+     two is on screen at a time. */
+  .nav-item .count { margin-left: auto; font: var(--md-label-large); letter-spacing: .1px; }
+  .nav-item .nav-icon .count { display: none; }
+  .shell.collapsed .nav-item > .count { display: none; }
+  .shell.collapsed .nav-item .nav-icon .count { display: grid; }
+  .nav-item .count.alert { color: var(--md-error); }
+  .sidebar-footer { margin-top: auto; padding-top: 12px; }
+  .runtime-card {
+    padding: 12px 16px; border-radius: var(--md-shape-md);
+    background: var(--md-surface-container-high); color: var(--md-on-surface-variant);
+  }
+  .runtime-line { display: flex; align-items: center; gap: 8px; font: var(--md-title-small); color: var(--md-on-surface); }
+  .runtime-meta { margin: 8px 0 0; font: var(--md-body-small); letter-spacing: .4px; overflow-wrap: anywhere; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--md-primary); flex: 0 0 auto; }
+  .dot.paused { background: var(--md-warning); }
+  .dot.bad { background: var(--md-error); }
 
-  /* Topbar and page head --------------------------------------------- */
+  /* Bottom navigation bar: what Material uses below 600dp, instead of
+     hiding every view behind a hamburger. Filled in from the same list as
+     the drawer, so the two cannot disagree about what exists. */
+  .nav-bar { display: none; }
+
+  /* Top app bar -------------------------------------------------------- */
   .main { grid-column: 2; min-width: 0; }
   .topbar {
-    min-height: 66px; position: sticky; top: 0; z-index: 12;
-    display: flex; align-items: center; gap: 12px; padding: 10px 20px;
-    background: var(--bg); border-bottom: 1px solid var(--line);
+    height: 64px; position: sticky; top: 0; z-index: 12;
+    display: flex; align-items: center; gap: 8px; padding: 8px 16px;
+    background: var(--md-surface); color: var(--md-on-surface);
   }
+  /* Material raises the app bar's container only once the page is scrolled
+     under it, which is also the only moment a person needs the boundary. */
+  .topbar.scrolled { background: var(--md-surface-container); box-shadow: var(--md-elevation-2); }
   .narrow-only { display: none; }
-  .topbar .menu-button { display: inline-flex; }
   .context { min-width: 0; }
-  .eyebrow { margin: 0 0 3px; color: var(--muted); font: 10px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
-  .context-title { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 750; }
-  .top-actions { margin-left: auto; display: flex; align-items: center; gap: 9px; }
+  .eyebrow { margin: 0; font: var(--md-label-small); letter-spacing: .5px; text-transform: uppercase; color: var(--md-on-surface-variant); }
+  .context-title { margin: 0; font: var(--md-title-large); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .top-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
   .kbd {
-    padding: 2px 6px; border: 1px solid var(--line-strong); border-radius: 5px;
-    background: var(--surface-0); color: var(--muted); font: 10px var(--mono);
+    padding: 2px 6px; border-radius: var(--md-shape-xs);
+    background: var(--md-surface-container-highest); color: var(--md-on-surface-variant);
+    font: var(--md-label-small); letter-spacing: .5px;
   }
   /* A grid child is 'min-width: auto' by default, so one wide table would
      stretch the whole page rather than scrolling inside its own box. Every
      grid that holds content needs this, not just the outermost one. */
-  .content { padding: 20px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .content { padding: 16px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .content > *, .view, .panel-body > * { min-width: 0; }
-  .page-head { display: flex; align-items: flex-start; gap: 14px; flex-wrap: wrap; }
-  .page-title { margin: 0; font-size: 19px; letter-spacing: -.01em; }
-  .page-description { margin: 4px 0 0; color: var(--muted); font-size: 13px; max-width: 70ch; }
+  .page-head { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+  .page-title { margin: 0; font: var(--md-headline-small); }
+  .page-description { margin: 4px 0 0; color: var(--md-on-surface-variant); font: var(--md-body-medium); letter-spacing: .25px; max-width: 70ch; }
   .page-actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
 
-  /* Cards, panels, pills --------------------------------------------- */
-  .summary-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-  .view { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  /* Cards -------------------------------------------------------------- */
+  .summary-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+  .view { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
   /* A display declaration overrides the hidden attribute, so the views that
      are not on screen have to be told again. */
   .view[hidden] { display: none; }
+  /* Filled card. */
   .summary-card {
-    min-height: 88px; padding: 14px 15px; position: relative; overflow: hidden;
-    background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius);
+    min-height: 96px; padding: 16px; position: relative; overflow: hidden;
+    background: var(--md-surface-container-highest); border-radius: var(--md-shape-md);
   }
-  .summary-card::after { content: ""; position: absolute; inset: auto 0 0; height: 2px; background: var(--card-accent, var(--line-strong)); }
-  .summary-label { color: var(--muted); font: 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
-  .summary-value { margin-top: 10px; font: 750 23px/1 var(--mono); letter-spacing: -.04em; }
-  .summary-value small { margin-left: 6px; color: var(--muted); font: 11px var(--mono); letter-spacing: 0; }
-  .summary-hint { margin-top: 8px; color: var(--muted); font: 11px/1.4 var(--mono); }
-  .panel { min-width: 0; background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius); }
-  .panel + .panel { margin-top: 12px; }
-  .panel.open { border-color: var(--accent); scroll-margin-top: 84px; }
-  .panel-head { min-height: 52px; padding: 10px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
-  .panel-title { margin: 0; font-size: 14px; letter-spacing: -.01em; }
-  .panel-meta { margin-left: auto; color: var(--muted); font: 11px var(--mono); }
-  .panel-body { padding: 16px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .summary-card::after {
+    content: ""; position: absolute; inset: auto 0 0; height: 4px;
+    background: var(--card-accent, var(--md-outline-variant));
+  }
+  .summary-label { color: var(--md-on-surface-variant); font: var(--md-label-medium); letter-spacing: .5px; text-transform: uppercase; }
+  .summary-value { margin-top: 12px; font: var(--md-headline-small); font-variant-numeric: tabular-nums; }
+  .summary-value small { margin-left: 6px; color: var(--md-on-surface-variant); font: var(--md-label-medium); }
+  .summary-hint { margin-top: 8px; color: var(--md-on-surface-variant); font: var(--md-body-small); letter-spacing: .4px; }
+  /* Outlined card. */
+  .panel {
+    min-width: 0; background: var(--md-surface); border: 1px solid var(--md-outline-variant);
+    border-radius: var(--md-shape-md);
+  }
+  .panel + .panel { margin-top: 16px; }
+  .panel.open { border-color: var(--md-primary); scroll-margin-top: 80px; }
+  .panel-head {
+    min-height: 56px; padding: 12px 16px; display: flex; align-items: center; gap: 12px;
+    border-bottom: 1px solid var(--md-outline-variant); flex-wrap: wrap;
+  }
+  .panel-title { margin: 0; font: var(--md-title-medium); letter-spacing: .15px; }
+  .panel-meta { margin-left: auto; color: var(--md-on-surface-variant); font: var(--md-body-small); letter-spacing: .4px; }
+  .panel-body { padding: 16px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .panel-body > .btn, .view > .btn { justify-self: start; }
-  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-  .agent-tree { display: grid; gap: 2px; }
-  .agent-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; min-width: 0; }
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .agent-tree { display: grid; gap: 4px; }
+  .agent-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; min-width: 0; }
   .agent-toggle { text-align: left; }
-  .agent-detail { display: grid; gap: 10px; padding-top: 4px; padding-bottom: 10px; border-left: 2px solid var(--line); margin-left: 6px; }
-  .agent-text { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px var(--mono); background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px; margin: 0; max-height: 420px; overflow: auto; }
+  .agent-detail {
+    display: grid; gap: 12px; padding: 4px 0 12px; margin-left: 8px;
+    border-left: 2px solid var(--md-outline-variant);
+  }
+  .agent-text {
+    white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 var(--mono); margin: 0; padding: 12px;
+    background: var(--md-surface-container-low); border-radius: var(--md-shape-sm);
+    max-height: 420px; overflow: auto;
+  }
   .grow { flex: 1 1 auto; min-width: 0; }
   .clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .wrap { overflow-wrap: anywhere; }
-  .muted { color: var(--muted); font-size: 13px; }
+  .muted { color: var(--md-on-surface-variant); font: var(--md-body-medium); letter-spacing: .25px; }
   .mono { font-family: var(--mono); }
-  .pill {
-    width: max-content; display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px;
-    border: 1px solid var(--line); border-radius: 999px; color: var(--text-soft);
-    background: var(--surface-2); font: 10px var(--mono); text-transform: uppercase; letter-spacing: .04em;
+  .ok { color: var(--md-primary); } .warn { color: var(--md-warning); } .bad { color: var(--md-error); }
+  .empty { color: var(--md-on-surface-variant); font: var(--md-body-medium); letter-spacing: .25px; }
+  .notice {
+    margin: 0; padding: 12px 16px; border-radius: var(--md-shape-sm);
+    background: var(--md-warning-container); color: var(--md-on-warning-container);
+    font: var(--md-body-medium); letter-spacing: .25px;
   }
-  .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
-  .pill.ok { color: var(--accent-strong); border-color: var(--accent-dim); background: var(--accent-dim); }
-  .pill.ok::before { background: var(--accent-strong); }
-  .pill.warn { color: var(--amber); border-color: var(--amber-dim); background: var(--amber-dim); }
-  .pill.warn::before { background: var(--amber); }
-  .pill.bad { color: var(--red); border-color: var(--red-dim); background: var(--red-dim); }
-  .pill.bad::before { background: var(--red); }
-  .ok { color: var(--accent-strong); } .warn { color: var(--amber); } .bad { color: var(--red); }
-  @media (prefers-color-scheme: dark) { .ok, .pill.ok { color: var(--accent); } }
-  .empty { color: var(--muted); font-size: 14px; }
-  .notice { border-left: 3px solid var(--amber); padding: 6px 0 6px 10px; margin: 0; font-size: 13px; }
-  .notice.bad { border-color: var(--red); }
+  .notice.bad { background: var(--md-error-container); color: var(--md-on-error-container); }
   pre {
-    background: var(--surface-0); border: 1px solid var(--line); border-radius: 8px; padding: 10px;
-    overflow-x: auto; font: 13px/1.5 var(--mono); margin: 0; white-space: pre-wrap; word-break: break-word;
+    margin: 0; padding: 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-word;
+    background: var(--md-surface-container-low); border-radius: var(--md-shape-sm); font: 13px/1.5 var(--mono);
   }
-  .pair { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 6px 12px; font-size: 13px; margin: 0; }
-  .pair dt { color: var(--muted); font: 11px var(--mono); text-transform: uppercase; letter-spacing: .06em; padding-top: 2px; }
-  .pair dd { margin: 0; word-break: break-word; }
+  .pair { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 8px 16px; margin: 0; }
+  .pair dt { color: var(--md-on-surface-variant); font: var(--md-label-medium); letter-spacing: .5px; text-transform: uppercase; padding-top: 2px; }
+  .pair dd { margin: 0; word-break: break-word; font: var(--md-body-medium); letter-spacing: .25px; }
 
-  /* Controls ---------------------------------------------------------- */
+  /* Chips — what the status pills are: 32dp, 8dp corners, a label and a
+     leading dot. */
+  .pill {
+    width: max-content; height: 32px; display: inline-flex; align-items: center; gap: 8px;
+    padding: 0 12px; border: 1px solid var(--md-outline); border-radius: var(--md-shape-sm);
+    color: var(--md-on-surface-variant); background: transparent;
+    font: var(--md-label-large); letter-spacing: .1px;
+  }
+  .pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+  .pill.ok { color: var(--md-on-primary-container); background: var(--md-primary-container); border-color: transparent; }
+  .pill.warn { color: var(--md-on-warning-container); background: var(--md-warning-container); border-color: transparent; }
+  .pill.bad { color: var(--md-on-error-container); background: var(--md-error-container); border-color: transparent; }
+
+  /* Buttons ------------------------------------------------------------ */
+  /* Outlined button is the default here; '.primary' is the filled one.
+     40dp tall, fully rounded, label-large, with the state layer above. */
   .btn {
-    min-height: 36px; padding: 0 13px; display: inline-flex; align-items: center; gap: 7px;
-    border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-1);
-    color: var(--text); cursor: pointer; font-size: 13px; font-weight: 650;
+    min-height: 40px; padding: 0 16px; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    border: 1px solid var(--md-outline); border-radius: var(--md-shape-full); background: transparent;
+    color: var(--md-primary); cursor: pointer; font: var(--md-label-large); letter-spacing: .1px;
+    transition: box-shadow var(--md-duration-short) var(--md-ease-standard);
   }
-  .btn:hover { border-color: var(--accent); }
-  .btn:disabled { opacity: .5; cursor: not-allowed; }
-  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--surface-0); }
-  .btn.primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
-  .btn.danger { color: var(--red); border-color: var(--red); }
-  .btn.small { min-height: 30px; padding: 0 10px; font-size: 12px; }
-  .btn.icon { width: 36px; padding: 0; justify-content: center; }
+  .btn:disabled { color: var(--md-on-surface); border-color: var(--md-on-surface); opacity: .38; cursor: not-allowed; }
+  .btn.primary { padding: 0 24px; border-color: transparent; background: var(--md-primary); color: var(--md-on-primary); }
+  .btn.primary:hover { box-shadow: var(--md-elevation-1); }
+  .btn.primary:disabled { background: var(--md-on-surface); color: var(--md-surface); border-color: transparent; }
+  /* Filled tonal: the middle weight, for an action that is expected but not
+     the page's one purpose. */
+  .btn.tonal { border-color: transparent; background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
+  .btn.danger { color: var(--md-error); border-color: var(--md-error); }
+  .btn.small { min-height: 32px; padding: 0 12px; font: var(--md-label-medium); letter-spacing: .5px; }
+  /* Icon button: a 40dp circle around a 24dp icon, its own state layer. */
+  .btn.icon { width: 40px; min-height: 40px; padding: 0; border-color: transparent; color: var(--md-on-surface-variant); }
+  .btn.icon svg { width: 24px; height: 24px; }
+  /* Text button. */
   .btn.link {
-    min-height: 0; padding: 0; border: 0; background: none; color: var(--accent-strong);
-    text-decoration: underline; font-weight: 650;
+    min-height: 32px; padding: 0 8px; border: 0; background: none; color: var(--md-primary);
+    font: var(--md-label-large); letter-spacing: .1px;
   }
-  @media (prefers-color-scheme: dark) { .btn.link { color: var(--accent); } }
-  /* In a column of values the caret says 'this opens'; underlining all of
-     them turns the table into a page of links. */
-  .btn.link.value { color: var(--text); text-decoration: none; }
-  .btn.link.value:hover, .btn.link.value:focus-visible { color: var(--accent); text-decoration: underline; }
-  input, select {
-    min-height: 36px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 8px;
-    background: var(--surface-0); color: var(--text); min-width: 0;
+  /* In a column of values the control carries the row rather than reading as
+     a link: same target size, no colour until it is pointed at. */
+  .btn.link.value { color: var(--md-on-surface); justify-content: flex-start; text-align: left; }
+  .btn.link.value:hover, .btn.link.value:focus-visible { color: var(--md-primary); }
+  /* Floating action button: on a phone the page's one purpose is not an item
+     in a crowded app bar. 56dp, 16dp corners, primary container, level 3. */
+  .fab {
+    display: none; position: fixed; z-index: 15; right: 16px; bottom: 96px;
+    width: 56px; height: 56px; align-items: center; justify-content: center;
+    border: 0; border-radius: var(--md-shape-lg);
+    background: var(--md-primary-container); color: var(--md-on-primary-container);
+    box-shadow: var(--md-elevation-3); cursor: pointer;
   }
-  input[type="checkbox"] { min-height: 0; width: 16px; height: 16px; }
-  /* In a table cell the control carries the row, so it stays compact and
-     never sets the column's width. */
-  select.inline { min-height: 30px; max-width: 220px; font-family: var(--mono); font-size: 12px; }
-  @media (pointer: coarse) { select.inline { min-height: 38px; } }
-  label.check { display: inline-flex; gap: 7px; align-items: center; color: var(--muted); font-size: 13px; }
-  .field { display: grid; gap: 6px; }
-  .field label { color: var(--text-soft); font-size: 12px; font-weight: 700; }
+  .fab svg { width: 24px; height: 24px; }
 
-  /* Tables ------------------------------------------------------------ */
+  /* Text fields — outlined, with the label sitting on the outline. Every
+     field on this page always shows its label, so the label is drawn in the
+     notch rather than animating into it. */
+  .field { position: relative; display: grid; gap: 0; padding-top: 8px; }
+  .field > label {
+    position: absolute; top: 0; left: 12px; z-index: 1; padding: 0 4px;
+    background: var(--md-surface); color: var(--md-on-surface-variant);
+    font: var(--md-body-small); letter-spacing: .4px;
+  }
+  .field:focus-within > label { color: var(--md-primary); }
+  input, select {
+    min-height: 56px; padding: 0 16px; width: 100%;
+    border: 1px solid var(--md-outline); border-radius: var(--md-shape-xs);
+    background: transparent; color: var(--md-on-surface); min-width: 0;
+    font: var(--md-body-large); letter-spacing: .5px;
+  }
+  input:focus, select:focus { border-color: var(--md-primary); border-width: 2px; padding: 0 15px; outline: 0; }
+  input::placeholder { color: var(--md-on-surface-variant); }
+  input[type="checkbox"] {
+    min-height: 0; width: 18px; height: 18px; padding: 0; accent-color: var(--md-primary);
+  }
+  /* In a table cell or a filter row the control carries the row, so it stays
+     compact and never sets the column's width. */
+  select.inline, input.inline {
+    min-height: 40px; width: auto; max-width: 260px; padding: 0 12px;
+    font: var(--md-body-medium); letter-spacing: .25px;
+  }
+  select.inline:focus, input.inline:focus { padding: 0 11px; }
+  label.check {
+    min-height: 40px; display: inline-flex; gap: 12px; align-items: center;
+    color: var(--md-on-surface-variant); font: var(--md-body-medium); letter-spacing: .25px;
+  }
+
+  /* Tables — Material's list, in rows: 48dp of height, a divider between,
+     no vertical rules. */
   .scroll { overflow-x: auto; max-width: 100%; }
   /* A diff reads as lines, each with the number it has on its own side. */
   .diff { min-width: max-content; font: 12px/1.6 var(--mono); }
   .diff-line { display: grid; grid-template-columns: 52px 52px 1fr; }
-  .diff-gutter { padding: 0 8px; text-align: right; color: var(--muted); user-select: none; }
-  .diff-text { padding: 0 10px; white-space: pre; }
-  .diff-line.add { background: color-mix(in srgb, var(--accent) 12%, transparent); }
-  .diff-line.add .diff-text { color: var(--accent-strong); }
-  .diff-line.remove { background: color-mix(in srgb, var(--red) 10%, transparent); }
-  .diff-line.remove .diff-text { color: var(--red); }
-  .diff-line.hunk { background: var(--surface-0); }
-  .diff-line.hunk .diff-text { color: var(--muted); }
-  @media (prefers-color-scheme: dark) { .diff-line.add .diff-text { color: var(--accent); } }
+  .diff-gutter { padding: 0 8px; text-align: right; color: var(--md-on-surface-variant); user-select: none; }
+  .diff-text { padding: 0 12px; white-space: pre; }
+  .diff-line.add { background: var(--md-primary-container); }
+  .diff-line.add .diff-text { color: var(--md-on-primary-container); }
+  .diff-line.remove { background: var(--md-error-container); }
+  .diff-line.remove .diff-text { color: var(--md-on-error-container); }
+  .diff-line.hunk { background: var(--md-surface-container); }
+  .diff-line.hunk .diff-text { color: var(--md-on-surface-variant); }
   table { width: 100%; border-collapse: collapse; }
   th {
-    padding: 10px 12px; color: var(--muted); background: var(--surface-0); border-bottom: 1px solid var(--line);
-    text-align: left; font: 10px var(--mono); letter-spacing: .08em; text-transform: uppercase; white-space: nowrap;
+    height: 48px; padding: 0 16px; color: var(--md-on-surface-variant);
+    border-bottom: 1px solid var(--md-outline-variant); text-align: left;
+    font: var(--md-title-small); letter-spacing: .1px; white-space: nowrap;
   }
-  td { padding: 11px 12px; border-bottom: 1px solid var(--line); color: var(--text-soft); font-size: 13px; vertical-align: middle; }
+  td {
+    height: 52px; padding: 8px 16px; border-bottom: 1px solid var(--md-outline-variant);
+    color: var(--md-on-surface); font: var(--md-body-medium); letter-spacing: .25px; vertical-align: middle;
+  }
   tbody tr:last-child td { border-bottom: 0; }
-  tbody tr.selected { background: var(--accent-dim); }
-  td.mono { font-family: var(--mono); font-size: 12px; }
+  tbody tr.selected { background: var(--md-secondary-container); }
+  tbody tr.selected td { color: var(--md-on-secondary-container); }
+  td.mono { font-family: var(--mono); font-size: 13px; }
   td.actions { white-space: nowrap; text-align: right; }
-  td.actions .btn + .btn { margin-left: 6px; }
+  td.actions .btn + .btn { margin-left: 8px; }
 
-  /* Modal, command palette, toasts ------------------------------------ */
+  /* Dialogs, command palette, snackbars -------------------------------- */
   .backdrop {
-    position: fixed; inset: 0; z-index: 50; display: none; place-items: center; padding: 20px;
-    background: rgba(2, 5, 7, .55);
+    position: fixed; inset: 0; z-index: 50; display: none; place-items: center; padding: 24px;
+    background: color-mix(in srgb, var(--md-scrim) 32%, transparent);
   }
   .backdrop.open { display: grid; }
+  /* Basic dialog: 28dp corners, level 3, 24dp of padding, its actions at the
+     bottom right. */
   .modal {
-    width: min(560px, 100%); overflow: hidden; background: var(--surface-1);
-    border: 1px solid var(--line-strong); border-radius: 12px; box-shadow: var(--shadow);
+    width: min(560px, 100%); overflow: hidden; border-radius: var(--md-shape-xl);
+    background: var(--md-surface-container-high); color: var(--md-on-surface);
+    box-shadow: var(--md-elevation-3);
   }
-  .modal-head { min-height: 56px; padding: 10px 17px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--line); }
-  .modal-title { margin: 0; font-size: 16px; }
-  .modal-body { padding: 17px; display: grid; gap: 14px; }
-  .modal-footer { padding: 13px 17px; display: flex; justify-content: flex-end; gap: 8px; background: var(--surface-0); border-top: 1px solid var(--line); }
-  .palette { width: min(620px, 100%); align-self: start; margin-top: min(14vh, 120px); }
-  .palette-search { padding: 12px; border-bottom: 1px solid var(--line); }
-  .palette-search input { width: 100%; }
-  .palette-list { padding: 7px; display: grid; gap: 3px; max-height: 50vh; overflow-y: auto; }
+  .modal-head { min-height: 56px; padding: 24px 24px 0; display: flex; align-items: center; gap: 12px; }
+  .modal-title { margin: 0; font: var(--md-headline-small); }
+  .modal-body { padding: 16px 24px 24px; display: grid; gap: 20px; }
+  .modal-footer { padding: 0 24px 24px; display: flex; justify-content: flex-end; gap: 8px; }
+  .modal .field > label { background: var(--md-surface-container-high); }
+  .palette { width: min(640px, 100%); align-self: start; margin-top: min(14vh, 112px); }
+  .palette-search { padding: 16px 16px 8px; }
+  .palette-list { padding: 8px; display: grid; gap: 4px; max-height: 50vh; overflow-y: auto; }
+  /* List item, 56dp, fully rounded when it is the one the keyboard is on. */
   .palette-option {
-    min-height: 42px; padding: 0 10px; display: flex; align-items: center; gap: 10px; width: 100%;
-    color: var(--text-soft); background: transparent; border: 0; border-radius: 7px; cursor: pointer; text-align: left;
+    min-height: 56px; padding: 0 16px; display: flex; align-items: center; gap: 16px; width: 100%;
+    color: var(--md-on-surface); background: transparent; border: 0; border-radius: var(--md-shape-full);
+    cursor: pointer; text-align: left; font: var(--md-body-large); letter-spacing: .5px;
   }
-  .palette-option:hover, .palette-option.active { color: var(--text); background: var(--surface-2); }
-  .palette-option .hint { margin-left: auto; color: var(--muted); font: 10px var(--mono); }
-  .toast-region { position: fixed; z-index: 80; right: 20px; bottom: 20px; display: grid; gap: 8px; max-width: min(420px, calc(100vw - 40px)); }
+  .palette-option.active { background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
+  .palette-option .hint { margin-left: auto; font: var(--md-label-medium); letter-spacing: .5px; color: var(--md-on-surface-variant); }
+  /* Snackbar: the inverse surface, 4dp corners, level 3, one line where it
+     fits. Material puts it at the bottom start on a wide screen and across
+     the bottom on a narrow one. */
+  /* Bottom start of the body region, not of the window: the drawer is fixed
+     over the left edge, and a snackbar printed across it covers the one line
+     that says whether this page is still polling. */
+  .toast-region {
+    position: fixed; z-index: 80; left: calc(var(--md-nav-drawer) + 16px); bottom: 16px;
+    display: grid; gap: 8px; max-width: min(560px, calc(100vw - var(--md-nav-drawer) - 32px));
+  }
   .toast {
-    padding: 11px 14px; background: var(--surface-1); border: 1px solid var(--line-strong);
-    border-left: 3px solid var(--accent); border-radius: 9px; box-shadow: var(--shadow); font-size: 13px;
+    min-height: 48px; padding: 14px 16px; display: flex; align-items: center;
+    border-radius: var(--md-shape-xs); background: var(--md-inverse-surface);
+    color: var(--md-inverse-on-surface); box-shadow: var(--md-elevation-3);
+    font: var(--md-body-medium); letter-spacing: .25px;
   }
-  .toast.warn { border-left-color: var(--amber); }
-  .toast.bad { border-left-color: var(--red); }
+  .toast.warn { color: var(--md-warning); }
+  .toast.bad { color: var(--md-error); }
 
-  /* Responsive --------------------------------------------------------- */
+  /* Window size classes ------------------------------------------------- */
   @media (max-width: 1080px) { .summary-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-  @media (max-width: 860px) {
+  /* Medium: the drawer becomes modal, over a scrim, as Material specifies. */
+  @media (max-width: 900px) {
     .shell { display: block; }
-    .sidebar { transform: translateX(-102%); transition: transform .22s ease; box-shadow: var(--shadow); }
-    .sidebar.open { transform: translateX(0); }
+    .sidebar {
+      width: min(320px, 90vw); border-radius: 0 var(--md-shape-lg) var(--md-shape-lg) 0;
+      background: var(--md-surface-container-low); box-shadow: var(--md-elevation-1);
+      transform: translateX(-102%); transition: transform var(--md-duration-medium) var(--md-ease-decelerate);
+    }
+    .sidebar.open { transform: translateX(0); box-shadow: var(--md-elevation-3); }
     .scrim {
       position: fixed; inset: 0; z-index: 19; display: block; visibility: hidden; border: 0; padding: 0;
-      background: rgba(2, 5, 7, .55); opacity: 0; transition: opacity .22s ease, visibility .22s ease;
+      background: color-mix(in srgb, var(--md-scrim) 32%, transparent); opacity: 0;
+      transition: opacity var(--md-duration-medium) var(--md-ease-standard), visibility var(--md-duration-medium);
     }
     .scrim.open { visibility: visible; opacity: 1; }
     .main { grid-column: auto; }
-    .topbar .menu-button { display: inline-flex; }
-    .content { padding: 16px; }
-    .pair { grid-template-columns: 1fr; gap: 2px; }
-    .pair dd { margin-bottom: 8px; }
+    /* The drawer is over the page here, not beside it. */
+    .toast-region { left: 16px; max-width: min(560px, calc(100vw - 32px)); }
+    .pair { grid-template-columns: 1fr; gap: 4px; }
+    .pair dd { margin-bottom: 12px; }
   }
-  @media (max-width: 560px) {
+  /* Compact: a bottom navigation bar and a FAB. The drawer is still there
+     for the runtime card and the view list, but nothing important is only
+     behind it. */
+  @media (max-width: 600px) {
     .summary-strip { grid-template-columns: 1fr; }
-    .topbar { padding: 8px 12px; gap: 8px; }
-    /* At this width the labels are what overflows, not the controls: the
-       search button becomes its icon and the primary action its verb. */
+    .topbar { padding: 8px 4px 8px 4px; gap: 4px; }
+    .context-title { font: var(--md-title-medium); }
     #open-palette span:not(.narrow-only), #open-palette .kbd { display: none; }
-    #open-palette { width: 40px; padding: 0; justify-content: center; }
+    #open-palette { width: 40px; min-height: 40px; padding: 0; border-color: transparent; color: var(--md-on-surface-variant); }
+    /* The primary action moves to the FAB, so the app bar keeps its title. */
+    #open-run { display: none; }
+    .fab { display: flex; }
     .narrow-only { display: inline; }
     .wide-only { display: none; }
-    .content { padding: 12px; }
-    .toast-region { left: 12px; right: 12px; bottom: 12px; max-width: none; }
-    .backdrop { padding: 10px; align-items: end; }
-    .modal { max-height: calc(100vh - 20px); overflow-y: auto; }
-    .palette { margin-top: 40px; }
+    .content { padding: 16px 16px 96px; }
+    .nav-bar {
+      position: fixed; inset: auto 0 0 0; z-index: 18; height: 80px; display: flex;
+      align-items: stretch; padding: 0 4px; overflow-x: auto;
+      background: var(--md-surface-container); box-shadow: var(--md-elevation-2);
+    }
+    .nav-bar-item {
+      flex: 1 0 auto; min-width: 64px; padding: 12px 0 16px; display: grid; gap: 4px;
+      justify-items: center; align-content: start; border: 0; background: transparent;
+      color: var(--md-on-surface-variant); cursor: pointer;
+      font: var(--md-label-medium); letter-spacing: .5px;
+    }
+    .nav-bar-item .nav-icon {
+      position: relative; width: 64px; height: 32px; display: grid; place-items: center;
+      border-radius: var(--md-shape-full);
+    }
+    .nav-bar-item svg { width: 24px; height: 24px; }
+    .nav-bar-item[aria-current="page"] { color: var(--md-on-secondary-container); }
+    .nav-bar-item[aria-current="page"] .nav-icon { background: var(--md-secondary-container); }
+    .nav-bar-item .count {
+      position: absolute; top: -2px; right: 8px; min-width: 16px; height: 16px; padding: 0 4px;
+      display: grid; place-items: center; border-radius: var(--md-shape-full);
+      background: var(--md-error); color: var(--md-on-error); font: var(--md-label-small);
+    }
+    .toast-region { left: 16px; right: 16px; bottom: 96px; max-width: none; }
+    .backdrop { padding: 12px; align-items: end; }
+    .modal { max-height: calc(100vh - 24px); overflow-y: auto; }
+    .palette { margin-top: 32px; }
   }
-  /* A finger is not a mouse pointer: on a touch screen every control is big
-     enough to hit without aiming, which is what makes this usable on a tablet
-     rather than merely readable. */
+  /* A finger is not a pointer: Material asks for 48dp of target, whatever
+     the control looks like. */
   @media (pointer: coarse) {
-    .btn, input, select { min-height: 42px; }
-    .btn.small { min-height: 38px; padding: 0 12px; }
-    .btn.link { min-height: 32px; padding: 4px 0; }
-    .nav-item, .palette-option { min-height: 48px; }
-    th, td { padding: 12px; }
-    input[type="checkbox"] { width: 20px; height: 20px; }
+    .btn { min-height: 48px; }
+    .btn.small { min-height: 40px; }
+    .btn.icon { width: 48px; min-height: 48px; }
+    .btn.link { min-height: 40px; }
+    select.inline, input.inline { min-height: 48px; }
+    th, td { height: 56px; }
+    input[type="checkbox"] { width: 22px; height: 22px; }
   }
-  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::after { transition-duration: 1ms !important; animation-duration: 1ms !important; }
+  }
 </style>
 </head>
 <body>
@@ -368,7 +614,7 @@ export function renderReviewPage(token) {
 
   <div class="main">
     <header class="topbar">
-      <button class="btn icon menu-button" id="menu" aria-label="Collapse the view list" aria-expanded="true">
+      <button class="btn icon state menu-button" id="menu" aria-label="Collapse the view list" aria-expanded="true">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
       </button>
       <div class="context">
@@ -376,12 +622,13 @@ export function renderReviewPage(token) {
         <h1 class="context-title" id="context-title">…</h1>
       </div>
       <div class="top-actions">
-        <button class="btn" id="open-palette" aria-label="Open the command palette">
+        <button class="btn state" id="open-palette" aria-label="Open the command palette">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
           <span>Commands</span>
           <span class="kbd">ctrl K</span>
         </button>
-        <button class="btn primary" id="open-run" aria-label="Start a run">
+        <button class="btn state" id="install" hidden>Install</button>
+        <button class="btn primary state" id="open-run" aria-label="Start a run">
           <span class="wide-only">Start a run</span><span class="narrow-only">Run</span>
         </button>
       </div>
@@ -402,6 +649,7 @@ export function renderReviewPage(token) {
       <section id="view-runs" class="view" hidden></section>
       <section id="view-worktrees" class="view" hidden></section>
       <section id="view-merges" class="view" hidden></section>
+      <section id="view-checks" class="view" hidden></section>
       <section id="view-settings" class="view" hidden></section>
     </main>
   </div>
@@ -411,7 +659,9 @@ export function renderReviewPage(token) {
   <div class="modal">
     <div class="modal-head">
       <h2 class="modal-title" id="run-modal-title">Start a run</h2>
-      <button class="btn icon" style="margin-left:auto" data-close="run-modal" aria-label="Close">✕</button>
+      <button class="btn icon state" style="margin-left:auto" data-close="run-modal" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
     </div>
     <form id="run-form">
       <div class="modal-body">
@@ -426,8 +676,8 @@ export function renderReviewPage(token) {
         <p class="muted" id="run-hint"></p>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn" data-close="run-modal">Cancel</button>
-        <button type="submit" class="btn primary" id="run-submit">Start</button>
+        <button type="button" class="btn link state" data-close="run-modal">Cancel</button>
+        <button type="submit" class="btn primary state" id="run-submit">Start</button>
       </div>
     </form>
   </div>
@@ -441,6 +691,11 @@ export function renderReviewPage(token) {
     <div class="palette-list" id="palette-list" role="listbox" aria-label="Commands"></div>
   </div>
 </div>
+
+<nav class="nav-bar" id="nav-bar" aria-label="Views"></nav>
+<button class="fab state" id="fab-run" aria-label="Start a run">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+</button>
 
 <div class="toast-region" id="toasts" role="status" aria-live="polite"></div>
 <script>
@@ -456,6 +711,15 @@ let worktreeDiff;
 let merges;
 let usage;
 let agents;
+// The checks this project can run on itself: the registry, what each one
+// found, and which are in flight. A result stays until that check is run
+// again, and the poll never starts one.
+let checks;
+const checkResults = new Map();
+const checksRunning = new Set();
+// Whether the open run's receipt verifies. Undefined means nobody has asked,
+// which is not the same as 'it is fine'.
+let verification;
 let openRun;
 // Which agent nodes are expanded, in the currently open run. Keyed by runId
 // so opening a different run — or the same one again — starts collapsed.
@@ -512,9 +776,19 @@ const VIEWS = [
   {
     id: "merges",
     label: "Merge requests",
+    // What the rail and the bottom bar use: 80dp of width printed
+    // 'Merge reque' over the edge of the rail.
+    short: "Merges",
     title: "Merge requests",
     description: "What a run published, and what else is queued for the same target — because what lands before ours is what breaks ours.",
     icon: "M7 3v12M7 21a3 3 0 100-6 3 3 0 000 6zM7 6a3 3 0 100-6 3 3 0 000 6zM17 21a3 3 0 100-6 3 3 0 000 6zM17 15V9a4 4 0 00-4-4h-2",
+  },
+  {
+    id: "checks",
+    label: "Checks",
+    title: "Checks",
+    description: "What this project can check about itself. Nothing here runs on its own: 'scan secrets' reads every tracked file, and doctor talks to a secret store.",
+    icon: "M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11",
   },
   {
     id: "settings",
@@ -560,7 +834,13 @@ function icon(path) {
 }
 
 function button(text, { class: className = "btn small", onClick, title, disabled = false } = {}) {
-  const node = el("button", { class: className, text, attrs: { type: "button", ...(title ? { title } : {}) } });
+  // 'state' on every one: the hover, focus and pressed layers are part of
+  // what a Material button is, not decoration to be applied case by case.
+  const node = el("button", {
+    class: className.includes("state") ? className : className + " state",
+    text,
+    attrs: { type: "button", ...(title ? { title } : {}) },
+  });
   node.disabled = disabled;
   if (onClick) node.addEventListener("click", onClick);
   return node;
@@ -684,27 +964,79 @@ async function act(call, message) {
 
 // ------------------------------------------------------------- navigation
 
+// The drawer and the bottom navigation bar are filled from one list, so the
+// two cannot disagree about which views exist. Material's active indicator is
+// a shape behind the icon, which is why the icon gets a box of its own.
 function renderNav() {
   const nav = $("nav");
+  const bar = $("nav-bar");
   nav.replaceChildren();
+  bar.replaceChildren();
   for (const entry of VIEWS) {
     const count = navCount(entry.id);
-    const node = el("button", {
-      class: "nav-item",
+    const badge = (extra) => (count === undefined
+      ? []
+      : [el("span", { class: count.alert ? "count alert" + extra : "count" + extra, text: String(count.value) })]);
+    const item = el("button", {
+      class: "nav-item state",
       attrs: {
         type: "button",
         title: entry.label,
         ...(entry.id === view ? { "aria-current": "page" } : {}),
       },
     }, [
-      icon(entry.icon),
-      el("span", { text: entry.label }),
-      ...(count === undefined ? [] : [el("span", { class: count.alert ? "count alert" : "count", text: String(count.value) })]),
+      el("span", { class: "nav-icon" }, [icon(entry.icon), ...badge("")]),
+      el("span", { class: "nav-text", text: entry.label }),
+      // The rail is 80dp wide and shows this one instead; the full label
+      // stays in the DOM for the drawer and for the accessible name.
+      el("span", { class: "nav-text-short", text: entry.short ?? entry.label }),
+      ...badge(""),
     ]);
-    node.addEventListener("click", () => show(entry.id));
-    nav.append(node);
+    item.addEventListener("click", () => show(entry.id));
+    nav.append(item);
+
+    if (!BAR_VIEWS.includes(entry.id)) continue;
+    const tab = el("button", {
+      class: "nav-bar-item state",
+      attrs: {
+        type: "button",
+        ...(entry.id === view ? { "aria-current": "page" } : {}),
+      },
+    }, [
+      el("span", { class: "nav-icon" }, [icon(entry.icon), ...badge("")]),
+      el("span", { class: "nav-text", text: entry.short ?? entry.label }),
+    ]);
+    tab.addEventListener("click", () => show(entry.id));
+    bar.append(tab);
   }
+  // Material's bottom bar holds three to five destinations. Seven of them at
+  // phone width printed 'Merge reques' over the next label — so the rest sit
+  // behind 'More', which opens the drawer and is itself marked as the current
+  // destination while one of them is open.
+  const rest = VIEWS.filter((entry) => !BAR_VIEWS.includes(entry.id));
+  const restCounts = rest.reduce((total, entry) => total + (navCount(entry.id)?.value ?? 0), 0);
+  const alert = rest.some((entry) => navCount(entry.id)?.alert);
+  const more = el("button", {
+    class: "nav-bar-item state",
+    attrs: {
+      type: "button",
+      "aria-label": "More views: " + rest.map((entry) => entry.label).join(", "),
+      ...(rest.some((entry) => entry.id === view) ? { "aria-current": "page" } : {}),
+    },
+  }, [
+    el("span", { class: "nav-icon" }, [
+      icon("M6 12h.01M12 12h.01M18 12h.01"),
+      ...(restCounts > 0 ? [el("span", { class: alert ? "count alert" : "count", text: String(restCounts) })] : []),
+    ]),
+    el("span", { class: "nav-text", text: "More" }),
+  ]);
+  more.addEventListener("click", openSidebar);
+  bar.append(more);
 }
+
+// The destinations that fit across the bottom of a phone. The rest stay one
+// tap away, in the drawer, and the drawer always lists every one of them.
+const BAR_VIEWS = ["overview", "approvals", "queue", "runs"];
 
 function navCount(id) {
   if (!state) return undefined;
@@ -817,7 +1149,102 @@ function render() {
   if (view === "runs") renderRuns();
   if (view === "worktrees") renderWorktrees();
   if (view === "merges") renderMerges();
+  if (view === "checks") renderChecks();
   if (view === "settings") renderSettings();
+}
+
+// The same registry the terminal interface lists, over the same read path.
+// Each row says which of four states it is in — never run, running, what it
+// found, or no verdict to give — because three of those look identical on a
+// surface that only knows 'ok'.
+function renderChecks() {
+  const host = $("view-checks");
+  host.replaceChildren();
+  if (checks === undefined) {
+    host.append(panel("Checks", { body: [el("p", { class: "empty", text: "Reading the list…" })] }));
+    void loadChecks();
+    return;
+  }
+  const ran = checks.filter((check) => checkResults.has(check.id)).length;
+  const failing = checks.filter((check) => checkResults.get(check.id)?.ok === false).length;
+  const meta = [
+    checks.length + " checks",
+    ran === 0 ? "none run yet" : ran + " run",
+    failing > 0 ? failing + " failing" : ran > 0 ? "none failing" : "nothing to report",
+  ].join(" · ");
+  const rows = table([
+    { label: "Check", value: (check) => check.title },
+    { label: "Result", value: (check) => checkPill(check) },
+    { label: "What it found", value: (check) => checkResults.get(check.id)?.summary ?? check.about },
+    { label: "Ran", value: (check) => (checkResults.has(check.id) ? when(checkResults.get(check.id).ranAt) : { text: "—" }) },
+    { label: "", value: (check) => button(checksRunning.has(check.id) ? "Running…" : "Run", {
+      class: "btn small",
+      disabled: checksRunning.has(check.id),
+      onClick: () => runChecks([check.id]),
+    }), actions: true },
+  ], checks, "No checks are registered.");
+  const head = el("div", { class: "row" }, [
+    button("Run them all", {
+      class: "btn tonal",
+      disabled: checksRunning.size > 0,
+      onClick: () => runChecks(checks.map((check) => check.id)),
+    }),
+    el("span", { class: "muted", text: "Each one reads the project as it is on disk now." }),
+  ]);
+  host.append(panel("Checks", { meta, body: [head, rows] }));
+  for (const check of checks) {
+    const result = checkResults.get(check.id);
+    if (!result) continue;
+    const body = [el("p", {
+      class: result.ok === false ? "notice bad" : result.ok === true ? "muted" : "notice",
+      text: result.summary,
+    })];
+    if ((result.findings ?? []).length === 0) {
+      body.push(el("p", { class: "empty", text: result.ok === true ? "Nothing to look at." : "It reported no individual findings." }));
+    } else {
+      body.push(table([
+        { label: "", value: (finding) => ({ text: finding.label ?? "", class: finding.tone === "bad" ? "bad" : finding.tone === "warn" ? "warn" : "" }) },
+        { label: "Finding", value: (finding) => finding.text },
+      ], result.findings, "None."));
+    }
+    host.append(panel(check.title, { meta: "ran " + when(result.ranAt).text, body }));
+  }
+}
+
+function checkPill(check) {
+  if (checksRunning.has(check.id)) return pill("running", "warn");
+  const result = checkResults.get(check.id);
+  if (!result) return pill("not run");
+  if (result.ok === true) return pill("ok", "ok");
+  if (result.ok === false) return pill("findings", "bad");
+  return pill("no verdict", "warn");
+}
+
+async function loadChecks() {
+  try {
+    checks = (await api("/api/checks")).checks;
+    render();
+  } catch (error) {
+    fail(error);
+  }
+}
+
+// One at a time and in order, repainting between them: a check walks the
+// working tree, and pretending it is instant would leave the page still.
+async function runChecks(ids) {
+  for (const id of ids) {
+    checksRunning.add(id);
+    render();
+    try {
+      checkResults.set(id, await api("/api/checks/run", { method: "POST", body: JSON.stringify({ id }) }));
+      clearError();
+    } catch (error) {
+      fail(error);
+    } finally {
+      checksRunning.delete(id);
+    }
+    render();
+  }
 }
 
 function renderRuntime() {
@@ -955,7 +1382,15 @@ function renderApprovals() {
   }
   for (const approval of list) {
     const details = approval.details ?? {};
-    const actor = el("input", { attrs: { placeholder: "your name", "aria-label": "reviewer" } });
+    const actor = el("input", {
+      class: "inline",
+      attrs: { placeholder: "your name", "aria-label": "reviewer", title: "Recorded in the receipt as you typed it: this page never checked who you are." },
+    });
+    // Remembered per device, because typing your name into a phone for every
+    // decision is how people stop typing it at all. It is still self-asserted;
+    // nothing here authenticates anybody.
+    actor.value = reviewerName();
+    actor.addEventListener("change", () => rememberReviewer(actor.value));
     const reason = el("input", { class: "grow", attrs: { placeholder: "reason (optional)", "aria-label": "reason" } });
     const decide = (decision) => act(
       () => api("/api/approvals/decide", {
@@ -1183,10 +1618,25 @@ function usagePanelBody(summary) {
   ]);
 }
 
+async function verifyOpenReceipt(file) {
+  verification = { file: undefined, pending: true };
+  render();
+  try {
+    verification = await api("/api/verify/" + encodeURIComponent(file));
+    clearError();
+  } catch (error) {
+    verification = undefined;
+    fail(error);
+  }
+  render();
+}
+
 function openReceipt(run) {
   return button(run.runId, { class: "btn link", onClick: async () => {
     try {
       openRun = { file: run.receiptFile, run, receipt: await api("/api/runs/" + encodeURIComponent(run.receiptFile)) };
+      // One run's verdict must never be left attached to another run's file.
+      verification = undefined;
       expandedAgents = new Set();
       clearError();
       render();
@@ -1304,7 +1754,27 @@ function renderRunDetail() {
       : el("p", { class: "warn", text: overrides.length + " changed locally: " + overrides.join(", ") }));
   }
   if (terminal.error) body.push(detailBlock("Error", terminal.error));
-  body.push(el("div", { class: "row" }, [button("Close", { onClick: () => { openRun = undefined; expandedAgents = new Set(); render(); renderPageActions(); } })]));
+  // Whether the receipt is what it claims is a different question from what
+  // it says, so it is asked for rather than assumed — and until it is asked,
+  // the panel offers the button instead of implying either answer.
+  body.push(el("p", { class: "muted", text: "Is this receipt what it claims?" }));
+  if (verification === undefined || verification.file !== receipt.file) {
+    body.push(el("div", { class: "row" }, [
+      button("Verify", {
+        class: "btn tonal",
+        disabled: verification !== undefined && verification.pending === true,
+        onClick: () => verifyOpenReceipt(receipt.file),
+      }),
+      el("span", { class: "muted", text: verification?.pending ? "Checking…" : "Rereads the file and rebuilds its hash chain." }),
+    ]));
+  } else {
+    body.push(el("div", { class: "row" }, [
+      pill(verification.valid ? "verified" : "does not verify", verification.tone),
+      ...(verification.encoding ? [el("span", { class: "muted", text: verification.encoding + " hashing" })] : []),
+    ]));
+    body.push(el("p", { class: verification.valid ? "muted" : "notice bad", text: verification.text }));
+  }
+  body.push(el("div", { class: "row" }, [button("Close", { onClick: () => { openRun = undefined; verification = undefined; expandedAgents = new Set(); render(); renderPageActions(); } })]));
   // What the panel says about the receipt has to be what the receipt is: the
   // header claimed 'sealed' over a note saying it never was.
   const meta = sealed ? "sealed receipt" : status === "running" ? "still running" : "receipt not sealed";
@@ -2062,7 +2532,7 @@ function renderPalette() {
   paletteIndex = Math.min(paletteIndex, commands.length - 1);
   commands.forEach((command, index) => {
     const node = el("button", {
-      class: index === paletteIndex ? "palette-option active" : "palette-option",
+      class: index === paletteIndex ? "palette-option state active" : "palette-option state",
       attrs: { type: "button", role: "option" },
     }, [el("span", { text: command.label }), el("span", { class: "hint", text: command.hint })]);
     node.addEventListener("click", () => {
@@ -2132,8 +2602,62 @@ async function refresh({ force = false } = {}) {
 
 let usageSignature;
 
+// The app: the page is installed as it stands, which is the only way there is
+// one surface rather than two. The worker caches the shell and never the
+// evidence — see src/ui/app.js for why, and for the two other decisions this
+// took (loopback only, and no claim to know who you are).
+if ("serviceWorker" in navigator && location.protocol !== "file:") {
+  addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {
+      // An install that cannot be offered is not a failure worth a toast:
+      // everything on this page works without it.
+    });
+  });
+}
+
+let installPrompt;
+addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  installPrompt = event;
+  $("install").hidden = false;
+});
+$("install").addEventListener("click", async () => {
+  if (!installPrompt) return;
+  $("install").hidden = true;
+  const offered = installPrompt;
+  installPrompt = undefined;
+  await offered.prompt();
+});
+addEventListener("appinstalled", () => { $("install").hidden = true; });
+
+// The reviewer's name lives on the device, never on the server: it is what
+// they call themselves, and the receipt records it as exactly that.
+function reviewerName() {
+  try {
+    return localStorage.getItem("etnpilot.reviewer") ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function rememberReviewer(name) {
+  try {
+    localStorage.setItem("etnpilot.reviewer", name.trim());
+  } catch {
+    // A browser with storage switched off still decides approvals; it just
+    // asks for the name again.
+  }
+}
+
+// Material's 'on-scroll' app bar: raised only while something is behind it.
+const topbar = document.querySelector(".topbar");
+const markScrolled = () => topbar.classList.toggle("scrolled", window.scrollY > 4);
+addEventListener("scroll", markScrolled, { passive: true });
+markScrolled();
+
 $("menu").addEventListener("click", toggleSidebar);
 $("scrim").addEventListener("click", closeSidebar);
+$("fab-run").addEventListener("click", () => { openModal("run-modal"); void prepareRunModal(); });
 $("open-run").addEventListener("click", () => { openModal("run-modal"); void prepareRunModal(); });
 $("run-agent").addEventListener("change", describeRunChoice);
 $("run-form").addEventListener("submit", startRun);

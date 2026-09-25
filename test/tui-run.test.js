@@ -391,3 +391,86 @@ test("the agents in a run are a navigable tree, and 'a' then enter reads one's f
     state.close();
   }
 });
+
+test("'v' says whether the receipt on screen verifies, and a tampered one does not", async () => {
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-tui-verify-"));
+  const runs = join(root, ".etnpilot", "state", "runs");
+  await mkdir(runs, { recursive: true });
+  await writeFile(join(root, ".etnpilot", "etnpilot.yaml"), "version: 1\n");
+  const file = "20260924170000-verify1.jsonl";
+  const store = new JsonlReceiptStore(join(runs, file));
+  await store.append({ runId: "verify-1", agent: "orchestrator", status: "succeeded", approvals: [] });
+  await store.append({ runId: "verify-1", terminal: true, status: "succeeded", approvals: [] });
+
+  const state = await openProjectState({ root });
+  const app = createTuiApp({ state, output: fakeOutput(), input: new EventEmitter() });
+  try {
+    await app.refresh();
+    await app.handle("2");
+    await app.handle("\r");
+    // Until it is asked for, the panel offers the key rather than claiming
+    // either answer: 'not checked' and 'checked, and sound' are not the same.
+    let frame = stripAnsi(app.frame().join("\n"));
+    assert.match(frame, /press 'v' to check its hash chain/);
+    assert.equal(/verified/.test(frame), false);
+
+    await app.handle("v");
+    assert.equal(app.verification.valid, true);
+    frame = stripAnsi(app.frame().join("\n"));
+    assert.match(frame, /verified/);
+    assert.match(frame, /The chain holds: 2 entries/);
+    // No public key is configured here, so the signatures were not checked —
+    // and the line says that instead of letting 'verified' cover both.
+    assert.match(frame, /Signatures were not checked/);
+    assert.equal(app.verification.signaturesChecked, false);
+  } finally {
+    app.stop();
+    state.close();
+  }
+
+  // Change one byte of a sealed record and the same key says so, naming the
+  // line and what kind of change it was.
+  const lines = (await readFile(join(runs, file), "utf8")).split("\n").filter(Boolean);
+  const entry = JSON.parse(lines[0]);
+  entry.agent = "somebody-else";
+  lines[0] = JSON.stringify(entry);
+  await writeFile(join(runs, file), `${lines.join("\n")}\n`);
+
+  const tampered = await openProjectState({ root });
+  const second = createTuiApp({ state: tampered, output: fakeOutput(), input: new EventEmitter() });
+  try {
+    await second.refresh();
+    await second.handle("2");
+    await second.handle("\r");
+    await second.handle("v");
+    assert.equal(second.verification.valid, false);
+    assert.equal(second.verification.reason, "hash-mismatch");
+    const frame = stripAnsi(second.frame().join("\n"));
+    assert.match(frame, /DOES NOT VERIFY/);
+    assert.match(frame, /does not match its own hash at line 1/);
+    assert.match(frame, /changed after it was written/);
+  } finally {
+    second.stop();
+    tampered.close();
+  }
+});
+
+test("a receipt name from a surface cannot reach outside the runs directory", async () => {
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-verify-escape-"));
+  await mkdir(join(root, ".etnpilot", "state", "runs"), { recursive: true });
+  await writeFile(join(root, ".etnpilot", "etnpilot.yaml"), "version: 1\n");
+  const state = await openProjectState({ root });
+  try {
+    // The same guard reading applies, because it is the same class of input.
+    await assert.rejects(state.verifyReceipt("../../etc/passwd"), /not a receipt file in this project/);
+    await assert.rejects(state.verifyReceipt("notes.txt"), /not a receipt file in this project/);
+    // A name that is shaped right but is not there reads as unreadable, not
+    // as a receipt that failed to verify for some other reason.
+    const missing = await state.verifyReceipt("20260101000000-nope.jsonl");
+    assert.equal(missing.valid, false);
+    assert.equal(missing.reason, "file-read-failed");
+    assert.match(missing.text, /could not be read/);
+  } finally {
+    state.close();
+  }
+});

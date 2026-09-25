@@ -23,7 +23,12 @@ nie eingecheckt; eingecheckt ist nur die Default-Einstellung."*
 | `src/tui/render.js` | Reine Renderer: State + Viewport rein, Zeilen raus |
 | `src/tui/app.js` | Tastenrouting, kennt kein Layout |
 | `src/ui/server.js` | Loopback, Token, `/api/state`, `/api/approvals/decide`, `/api/queue/cancel` |
-| `src/ui/page.js` | `renderReviewPage(token)`, eine Seite ohne Build-Schritt |
+| `src/ui/page.js` | `renderReviewPage(token)`, eine Seite ohne Build-Schritt, Material Design 3 aus eigenen Tokens |
+| `src/ui/app.js` | Manifest, Icons und Service Worker — die App ist diese Seite, installiert |
+| `src/ui/setup-page.js` | Die Seite für ein Verzeichnis ohne Projekt |
+| `src/runtime/project-checks.js` | `listChecks()` / `runCheck(id)` — die Prüfungen, eine Registry für alle Oberflächen |
+| `src/runtime/first-run.js` | `describeProject()` / `createProject()` — gibt es hier ein Projekt, und was würde eines anlegen |
+| `src/runtime/diagnose.js` | `diagnose(root)` — ob ein Run hier starten könnte und gegen welchen Provider |
 
 Jede neue Oberflächenfunktion geht durch `project-state.js`. Kein zweiter
 Lesepfad, keine zweite Wahrheit.
@@ -34,27 +39,105 @@ Lesepfad, keine zweite Wahrheit.
 
 | Fähigkeit | CLI | TUI | Web | App |
 | --- | :-: | :-: | :-: | :-: |
-| Approvals listen und entscheiden | ✅ | ✅ | ✅ | — |
-| Approval im Volltext + auslösende Regel | ✅ | ✅ | ✅ | — |
-| Queue listen / abbrechen | ✅ | ✅ | ✅ | — |
-| Queue fortsetzen (`resume`) | ✅ | ✅ | ✅ | — |
-| Runs listen | ✗ | ✅ | ✅ | — |
-| Receipt eines Runs im Detail | teilw. | ✅ | ✅ | — |
-| Run starten | ✅ | ✅ | ✅ | — |
-| Settings listen / diff | ✅ | ✅ | ✅ | — |
-| Settings ändern (lokal/global) | ✅ | ✅ | ✅ | — |
-| `policy check` | ✅ | ✗ | ✗ | — |
-| `receipt verify`, `replay`, `attest` | ✅ | ✗ | ✗ | — |
-| `deps check`, `sbom`, `scan secrets` | ✅ | ✗ | ✗ | — |
-| `graph *`, `content lock/verify` | ✅ | ✗ | ✗ | — |
-| `doctor`, `telemetry summary` | ✅ | ✗ | ✗ | — |
-| `init` | ✅ | ✗ | ✗ | — |
-| Worktrees listen, mit ungespeicherter Arbeit | ✅ | ✅ | ✅ | — |
-| Worktree entfernen (nur wenn sauber) | ✅ | ✅ | ✅ | — |
-| Eigene Merge Requests listen | ✅ | ✅ | ✅ | — |
+| Approvals: list and decide | ✅ | ✅ | ✅ | ✅ |
+| Approval in full, with the rule that stopped it | ✅ | ✅ | ✅ | ✅ |
+| Queue: list, cancel, resume | ✅ | ✅ | ✅ | ✅ |
+| Runs: list | ✅ | ✅ | ✅ | ✅ |
+| A run's receipt in detail | ✅ | ✅ | ✅ | ✅ |
+| The agents that ran, each one readable in full | ✅ | ✅ | ✅ | ✅ |
+| Verify a receipt: hash chain and signatures | ✅ | ✅ | ✅ | ✅ |
+| Start a run | ✅ | ✅ | ✅ | ✅ |
+| Settings: list, diff, change locally or globally | ✅ | ✅ | ✅ | ✅ |
+| Worktrees: list, and remove only when clean | ✅ | ✅ | ✅ | ✅ |
+| What a worktree holds, and one file's diff | ✅ | ✅ | ✅ | ✅ |
+| The project's own merge requests | ✅ | ✅ | ✅ | ✅ |
+| The checks: doctor, policy, content, deps, secrets, telemetry | ✅ | ✅ | ✅ | ✅ |
+| A project where there is none yet | ✅ | ✅ | ✅ | ✅ |
+| The models a provider can reach, and their published prices | ✗ | ✗ | ✅ | ✅ |
+| An SBOM, an attestation, a replay | ✅ | ✗ | ✗ | ✗ |
+TAP version 13
+# Subtest: every capability the table claims is in the code
+ok 1 - every capability the table claims is in the code
+  ---
+  duration_ms: 6.057198
+  type: 'test'
+  ...
+# Subtest: a capability that is open says so, and says why
+ok 2 - a capability that is open says so, and says why
+  ---
+  duration_ms: 0.311122
+  type: 'test'
+  ...
+# Subtest: the table in docs/roadmap-ui.md is the one these rows produce
+not ok 3 - the table in docs/roadmap-ui.md is the one these rows produce
+  ---
+  duration_ms: 3.185708
+  type: 'test'
+  location: '/home/user/ETNPILOT/test/parity.test.js:157:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    docs/roadmap-ui.md is out of date. Replace its capability table with:
+    
+    | Fähigkeit | CLI | TUI | Web | App |
+    | --- | :-: | :-: | :-: | :-: |
+    | Approvals: list and decide | ✅ | ✅ | ✅ | ✅ |
+    | Approval in full, with the rule that stopped it | ✅ | ✅ | ✅ | ✅ |
+    | Queue: list, cancel, resume | ✅ | ✅ | ✅ | ✅ |
+    | Runs: list | ✅ | ✅ | ✅ | ✅ |
+    | A run's receipt in detail | ✅ | ✅ | ✅ | ✅ |
+    | The agents that ran, each one readable in full | ✅ | ✅ | ✅ | ✅ |
+    | Verify a receipt: hash chain and signatures | ✅ | ✅ | ✅ | ✅ |
+    | Start a run | ✅ | ✅ | ✅ | ✅ |
+    | Settings: list, diff, change locally or globally | ✅ | ✅ | ✅ | ✅ |
+    | Worktrees: list, and remove only when clean | ✅ | ✅ | ✅ | ✅ |
+    | What a worktree holds, and one file's diff | ✅ | ✅ | ✅ | ✅ |
+    | The project's own merge requests | ✅ | ✅ | ✅ | ✅ |
+    | The checks: doctor, policy, content, deps, secrets, telemetry | ✅ | ✅ | ✅ | ✅ |
+    | A project where there is none yet | ✅ | ✅ | ✅ | ✅ |
+    | The models a provider can reach, and their published prices | ✗ | ✗ | ✅ | ✅ |
+    | An SBOM, an attestation, a replay | ✅ | ✗ | ✗ | ✗ |
+    
+    
+    false !== true
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///home/user/ETNPILOT/test/parity.test.js:160:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: the app column is the web column, because the app is the page
+ok 4 - the app column is the web column, because the app is the page
+  ---
+  duration_ms: 0.28567
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 3
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 16.150046
 
-Die App existiert als Code **gar nicht** — nur als Artboards im Design-Canvas
-(`https://claude.ai/artifact/Rr65iXmq1fgRSZMKMwD1YH`).
+**Diese Tabelle prüft sich selbst.** Sie wird aus `test/parity.test.js`
+erzeugt, und jede Zeile nennt dort pro Oberfläche das Beleg-Stück im Code —
+den CLI-Befehl, die Ansicht oder Taste, die HTTP-Route. Der Test sucht sie und
+schlägt fehl, wenn eine Behauptung nicht stimmt oder wenn diese Tabelle von den
+Zeilen abweicht. Ein ✗ muss einen Grund haben, sonst schlägt er auch fehl.
+
+Die App-Spalte ist die Web-Spalte, weil die App die Seite *ist* — installiert
+(UI-3). Das ist eine Entscheidung, keine Lücke: eine zweite Implementierung
+jeder Ansicht wäre genau der zweite Lesepfad, den dieses Projekt vermeidet.
+
+Der Design-Canvas mit den Artboards liegt weiterhin unter
+`https://claude.ai/artifact/Rr65iXmq1fgRSZMKMwD1YH`.
 
 ---
 
@@ -111,19 +194,39 @@ Sprache bleibt vorerst Englisch wie im ganzen Repository.
 
 ---
 
-## UI-2 — TUI: die restlichen Befehle
+## UI-2 — TUI: die restlichen Befehle — erledigt
 
-Neue Ansicht `tools` (Taste `7`), Liste von Prüfungen, `enter` führt aus,
-Ergebnis im Panel. Alles bereits vorhandene Funktionen, nur ohne CLI.
+### UI-2.1 Prüfungen — erledigt
+- Ansicht `checks` (Taste `7`): `doctor`, die Policy über alle konfigurierten
+  Provider, `content verify`, `deps check`, `scan secrets`, `telemetry
+  summary`. `enter` führt die markierte aus, `A` alle der Reihe nach.
+- Eine Registry, `src/runtime/project-checks.js`, über `project-state` wie
+  alles andere; `etnpilot check [name...]` ist derselbe Lesepfad. Eine zweite
+  Implementierung pro Oberfläche wäre eine zweite Antwort auf „ist dieses
+  Projekt in Ordnung", und zwei Antworten sind schlimmer als keine.
+- **Nichts davon läuft von selbst.** `scan secrets` liest jede getrackte Datei,
+  `doctor` spricht mit einem Secret-Store — der Poll darf keine davon starten,
+  und der Test prüft genau das.
+- Vier Zustände, nie verwechselt: nie gelaufen, läuft gerade, was sie gefunden
+  hat, und *kein Urteil* — Telemetrie ohne aufgezeichneten Run ist kein
+  bestandener Test, und `scan secrets` außerhalb eines Checkouts sagt „kein
+  git-Checkout" statt „nichts gefunden".
+- **Erledigt:** `test/tui-checks.test.js` rendert die Ansicht, führt sie gegen
+  ein echtes Testprojekt aus, pflanzt ein Credential und liest den Fund
+  zurück — ohne dass der Wert selbst je im Fund auftaucht.
 
-### UI-2.1 Prüfungen
-- `policy check` (`src/policy/engine.js`), `content verify`, `deps check`, `scan secrets`, `doctor`, `telemetry summary`.
-- Jede ist ein Eintrag mit Name, letzter Ausführung und Ergebnis (`ok` / `findings: n`).
-- **Fertig wenn:** `test/tui-tools.test.js` rendert die Ansicht, führt `doctor` und `scan secrets` gegen ein Testprojekt aus und prüft das Ergebnis im Rahmen.
-
-### UI-2.2 Receipt prüfen
-- In der Run-Detailansicht `v` → `verifyReceiptFile` (`src/core/receipt-store.js`), Ergebnis unter „Receipt": gültig, Hash-Kette, Signatur, `encoding`.
-- **Fertig wenn:** ein manipuliertes Receipt in der Ansicht als ungültig erscheint.
+### UI-2.2 Receipt prüfen — erledigt
+- In der Run-Detailansicht `v` → unter „Receipt": gültig, Hash-Kette,
+  Signatur, `encoding`. Auf der Seite derselbe Knopf, über `GET /api/verify/`.
+- Der Grund-Code ist für ein Programm; `describeVerification` macht daraus den
+  Satz, den ein Mensch braucht: nicht `hash-mismatch`, sondern „ein Eintrag
+  passt nicht zu seinem eigenen Hash, Zeile 3: er wurde nach dem Schreiben
+  geändert".
+- Ohne konfigurierten Public Key wird die Kette geprüft und die Signatur
+  nicht — und die Zeile sagt das, statt „verifiziert" beides bedeuten zu
+  lassen.
+- **Erledigt:** `test/tui-run.test.js` verändert ein Byte eines gesiegelten
+  Receipts und liest den Satz vom Schirm ab.
 
 ### UI-2.3 Worktrees — erledigt
 - Ansicht `worktrees` (Taste `5`): `WorktreeManager.describe()` — Branch, HEAD,
@@ -147,31 +250,54 @@ Ergebnis im Panel. Alles bereits vorhandene Funktionen, nur ohne CLI.
   von GitLab sagt sie das; der Rest der Oberfläche arbeitet weiter.
 - Auch als `etnpilot merge list [--status …]`, über denselben Lesepfad
   (`state.mergeRequests()`).
-- **Offen für Web und App:** beide Ansichten fehlen dort noch (UI-1, UI-3).
+- **Erledigt für Web und App:** beide Ansichten gibt es dort, über dieselben
+  Routen (`/api/worktrees`, `/api/merges`).
 
-### UI-2.4 Erste Schritte
-- Wenn `.etnpilot/etnpilot.yaml` fehlt: statt eines Fehlers eine Ansicht, die `initializeProject` mit Template-Auswahl anbietet.
-- **Fertig wenn:** `etnpilot tui` in einem leeren Verzeichnis nicht mehr abbricht.
+### UI-2.4 Erste Schritte — erledigt
+- Fehlt `.etnpilot/etnpilot.yaml`, zeigt `etnpilot tui` die drei Templates mit
+  je einem Satz, legt das gewählte an und öffnet die echte Oberfläche darauf.
+  `etnpilot ui` tut dasselbe über eine eigene Seite und
+  `POST /api/project/create`.
+- Jede Zeile listet die Einstellungen, die dieses Template wirklich ändert —
+  aus dem Template selbst gelesen, nicht daneben geschrieben.
+- Zwei Dinge, die das ENOENT nicht sagen konnte: dass das Verzeichnis kein
+  git-Checkout ist (die nächste Wand), und dass außerhalb von `.etnpilot/`
+  nichts angefasst und nichts committet wird.
+- **Erledigt:** `test/tui-first-run.test.js` und `test/ui.test.js` — `q` legt
+  nichts an, ein fehlgeschlagener Schreibvorgang lässt den Schirm mit dem Grund
+  offen, und ein Template-Name von außerhalb der Liste erreicht
+  `initializeProject` nie.
 
 ---
 
-## UI-3 — Die App
+## UI-3 — Die App — erledigt
 
-Noch keine Zeile Code. Vor dem Bauen zu entscheiden (**dem User vorlegen, nicht
-selbst annehmen**):
+Die drei offenen Entscheidungen sind getroffen. Die Begründung steht in
+`src/ui/app.js`, damit eine spätere Änderung etwas zum Widersprechen hat:
 
-1. **Form** — PWA auf der bestehenden Seite (kein neues Ökosystem, offline
-   begrenzt) oder nativ (Push, Biometrie, größerer Unterhalt)?
-2. **Reichweite** — nur Loopback im selben Netz, oder über ein Relay? Ein Relay
-   bricht die heutige Sicherheitsaussage („gebunden an 127.0.0.1"), das ist ein
-   Entwurf für sich und keine Nebensache.
-3. **Identität** — wer ist `decidedBy`, wenn die Entscheidung vom Telefon kommt?
+1. **Form — PWA auf der bestehenden Seite.** Die Regel dieses Projekts ist ein
+   Lesepfad und keine zweite Wahrheit. Eine native App ist eine zweite
+   Implementierung jeder Ansicht und driftet beim ersten neuen Feld. So kostet
+   „installieren" ein Manifest und einen Service Worker, und installiert wird
+   die Oberfläche, die bereits getestet und bereits Material Design ist.
+2. **Reichweite — Loopback, unverändert.** Ein Relay legt Approvals auf fremde
+   Maschinen und bricht den Satz, auf dem diese Oberfläche steht.
+   `etnpilot ui --host` bedient schon heute ein Tablet im selben Netz und sagt
+   dazu, was das kostet; die App fügt dem nichts hinzu.
+3. **Identität — das Token weist den aus, der es hat, keine Person.**
+   Installieren ändert daran nichts. Die App merkt sich den Namen, den man
+   eingibt, auf dem Gerät, schickt ihn mit jeder Entscheidung, und das Feld
+   sagt selbst, dass diese Seite nie geprüft hat, wer man ist.
 
-Erst danach:
-- **UI-3.1** Approvals lesen und entscheiden, mit der auslösenden Regel.
-- **UI-3.2** Runs und Receipts.
-- **UI-3.3** Settings, mit denselben Modi und denselben Ablehnungen.
-- **UI-3.4** Run starten.
+Offline gilt dasselbe Prinzip: der Worker cacht die beiden Icons und sich
+selbst, nie `/api/` und nie eine Navigation. Eine Review-Oberfläche, die
+jemandem beim Entscheiden die Approvals von gestern zeigt, wäre offline
+schlechter als abwesend — ohne Netz kommt eine Seite, die das sagt.
+
+- **UI-3.1 bis UI-3.4** sind damit die Seite selbst: Approvals mit der
+  auslösenden Regel, Runs und Receipts, Settings mit denselben Modi und
+  denselben Ablehnungen, Run starten. `test/ui-app.test.js` hält die Schale
+  und die Regel, dass nie Evidenz gecacht wird.
 
 ---
 
@@ -183,7 +309,15 @@ Die Artboards `Tui-Policy`, `Web-Policy`, `App-Policy` zeigen noch ein
 lokal" falsch. Ersetzen durch die Schicht-Ansicht mit `open` /
 `stricter-only` / `locked`.
 
-### UI-4.2 Ein echter Durchlauf
+### UI-4.2 Ein echter Durchlauf — Anleitung steht, Durchlauf fehlt
+
+`docs/first-real-run.md` ist die Anleitung: Provider, Workflow im Worktree,
+echtes GitLab, Evidenz prüfen. Sie beginnt mit einer Tabelle, was tatsächlich
+belegt ist — und zwei Zeilen darin lauten **nichts**. Das Dokument zu schreiben
+ändert daran nichts, und es sagt das ausdrücklich, statt wie ein Bericht über
+einen Lauf zu klingen, den es nicht gab. `test/docs.test.js` prüft, dass jeder
+dort genannte `etnpilot …`-Befehl existiert.
+
 
 **Belegt am 2026-09-23, Termux auf Android/arm64, Node 26.3.1:** 196 von 201
 Tests grün, `doctor` meldet `ready: true`, `node:sqlite` vorhanden,
@@ -198,10 +332,11 @@ laufen gegen eingesetzte Stub-Provider. Nötig: eine dokumentierte Anleitung
 (`docs/first-real-run.md`) und ein Bericht, was dabei tatsächlich gebrochen
 ist. Das ist keine Aufräumarbeit, sondern die Frage, ob das Ganze funktioniert.
 
-### UI-4.3 Eine Fähigkeitstabelle, die sich selbst prüft
-`test/parity.test.js`: eine Liste von Fähigkeiten, pro Oberfläche belegt durch
-einen Test oder ausdrücklich als offen markiert. Dann kann die Tabelle in dieser
-Datei nicht mehr unbemerkt veralten.
+### UI-4.3 Eine Fähigkeitstabelle, die sich selbst prüft — erledigt
+`test/parity.test.js`: jede Zeile nennt pro Oberfläche das Beleg-Stück im Code,
+der Test sucht es, und die Tabelle oben in dieser Datei wird aus denselben
+Zeilen erzeugt. Ein `✗` ohne Begründung schlägt ebenfalls fehl — das ist, was
+„noch nicht" davon abhält, unbemerkt „nie" zu werden.
 
 ---
 
@@ -224,7 +359,18 @@ Jede stammt aus einem Fehler, der erst beim Ansehen auffiel — nicht im Test.
 6. **Was eine offene Oberfläche schon hält, kann eine Einstellung nicht mehr
    ändern** (`queue.database`, `approval.inbox.database`) — das sagt sie, statt
    eine Änderung vorzutäuschen.
-7. **Renderer bleiben reine Funktionen.** State und Viewport rein, Zeilen oder
+7. **Eine Prüfung, die ihre Frage nicht stellen konnte, hat sie nicht
+   bestanden.** `scan secrets` außerhalb eines Checkouts liest keine Datei;
+   „nichts gefunden" wäre eine Behauptung über einen Baum, den sie nie
+   geöffnet hat. Dafür gibt es *kein Urteil* als eigenen Zustand.
+8. **Eine Oberfläche sagt, welche Frage sie beantwortet hat.** „Verifiziert"
+   ohne konfigurierten Public Key heißt: die Kette stimmt, die Signaturen
+   wurden nicht geprüft. Ein Wort für beides ist die stärkere Behauptung von
+   zweien, und damit die falsche.
+9. **Design ist ein System, kein Anstrich.** Tokens zuerst, Komponenten
+   danach; kein Literal für eine Farbe unterhalb des Token-Blocks, sonst folgt
+   sie dem Dunkelmodus nicht. `test/ui-material.test.js` hält das fest.
+10. **Renderer bleiben reine Funktionen.** State und Viewport rein, Zeilen oder
    Knoten raus. Nur deshalb sind diese Oberflächen überhaupt testbar.
 
 ## Sicherheitsrahmen für neue Web-Endpunkte

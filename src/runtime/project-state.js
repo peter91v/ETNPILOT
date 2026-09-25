@@ -4,10 +4,13 @@ import YAML from "yaml";
 import { loadConfig } from "../config/load.js";
 import { describeSettings, setSetting, unsetSetting } from "../config/settings.js";
 import { ApprovalInbox, createInboxApprovalHandler } from "../core/approval-inbox.js";
+import { verifyReceiptFile } from "../core/receipt-store.js";
+import { loadReceiptVerifiers } from "../core/receipt-signing.js";
 import { escapeControlCharacters } from "../core/text-safety.js";
 import { WorktreeManager } from "../git/worktrees.js";
 import { GitLabClient } from "../gitlab/client.js";
 import { summarizeTelemetryFile } from "../observability/telemetry.js";
+import { listChecks, runCheck } from "./project-checks.js";
 import { runProject, RUN_BRANCH_PREFIX } from "./project-runner.js";
 import { createSecretResolver } from "../secrets/resolver.js";
 import { resolveConfiguredApiKey } from "../providers/register.js";
@@ -211,6 +214,16 @@ export async function openProjectState({ root = process.cwd(), env = process.env
     // instead of asking a person to remember how they spelled one.
     agents: () => readAgents({ root: projectRoot, config: current }),
     mergeRequests: (options) => readMergeRequests({ root: projectRoot, config: current, env }, options),
+    // The checks that used to be CLI-only. Listing them is free; running one
+    // is not, so it happens when a person asks — never in a poll — and every
+    // surface calls this same registry rather than reimplementing a check per
+    // window.
+    checks: () => listChecks(),
+    runCheck: (id) => runCheck(id, { root: projectRoot, config: current }),
+    // Whether a receipt is what it claims: the hash chain, and the signature
+    // where the project signs. The same name check 'readReceipt' applies, for
+    // the same reason — a file name from a surface never decides what is read.
+    verifyReceipt: (file) => verifyProjectReceipt(runsDirectory, file, { root: projectRoot, config: current }),
     // Changing a setting from any surface goes through the same module the
     // CLI uses, so every surface is refused for the same reason.
     async setSetting(path, value, options = {}) {
@@ -538,10 +551,73 @@ function publicationReason(publication) {
   return `not published: ${publication.reason ?? "no reason recorded"}`;
 }
 
-export async function readReceipt(directory, file) {
+// Verifying is a different question from reading: the chain and the signature,
+// rather than what the run did. A receipt whose chain is broken still reads —
+// that is exactly why this answer has to be available next to it.
+export async function verifyProjectReceipt(directory, file, { root, config } = {}) {
+  assertReceiptName(file);
+  const configured = config?.receipts?.signing?.publicKeyFile;
+  const verifiers = configured
+    ? await loadReceiptVerifiers([resolve(root, configured)]).catch(() => undefined)
+    : undefined;
+  const report = await verifyReceiptFile(join(directory, file), { ...(verifiers ? { verifiers } : {}) });
+  return {
+    file,
+    ...report,
+    // Which question was actually asked: with no public key configured the
+    // chain is checked and the signatures are not, and a surface that says
+    // 'verified' either way would be claiming the stronger of the two.
+    signaturesChecked: Boolean(verifiers),
+    ...describeVerification(report, { signaturesChecked: Boolean(verifiers) }),
+  };
+}
+
+// A reason code is for a program; this is the sentence a person reads. Every
+// failure here means someone or something changed a sealed record, so it says
+// which line and what kind of change it was, not 'invalid'.
+export function describeVerification(report, { signaturesChecked = false } = {}) {
+  if (report.valid) {
+    const chain = `${report.entries} ${report.entries === 1 ? "entry" : "entries"}, each hashed onto the one before it`;
+    const signatures = signaturesChecked
+      ? report.signed === 0
+        ? "nothing is signed"
+        : `${report.signed} signed${report.unsigned > 0 ? `, ${report.unsigned} not` : ""}`
+      : "signatures were not checked: no public key is configured";
+    return {
+      tone: signaturesChecked && report.unsigned === 0 && report.signed > 0 ? "ok" : "warn",
+      text: `The chain holds: ${chain}. ${signatures[0].toUpperCase()}${signatures.slice(1)}.`
+        + (report.encoding === "mixed" ? " Some entries predate canonical hashing and were checked the old way." : ""),
+    };
+  }
+  const at = report.line === undefined ? "" : ` at line ${report.line}`;
+  const reasons = {
+    "file-read-failed": "The receipt could not be read.",
+    "empty-file": "The receipt file is empty; nothing was ever written to it.",
+    "invalid-json": `The receipt is not readable${at}: that line is not valid JSON.`,
+    "invalid-entry": `The receipt is not readable${at}: that line is not a receipt entry.`,
+    "hash-mismatch": `An entry does not match its own hash${at}: it was changed after it was written.`,
+    "chain-mismatch": `An entry does not follow the one before it${at}: an entry was inserted, removed or reordered.`,
+    "entries-after-terminal": `Something was appended after the run had already ended${at}.`,
+    "signature-required": `An entry${at} carries no signature, and this project requires one.`,
+    "untrusted-key": `An entry${at} is signed with a key this project does not trust${report.keyId ? ` (${report.keyId})` : ""}.`,
+    "invalid-signature": `A signature does not match its entry${at}: the entry or the signature was changed.`,
+    "unsupported-proof": `An entry${at} carries a kind of proof this version cannot check.`,
+    "terminal-receipt-required": "The receipt was never sealed: the run did not record an end.",
+  };
+  return {
+    tone: "bad",
+    text: reasons[report.reason] ?? `The receipt did not verify${at}: ${report.reason}.`,
+  };
+}
+
+function assertReceiptName(file) {
   if (typeof file !== "string" || file.includes("/") || file.includes("\\") || !file.endsWith(".jsonl")) {
     throw new TypeError(`'${file}' is not a receipt file in this project.`);
   }
+}
+
+export async function readReceipt(directory, file) {
+  assertReceiptName(file);
   const content = await readFile(join(directory, file), "utf8");
   const entries = [];
   for (const line of content.split("\n").filter(Boolean)) {

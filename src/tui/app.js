@@ -47,6 +47,15 @@ export function createTuiApp({
   let agentTextOffset = 0;
   let worktreesReadAt = 0;
   let merges;
+  // The checks are listed from the registry once; what each one found is kept
+  // per check, so a result stays on screen until it is run again. Nothing here
+  // is ever run by the poll — 'scan secrets' reads the whole working tree.
+  const checks = state.checks?.() ?? [];
+  const checkResults = {};
+  const checksRunning = new Set();
+  // Whether the open receipt verifies. Read when asked, next to the receipt it
+  // is about, and cleared when another run is opened.
+  let verification;
   let messageTimer;
   let timer;
   let stopped = false;
@@ -72,6 +81,9 @@ export function createTuiApp({
     get agentMode() { return agentMode; },
     get agentText() { return agentText; },
     get merges() { return merges; },
+    get checks() { return checks; },
+    get checkResults() { return checkResults; },
+    get verification() { return verification; },
     // What is running is tracked in the shared state, because the page needs
     // the same answer; this is a view of it, not a second copy.
     get active() { return snapshot.active ?? []; },
@@ -117,6 +129,10 @@ export function createTuiApp({
         agentText,
         agentTextOffset,
         merges,
+        checks,
+        checkResults,
+        checksRunning,
+        verification,
         active: snapshot.active ?? [],
         project: state.config?.git?.project ?? "",
       });
@@ -171,6 +187,8 @@ export function createTuiApp({
         show(VIEWS[(VIEWS.indexOf(view) + 1) % VIEWS.length]);
       } else if (/^[1-9]$/.test(key) && Number(key) <= VIEWS.length) {
         show(VIEWS[Number(key) - 1]);
+      } else if (view === "checks" && key === "A") {
+        await runChecks(checks.map((check) => check.id));
       } else if (key === "x" && view === "worktrees") {
         await removeWorktree();
       } else if (view === "settings" && key === "/") {
@@ -195,7 +213,8 @@ export function createTuiApp({
         else if (detail && view === "worktrees") changeCursor = clamp(changeCursor - 1, changeCount());
         else cursor = clamp(cursor - 1, selection().length);
       } else if (key === "\r" || key === "\n") {
-        if (agentMode && !agentText) openAgentText();
+        if (view === "checks") await runChecks([selection()[clamp(cursor, selection().length)]?.id]);
+        else if (agentMode && !agentText) openAgentText();
         else if (view === "approvals" && selection().length > 0) detail = true;
         else if (view === "runs" && !detail && selection().length > 0) await openRun();
         else if (view === "worktrees" && detail && !worktreeDiff) await openFileDiff();
@@ -213,6 +232,8 @@ export function createTuiApp({
           detail = false;
           worktreeChanges = undefined;
         }
+      } else if (key === "v" && detail && view === "runs") {
+        await verifyOpenReceipt();
       } else if (key === "a" && detail && view === "runs" && !agentMode && agentRows().length > 0) {
         agentMode = true;
         agentCursor = 0;
@@ -288,6 +309,7 @@ export function createTuiApp({
     if (view === "queue") return snapshot.queue?.jobs ?? [];
     if (view === "worktrees") return worktrees?.entries ?? [];
     if (view === "merges") return mergeEntries(merges);
+    if (view === "checks") return checks;
     if (view === "settings") return settingEntries(snapshot, { filter });
     return snapshot.approvals?.pending ?? [];
   }
@@ -327,6 +349,27 @@ export function createTuiApp({
       merges = { configured: true, available: false, error: error.message, entries: [] };
     }
     cursor = clamp(cursor, selection().length);
+  }
+
+  // A check is run because somebody asked for it, one at a time and in order,
+  // and the screen repaints between them: 'scan secrets' walks the tree and
+  // 'doctor' talks to a secret store, so pretending they are instant would
+  // leave the interface frozen with no reason on screen.
+  async function runChecks(ids) {
+    for (const id of ids.filter(Boolean)) {
+      checksRunning.add(id);
+      app.paint();
+      try {
+        checkResults[id] = await state.runCheck(id);
+      } catch (error) {
+        // runCheck reports a broken check as a result; this is for the case
+        // where reaching it at all failed.
+        note(error.message);
+      } finally {
+        checksRunning.delete(id);
+      }
+      app.paint();
+    }
   }
 
   // Removing a worktree is the one destructive thing this view can do, so it
@@ -440,6 +483,7 @@ export function createTuiApp({
     if (!run) return;
     detail = true;
     receipt = undefined;
+    verification = undefined;
     agentMode = false;
     agentCursor = 0;
     agentText = undefined;
@@ -449,6 +493,22 @@ export function createTuiApp({
     } catch (error) {
       note(error.message);
       detail = false;
+    }
+  }
+
+  // Verifying is asked for, not done on open: it rereads and rehashes the whole
+  // file, and a poll doing that to every run on screen would be the one thing
+  // this interface must not cost.
+  async function verifyOpenReceipt() {
+    const run = selection()[clamp(cursor, selection().length)];
+    if (!run) return;
+    verification = { file: undefined };
+    app.paint();
+    try {
+      verification = await state.verifyReceipt(run.receiptFile);
+    } catch (error) {
+      verification = undefined;
+      note(error.message);
     }
   }
 

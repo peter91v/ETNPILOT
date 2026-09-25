@@ -5,7 +5,10 @@ import { ApprovalStateError } from "../core/approval-inbox.js";
 import { parseSettingValue, SettingsRefused } from "../config/settings.js";
 import { openProjectState } from "../runtime/project-state.js";
 import { WorkflowQueueStateError } from "../workflow/queue.js";
+import { createProject, describeProject } from "../runtime/first-run.js";
 import { renderReviewPage } from "./page.js";
+import { renderIcon, renderManifest, renderServiceWorker } from "./app.js";
+import { renderSetupPage } from "./setup-page.js";
 
 // A local review surface for the evidence ETNPilot already produces: pending
 // approvals, queued work, and finished runs. It reads the same databases the
@@ -21,8 +24,13 @@ export async function createReviewServer({
   env = process.env,
   token = randomBytes(24).toString("base64url"),
 } = {}) {
-  const state = await openProjectState({ root, env });
-  const { inbox, queue } = state;
+  // A directory with no project in it is not an error to crash on: the page
+  // offers to create one, exactly as the terminal interface does. Until it
+  // exists there is no state to open, and every route that needs one says so
+  // rather than failing on a file nobody has heard of.
+  let state = (await describeProject({ root })).exists
+    ? await openProjectState({ root, env })
+    : undefined;
 
   const server = createServer(async (request, response) => {
     try {
@@ -32,22 +40,52 @@ export async function createReviewServer({
         if (!authorized(url.searchParams.get("token"), token)) {
           return html(response, 401, "<h1>ETNPilot</h1><p>Open the URL printed by <code>etnpilot ui</code>.</p>");
         }
-        return html(response, 200, renderReviewPage(token));
+        return html(response, 200, state
+          ? renderReviewPage(token)
+          : renderSetupPage(token, await describeProject({ root })));
+      }
+      // The app's shell. These three carry no evidence — a name, two drawn
+      // icons and a worker script — so they are served without the token:
+      // a manifest and a service worker are fetched by the browser itself,
+      // sometimes without the page's credentials, and an installed app that
+      // cannot fetch its own icon is not installed.
+      if (request.method === "GET" && url.pathname === "/manifest.webmanifest") {
+        return send(response, 200, renderManifest({ project: state?.config?.git?.project ?? "" }));
+      }
+      if (request.method === "GET" && (url.pathname === "/icon.svg" || url.pathname === "/icon-maskable.svg")) {
+        return svg(response, renderIcon({ maskable: url.pathname.includes("maskable") }));
+      }
+      if (request.method === "GET" && url.pathname === "/sw.js") {
+        // The token is the cache's version, so a new session cannot be served
+        // a previous one's shell.
+        return script(response, renderServiceWorker(token.slice(0, 8)));
       }
       if (!url.pathname.startsWith("/api/")) return send(response, 404, { error: "not-found" });
       if (!authorized(header(request, "x-etnpilot-token"), token)) {
         return send(response, 401, { error: "unauthorized" });
       }
+      // The only route that works before there is a project, and the only one
+      // that stops working once there is: creating one twice is not a thing
+      // this surface offers.
+      if (request.method === "POST" && url.pathname === "/api/project/create") {
+        if (state) throw badRequest("This directory already has a project.");
+        const body = await readJsonBody(request);
+        const created = await createProject({ root, template: String(body.template ?? "default") })
+          .catch((error) => { throw error instanceof TypeError ? badRequest(error.message) : error; });
+        state = await openProjectState({ root, env });
+        return send(response, 201, created);
+      }
+      if (!state) return send(response, 409, { error: "no-project-here", root });
       if (request.method === "GET" && url.pathname === "/api/state") {
         return send(response, 200, await state.collect());
       }
       if (request.method === "POST" && url.pathname === "/api/approvals/decide") {
         const body = await readJsonBody(request);
-        return send(response, 200, decideApproval(inbox, body));
+        return send(response, 200, decideApproval(state.inbox, body));
       }
       if (request.method === "POST" && url.pathname === "/api/queue/cancel") {
         const body = await readJsonBody(request);
-        return send(response, 200, queue.requestCancel(String(body.id), {
+        return send(response, 200, state.queue.requestCancel(String(body.id), {
           actor: actorName(body, env),
           reason: body.reason ? String(body.reason) : undefined,
         }));
@@ -140,6 +178,29 @@ export async function createReviewServer({
         state.startRun({ input: task, agent });
         return send(response, 202, { started: true, task, ...(agent ? { agent } : {}) });
       }
+      // Whether a receipt is what it claims. It rereads and rehashes the whole
+      // file, so it is a route of its own that the page's poll never calls —
+      // a person asks for it, per run.
+      if (request.method === "GET" && url.pathname.startsWith("/api/verify/")) {
+        const file = decodeURIComponent(url.pathname.slice("/api/verify/".length));
+        const report = await state.verifyReceipt(file).catch((error) => {
+          throw error instanceof TypeError ? badRequest(error.message) : error;
+        });
+        return send(response, 200, report);
+      }
+      // The checks this project can run on itself. Listing them is part of the
+      // state; running one is a POST, because it reads the working tree.
+      if (request.method === "GET" && url.pathname === "/api/checks") {
+        return send(response, 200, { checks: state.checks() });
+      }
+      if (request.method === "POST" && url.pathname === "/api/checks/run") {
+        const body = await readJsonBody(request);
+        if (typeof body.id !== "string" || body.id.trim() === "") throw badRequest("A check id is required.");
+        const result = await state.runCheck(body.id.trim()).catch((error) => {
+          throw badRequest(error.message);
+        });
+        return send(response, 200, result);
+      }
       // The file name is never inspected here: readReceipt refuses anything
       // that is not a '*.jsonl' without a path separator, and one check in
       // one place cannot drift from another.
@@ -160,9 +221,11 @@ export async function createReviewServer({
   return {
     server,
     token,
-    state,
-    inbox,
-    queue,
+    // The state is created when the project is, so these read through rather
+    // than being captured once.
+    get state() { return state; },
+    get inbox() { return state?.inbox; },
+    get queue() { return state?.queue; },
     listen({ host = "127.0.0.1", port = 8788 } = {}) {
       return new Promise((resolveListen, reject) => {
         const onError = (error) => {
@@ -191,11 +254,11 @@ export async function createReviewServer({
     async close() {
       // Runs this server started are stopped before the databases they write
       // to are closed, rather than being left working for nobody.
-      state.stopRuns();
+      state?.stopRuns();
       if (server.listening) {
         await new Promise((resolveClose, reject) => server.close((error) => (error ? reject(error) : resolveClose())));
       }
-      state.close();
+      state?.close();
     },
   };
 }
@@ -203,6 +266,27 @@ export async function createReviewServer({
 // A refusal is an answer, not a crash: the state errors these modules raise
 // are conflicts and bad requests, and the page shows them where the action
 // was taken rather than as 'request failed (500)'.
+function svg(response, body) {
+  response.writeHead(200, {
+    "content-type": "image/svg+xml; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+  });
+  response.end(body);
+}
+
+function script(response, body) {
+  response.writeHead(200, {
+    "content-type": "text/javascript; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    // A service worker may only control the paths under its own scope, and
+    // this one needs the origin so an installed page is one of them.
+    "service-worker-allowed": "/",
+  });
+  response.end(body);
+}
+
 function statusFor(error) {
   if (error.statusCode) return error.statusCode;
   if (error instanceof ApprovalStateError || error instanceof WorkflowQueueStateError) return 409;
@@ -319,7 +403,11 @@ function html(response, status, body) {
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",
     // The page loads nothing from anywhere: no CDN, no fonts, no analytics.
-    "content-security-policy": "default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'",
+    // The three 'self' sources are the app shell this server draws itself —
+    // the icons, the manifest and the service worker — and nothing else is
+    // reachable from here, which is what 'default-src none' keeps true.
+    "content-security-policy": "default-src 'none'; img-src data: 'self'; style-src 'unsafe-inline';"
+      + " script-src 'unsafe-inline'; connect-src 'self'; manifest-src 'self'; worker-src 'self'",
     "referrer-policy": "no-referrer",
   });
   response.end(body);

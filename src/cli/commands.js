@@ -26,7 +26,14 @@ import { createGitLabWebhookServer } from "../gitlab/webhook-server.js";
 import { openInBrowser } from "../ui/open-browser.js";
 import { createReviewServer } from "../ui/server.js";
 import { createTuiApp } from "../tui/app.js";
+import { createFirstRunApp } from "../tui/first-run.js";
+import { describeProject } from "../runtime/first-run.js";
 import { agentRawResponses, openProjectState, readMergeRequests, readWorktrees } from "../runtime/project-state.js";
+// 'diagnose' moved to the runtime layer, because the TUI and the page run the
+// same check; 'etnpilot doctor' is one of its callers, not its home.
+import { knownCheck, listChecks, runCheck } from "../runtime/project-checks.js";
+import { diagnose } from "../runtime/diagnose.js";
+export { diagnose } from "../runtime/diagnose.js";
 import { runProject } from "../runtime/project-runner.js";
 import { replayRun } from "../runtime/replay.js";
 import { WorkflowQueue } from "../workflow/queue.js";
@@ -130,6 +137,7 @@ Usage:
   etnpilot attest <receipt-file> [--out file] [--root directory]
   etnpilot telemetry summary [workflow-run-id] [--root directory]
   etnpilot doctor [--root directory]
+  etnpilot check [name...] [--root directory]
 
 Exit codes:
   0  the command succeeded
@@ -303,11 +311,28 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     await waitForShutdown();
     await webhookServer.close();
   } else if (command === "tui") {
-    const state = await openProjectState({ root: resolve(values.root) });
+    const root = resolve(values.root);
     if (!process.stdin.isTTY) {
-      state.close();
       throw new Error("The TUI needs an interactive terminal. Use 'etnpilot ui' or the plain commands instead.");
     }
+    // A directory with no project in it used to end here with the ENOENT of a
+    // file nobody had heard of. It now offers to create one, and then opens on
+    // what it created — which is what was being asked for.
+    const project = await describeProject({ root });
+    if (!project.exists) {
+      const setup = createFirstRunApp({ root });
+      try {
+        await setup.start();
+      } finally {
+        setup.stop();
+      }
+      if (!setup.created) {
+        console.log("Nothing was created. 'etnpilot init' does the same thing without the screen.");
+        return 0;
+      }
+      console.log(`Created ${setup.created.configFile} (${setup.created.template}).`);
+    }
+    const state = await openProjectState({ root });
     const app = createTuiApp({ state, actor: values.actor });
     try {
       await app.start();
@@ -562,6 +587,23 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"));
     const path = resolve(root, config.observability?.file ?? ".etnpilot/state/telemetry.jsonl");
     console.log(JSON.stringify(await summarizeTelemetryFile(path, { workflowRunId: rest[0] }), null, 2));
+  } else if (command === "check") {
+    // The same registry the TUI and the page list, so 'what can this project
+    // check about itself' has one answer, wherever it is asked.
+    const root = resolve(values.root);
+    const names = [subcommand, ...rest].filter(Boolean);
+    const unknown = names.filter((name) => !knownCheck(name));
+    if (unknown.length > 0) {
+      throw new Error(`Unknown check${unknown.length === 1 ? "" : "s"}: ${unknown.join(", ")}.`
+        + ` Known: ${listChecks().map((one) => one.id).join(", ")}.`);
+    }
+    const wanted = names.length > 0 ? names : listChecks().map((one) => one.id);
+    const results = [];
+    for (const id of wanted) results.push(await runCheck(id, { root }));
+    console.log(JSON.stringify(names.length === 1 ? results[0] : { checks: results }, null, 2));
+    // A check with no verdict of its own — no telemetry recorded yet — is not
+    // a failure, so it does not decide the exit code.
+    return results.some((result) => result.ok === false) ? 1 : 0;
   } else if (command === "doctor") {
     const report = await diagnose(resolve(values.root));
     console.log(JSON.stringify(report, null, 2));
@@ -632,136 +674,6 @@ function ignoreMissing(error) {
   throw error;
 }
 
-export async function diagnose(root) {
-  const [major, minor] = process.versions.node.split(".").map(Number);
-  const checks = {
-    node: process.versions.node,
-    // node:sqlite backs the durable queue and the approval inbox.
-    nodeSupported: major > 22 || (major === 22 && minor >= 13),
-    git: await commandExists("git"),
-    sqlite: await import("node:sqlite").then(() => true, () => false),
-    copilotSdk: await import("@github/copilot-sdk").then(() => true, () => false),
-    copilotSdkAvailableForPlatform: copilotSdkPlatformSupported(),
-    project: await access(join(root, ".etnpilot", "etnpilot.yaml")).then(() => true, () => false),
-  };
-  // Whether a run could actually start here. 'ready' that ignores the route
-  // says yes on a machine where the configured provider cannot run at all —
-  // which is what 'etnpilot run' then reports, one command too late.
-  const routing = checks.project ? await diagnoseRoute(root, checks) : undefined;
-  return {
-    ...checks,
-    ...(routing ? { routing } : {}),
-    ready: checks.nodeSupported && checks.git && checks.sqlite && (routing ? routing.usable !== null : true),
-    hints: [
-      checks.nodeSupported ? undefined : "Node.js 22.13 or newer is required for node:sqlite.",
-      checks.git ? undefined : "Install git; ETNPilot runs every repository operation through it.",
-      checks.copilotSdk ? undefined : copilotSdkAdvice(),
-      checks.project ? undefined : "No '.etnpilot/etnpilot.yaml' found. Run 'etnpilot init' first.",
-      ...(routing?.hints ?? []),
-    ].filter(Boolean),
-  };
-}
-
-// The provider a run would reach, and whether it can run here. Everything it
-// reports is read the same way the run reads it.
-async function diagnoseRoute(root, checks) {
-  const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml")).catch(() => undefined);
-  if (!config) return { error: "The project configuration could not be read.", route: [], usable: null, hints: [] };
-  const state = await openProjectState({ root }).catch(() => undefined);
-  const described = await state?.agents().catch(() => undefined);
-  state?.close?.();
-  // The same agent a run would take: 'defaultAgent', or 'orchestrator', which
-  // is what the workflow falls back to.
-  const name = described?.defaultAgent ?? config.defaultAgent ?? "orchestrator";
-  const agent = described?.agents?.find((entry) => entry.name === name);
-  const { providers } = routeFor(
-    { name: name ?? "the default agent", ...(agent?.provider ? { provider: agent.provider } : {}) },
-    { rules: config.routing?.rules ?? [], defaults: [...(config.routing?.defaults ?? []), ...(config.defaultProvider ? [config.defaultProvider] : [])] },
-  );
-  const resolver = createSecretResolver({ root, config, env: process.env });
-  const policy = config.policy ? new PolicyEngine(config.policy) : undefined;
-  const route = [];
-  for (const provider of providers) {
-    route.push(await diagnoseProvider(provider, config, resolver, checks, policy));
-  }
-  const usable = route.find((entry) => entry.usable)?.name ?? null;
-  // A way out beats a diagnosis: where the routed provider cannot run but
-  // another configured one can, name it and the setting that switches.
-  const alternatives = [];
-  if (!usable) {
-    for (const other of Object.keys(config.providers ?? {})) {
-      if (route.some((entry) => entry.name === other)) continue;
-      if ((await diagnoseProvider(other, config, resolver, checks, policy)).usable) alternatives.push(other);
-    }
-  }
-  return {
-    agent: name,
-    route,
-    usable,
-    ...(alternatives.length > 0 ? { alternatives } : {}),
-    hints: usable
-      ? []
-      : [
-        route.length === 0
-          ? "No provider is routed: set 'defaultProvider', or name one in the agent manifest."
-          : `No routed provider can run here: ${route.map((entry) => `'${entry.name}' ${entry.reason}`).join("; ")}.`,
-        ...(alternatives.length > 0
-          ? [`Ready to use instead: ${alternatives.map((one) => `'${one}'`).join(", ")}.`
-            + ` Switch with 'etnpilot config set defaultProvider ${alternatives[0]}' — that stays local.`]
-          : []),
-      ],
-  };
-}
-
-async function diagnoseProvider(name, config, resolver, checks, policy) {
-  const configured = config.providers?.[name];
-  if (!configured) return { name, usable: false, reason: "is not configured under 'providers'" };
-  // Policy first: a denied provider cannot run however well it is configured,
-  // and 'policy.**' is stricter-only, so no local file can allow it.
-  const decision = policy?.evaluateProvider(name);
-  if (decision && decision.allowed === false) {
-    return {
-      name,
-      type: configured.type,
-      usable: false,
-      reason: "is denied by policy.providers, which only the committed file can change",
-    };
-  }
-  const type = configured.type;
-  if (type === "github-copilot") {
-    return checks.copilotSdk
-      ? { name, type, usable: true }
-      : { name, type, usable: false, reason: "needs '@github/copilot-sdk', which is not installed here" };
-  }
-  if (type === "openai-compatible" || type === "anthropic") {
-    const secret = configured.apiKeySecret ?? (type === "anthropic" ? "anthropic.apiKey" : "provider.apiKey");
-    const key = configured.apiKey ? { available: true } : await resolver.check(secret);
-    if (key.available) return { name, type, usable: true, key: secret };
-    // A model server on this machine is the one endpoint that needs no key.
-    if (type === "openai-compatible" && isLoopbackUrl(configured.baseUrl)) return { name, type, usable: true };
-    return { name, type, usable: false, key: secret, reason: `has no key: ${describeMissingKey(secret, config)}` };
-  }
-  // A provider type this command does not know about is not a provider that
-  // cannot run; saying so would be a guess.
-  return { name, type, usable: true, checked: false };
-}
-
-function describeMissingKey(secret, config) {
-  const reference = config.secrets?.values?.[secret];
-  if (reference?.provider === "env") return `set ${reference.key}`;
-  if (reference) return `secret '${secret}' is not available from '${reference.provider}'`;
-  return `secret '${secret}' is not mapped under 'secrets.values'`;
-}
-
-function isLoopbackUrl(value) {
-  try {
-    const { hostname } = new URL(value);
-    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
-  } catch {
-    return false;
-  }
-}
-
 async function resolveReceiptPublicKeys(root, explicitPaths) {
   if (explicitPaths.length > 0) return explicitPaths.map((path) => resolve(path));
   const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml")).catch((error) => {
@@ -815,11 +727,3 @@ function isBootstrapPlugin(entry) {
   return entry && typeof entry === "object" && entry.bootstrap === true;
 }
 
-async function commandExists(commandName) {
-  const { spawn } = await import("node:child_process");
-  return new Promise((resolveResult) => {
-    const child = spawn(commandName, ["--version"], { stdio: "ignore" });
-    child.once("error", () => resolveResult(false));
-    child.once("exit", (code) => resolveResult(code === 0));
-  });
-}

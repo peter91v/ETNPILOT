@@ -4,7 +4,7 @@ import { createStyle, displayWidth, duration, pad, padStart, shortId, since, tru
 // The runtime below only paints what these return, which is what makes the
 // interface testable without a terminal.
 
-const VIEWS = Object.freeze(["approvals", "runs", "queue", "settings", "worktrees", "merges"]);
+const VIEWS = Object.freeze(["approvals", "runs", "queue", "settings", "worktrees", "merges", "checks"]);
 
 export function viewList() {
   return [...VIEWS];
@@ -49,6 +49,8 @@ export function renderApp(state, options = {}) {
     style, width, height: body, cursor, now, editor, filter, filtering, scope, receipt,
     worktrees, changes: options.worktreeChanges, changeCursor: options.changeCursor, merges, active,
     agentMode: options.agentMode, agentCursor: options.agentCursor,
+    checks: options.checks ?? [], results: options.checkResults ?? {}, running: options.checksRunning ?? new Set(),
+    verification: options.verification,
   };
   const rendered = help
     ? renderHelp({ style, width, height: body, offset: helpOffset })
@@ -79,6 +81,7 @@ export function renderApp(state, options = {}) {
 
 function renderView(view, state, context) {
   if (view === "runs") return renderRuns(state, context);
+  if (view === "checks") return renderChecks(state, context);
   if (view === "queue") return renderQueue(state, context);
   if (view === "worktrees") return renderWorktrees(state, context);
   if (view === "merges") return renderMerges(state, context);
@@ -94,15 +97,32 @@ function header(state, { style, width, view, project, active = [] }) {
   // Runs this window started count too, or a run you are watching would not
   // appear in the one place that claims to say how many are running.
   const running = (counts.running ?? 0) + active.length;
-  const tabs = VIEWS.map((name) => {
-    const label = name === "approvals" && pending > 0 ? `${name} ${pending}` : name;
-    return name === view ? style.bold(style.accent(label)) : style.dim(label);
-  }).join(style.dim("  ·  "));
-  const left = `${style.bold(style.accent("ETNPILOT"))}  ${tabs}`;
+  const label = (name) => (name === "approvals" && pending > 0 ? `${name} ${pending}` : name);
+  const tabs = VIEWS.map((name) => (name === view
+    ? style.bold(style.accent(label(name)))
+    : style.dim(label(name)))).join(style.dim("  ·  "));
+  const brand = style.bold(style.accent("ETNPILOT"));
+  // A phone terminal is 40 to 60 columns, and seven tabs do not fit there:
+  // the strip was cut mid-word, which loses both the tabs it dropped and the
+  // count on the right. Below that width the header names the view you are on
+  // and its number, which is what the keys 1-7 need anyway.
+  const plain = `ETNPILOT  ${VIEWS.map(label).join("  ·  ")}`;
+  const compact = `${label(view)} ${VIEWS.indexOf(view) + 1}/${VIEWS.length}`;
+  const left = plain.length + 12 <= width
+    ? `${brand}  ${tabs}`
+    : `${brand}  ${style.bold(style.accent(compact))}`;
   const working = active.find((run) => run.step);
   const where = working ? ` ${working.step}${working.stepAgent ? `/${working.stepAgent}` : ""}` : "";
-  const right = style.dim(`${project}${project ? "  " : ""}${running} running${where}`);
-  const gap = Math.max(1, width - displayWidth(left) - displayWidth(right));
+  // How many runs are going is the fact this line exists for; the project name
+  // is context. Where the tabs leave room for only one of them, the count
+  // stays — a seventh tab was enough to push it off the right at 100 columns,
+  // and 'varga.pter9…' in its place says nothing at all.
+  const count = `${running} running${where}`;
+  const full = `${project}${project ? "  " : ""}${count}`;
+  const room = width - displayWidth(left) - 1;
+  const text = displayWidth(full) <= room ? full : count;
+  const right = style.dim(text);
+  const gap = Math.max(1, width - displayWidth(left) - displayWidth(text));
   return left + " ".repeat(gap) + right;
 }
 
@@ -124,7 +144,7 @@ function footerKeys({ view, detail, editor, prompt, help, diff, agentMode, agent
   }
   if (agentText && view === "runs") return [["↑↓", "scroll"], ["esc", "back"], ["q", "quit"]];
   if (agentMode && view === "runs") return [["↑↓", "move"], ["enter", "read"], ["esc", "back"], ["q", "quit"]];
-  if (detail && view === "runs") return [["a", "agents"], ["esc", "back"], ["n", "run"], ["q", "quit"]];
+  if (detail && view === "runs") return [["a", "agents"], ["v", "verify"], ["esc", "back"], ["n", "run"], ["q", "quit"]];
   if (diff && view === "worktrees") return [["↑↓", "scroll"], ["esc", "back"], ["q", "quit"]];
   if (detail && view === "worktrees") {
     return [["↑↓", "move"], ["enter", "what changed"], ["esc", "back"], ["x", "remove if clean"], ["q", "quit"]];
@@ -141,6 +161,9 @@ function footerKeys({ view, detail, editor, prompt, help, diff, agentMode, agent
   }
   if (view === "merges") {
     return [["↑↓", "move"], ["g", "reread"], ["n", "run"], ["tab", "view"], ["?", "help"], ["q", "quit"]];
+  }
+  if (view === "checks") {
+    return [["↑↓", "move"], ["enter", "run it"], ["A", "run all"], ["tab", "view"], ["?", "help"], ["q", "quit"]];
   }
   if (view === "settings") {
     return [["↑↓", "move"], ["enter", "edit"], ["d", "default"], ["s", "scope"], ["/", "filter"], ["tab", "view"], ["q", "quit"]];
@@ -349,6 +372,79 @@ export function renderAgentText(state, { style, width, height, agentText, offset
   const hidden = lines.length - start - body.length;
   const bottom = hidden > 0 ? style.dim(`↑↓ scroll · ${hidden} more lines`) : style.dim("the end");
   return [...head, ...body, bottom];
+}
+
+// The checks this project can run on itself — the same ones the CLI has as
+// subcommands, in a list, because a check nobody remembers the name of is a
+// check nobody runs. Nothing here runs by itself: each row says when it last
+// ran, or that it has not.
+export function renderChecks(state, { style, width, height, cursor, checks = [], results = {}, running = new Set(), now }) {
+  if (checks.length === 0) return [style.dim("No checks are registered.")];
+  const ran = checks.filter((check) => results[check.id]).length;
+  const failed = checks.filter((check) => results[check.id]?.ok === false).length;
+  const summary = [
+    `${checks.length} checks`,
+    ran === 0 ? "none run yet" : `${ran} run`,
+    failed > 0 ? `${failed} failing` : ran > 0 ? "none failing" : "nothing to report",
+  ].join(" · ");
+  const columns = [
+    { label: "CHECK", width: Math.max(18, Math.floor(width * 0.22)), value: (check) => check.title },
+    { label: "RESULT", width: 12, value: (check) => checkState(check, results, running),
+      tone: (check) => checkTone(check, results, running) },
+    { label: "WHAT IT FOUND", width: Math.max(24, Math.floor(width * 0.42)),
+      value: (check) => results[check.id]?.summary ?? check.about },
+    { label: "RAN", width: 9, value: (check) => (results[check.id] ? since(results[check.id].ranAt, now) : "—") },
+  ];
+  const lines = [style.dim(summary), "", ...table(checks, columns, { style, width, height: height - 2, cursor })];
+  const selected = checks[clamp(cursor, checks.length)];
+  const result = selected ? results[selected.id] : undefined;
+  if (result) {
+    lines.push("", ...renderCheckFindings(result, { style, width, height: Math.max(3, height - lines.length - 1) }));
+  } else if (selected) {
+    lines.push("", style.dim(`enter runs '${selected.title}'. Nothing here runs on its own.`));
+  }
+  return lines;
+}
+
+// What a check found, under the list. A check with nothing to say says that,
+// rather than leaving the panel to be read as 'not run yet'.
+function renderCheckFindings(result, { style, width, height }) {
+  const head = result.ok === false
+    ? style.bad(`${result.title}: ${result.summary}`)
+    : result.ok === true
+      ? style.ok(`${result.title}: ${result.summary}`)
+      : style.warn(`${result.title}: ${result.summary}`);
+  const lines = [head];
+  const findings = result.findings ?? [];
+  if (findings.length === 0) {
+    lines.push(style.dim(result.ok === true ? "Nothing to look at." : "It reported no individual findings."));
+    return lines.slice(0, height);
+  }
+  const room = Math.max(1, height - 2);
+  for (const finding of findings.slice(0, room)) {
+    const label = finding.label ? `${style.tone(pad(truncate(finding.label, 18), 18), finding.tone ?? "muted")} ` : "";
+    lines.push(`  ${label}${style.ink(truncate(finding.text, Math.max(10, width - 24)))}`);
+  }
+  if (findings.length > room) lines.push(style.dim(`  … ${findings.length - room} more`));
+  return lines.slice(0, height);
+}
+
+function checkState(check, results, running) {
+  if (running.has(check.id)) return "running…";
+  const result = results[check.id];
+  if (!result) return "not run";
+  if (result.ok === true) return "ok";
+  if (result.ok === false) return "findings";
+  return "no verdict";
+}
+
+function checkTone(check, results, running) {
+  if (running.has(check.id)) return "warn";
+  const result = results[check.id];
+  if (!result) return "muted";
+  if (result.ok === true) return "ok";
+  if (result.ok === false) return "bad";
+  return "warn";
 }
 
 export function renderWorktrees(state, { style, width, height, cursor, worktrees }) {
@@ -569,7 +665,7 @@ function queueTone(status) {
   return "muted";
 }
 
-function renderRunDetail(state, { style, width, height, cursor, receipt, agentMode = false, agentCursor = 0 }) {
+function renderRunDetail(state, { style, width, height, cursor, receipt, verification, agentMode = false, agentCursor = 0 }) {
   const runs = state.runs ?? [];
   const run = runs[clamp(cursor, runs.length)];
   if (!run) return [style.dim("No runs have been recorded yet.")];
@@ -681,6 +777,20 @@ function renderRunDetail(state, { style, width, height, cursor, receipt, agentMo
   }
   lines.push(style.dim("Receipt"));
   lines.push(`  ${style.muted(run.receiptFile)} · ${run.entries} entries · ${run.signed ? style.ok("signed") : style.warn("unsigned")}`);
+  // Whether it verifies is a different claim from what it says, so it is only
+  // here once it has been checked — and it never reads as 'not checked yet'
+  // and 'checked, and fine' the same way.
+  if (verification === undefined) {
+    lines.push(`  ${style.dim("press 'v' to check its hash chain and signatures")}`);
+  } else if (verification.file !== run.receiptFile) {
+    lines.push(`  ${style.dim("checking…")}`);
+  } else {
+    lines.push(`  ${style.tone(verification.valid ? "verified" : "DOES NOT VERIFY", verification.tone)}`
+      + ` ${style.muted(`${verification.encoding ?? ""}`)}`);
+    for (const piece of wrap(verification.text, width - 4)) {
+      lines.push(`  ${verification.valid ? style.muted(piece) : style.bad(piece)}`);
+    }
+  }
   if (terminal.error) {
     lines.push("", style.dim("Error"));
     for (const piece of wrap(terminal.error, width - 2)) lines.push(`  ${style.bad(piece)}`);
@@ -695,7 +805,7 @@ function renderHelp({ style, width, height, offset = 0 }) {
     ...keys.map(([key, label]) => truncate(`  ${style.accent(pad(key, 10))} ${style.ink(label)}`, columnWidth)),
     "",
   ];
-  const single = sections.flatMap((section) => render(section, width));
+  const single = trimTrailing(sections.flatMap((section) => render(section, width)));
   const rows = single.length <= height ? single : twoColumns(sections, render, width);
   if (rows.length <= height) return rows;
 
@@ -709,20 +819,26 @@ function renderHelp({ style, width, height, offset = 0 }) {
 }
 
 export function helpLength(width, height) {
-  const measure = ([title, keys], columnWidth) => [title, ...keys.map(([key]) => key), ""].length;
-  const single = HELP_SECTIONS.reduce((total, section) => total + measure(section), 0);
+  // Minus one for the blank line the last section in a column does not get.
+  const measure = (sections) => sections.reduce(
+    (total, [title, keys]) => total + keys.length + 2,
+    0,
+  ) - (sections.length > 0 ? 1 : 0);
+  const single = measure(HELP_SECTIONS);
   if (single <= height) return single;
   const half = Math.ceil(HELP_SECTIONS.length / 2);
-  const left = HELP_SECTIONS.slice(0, half).reduce((total, section) => total + measure(section), 0);
-  const right = HELP_SECTIONS.slice(half).reduce((total, section) => total + measure(section), 0);
-  return Math.max(left, right);
+  return Math.max(measure(HELP_SECTIONS.slice(0, half)), measure(HELP_SECTIONS.slice(half)));
 }
 
 function twoColumns(sections, render, width) {
   const columnWidth = Math.floor((width - 2) / 2);
   const half = Math.ceil(sections.length / 2);
-  const left = sections.slice(0, half).flatMap((section) => render(section, columnWidth));
-  const right = sections.slice(half).flatMap((section) => render(section, columnWidth));
+  // The blank line under a section separates it from the next one. The last
+  // section in a column has no next one, and that spare line is the
+  // difference between the whole help fitting and a scrollbar — which was
+  // what adding a seventh view did to it.
+  const left = trimTrailing(sections.slice(0, half).flatMap((section) => render(section, columnWidth)));
+  const right = trimTrailing(sections.slice(half).flatMap((section) => render(section, columnWidth)));
   const rows = [];
   for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
     rows.push(`${pad(left[index] ?? "", columnWidth)}  ${right[index] ?? ""}`);
@@ -730,9 +846,15 @@ function twoColumns(sections, render, width) {
   return rows;
 }
 
+function trimTrailing(rows) {
+  const trimmed = [...rows];
+  while (trimmed.length > 0 && trimmed.at(-1) === "") trimmed.pop();
+  return trimmed;
+}
+
 const HELP_SECTIONS = Object.freeze([
   ["Everywhere", [
-    ["tab / 1-6", "switch view"],
+    ["tab / 1-7", "switch view"],
     ["↑ ↓ / k j", "move the cursor"],
     ["n", "start a run"],
     ["g", "refresh now"],
@@ -744,7 +866,11 @@ const HELP_SECTIONS = Object.freeze([
     ["a / r", "approve once / reject"],
     ["esc", "back to the list"],
   ]],
-  ["Runs", [["enter", "open the receipt"], ["a", "its agents, as a tree — enter reads one"]]],
+  ["Runs", [
+    ["enter", "open the receipt"],
+    ["a", "its agents, as a tree — enter reads one"],
+    ["v", "check its hash chain and signatures"],
+  ]],
   ["Queue", [["c", "request cancellation"], ["R", "resume a failed job"]]],
   ["Worktrees", [
     ["enter", "the files it holds, then one file's diff"],
@@ -752,6 +878,10 @@ const HELP_SECTIONS = Object.freeze([
     ["g", "read them again"],
   ]],
   ["Merge requests", [["↑↓", "ours first, then others"], ["g", "ask GitLab again"]]],
+  ["Checks", [
+    ["enter", "run the selected check"],
+    ["A", "run all of them, in order"],
+  ]],
   ["Settings", [
     ["enter", "edit"],
     ["d", "back to the default"],
