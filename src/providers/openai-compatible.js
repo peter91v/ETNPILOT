@@ -28,6 +28,7 @@ export function createOpenAICompatibleProvider({
   requestBody,
   retry,
   contextTokens = 120_000,
+  extraTools = [],
   // Which environment variable and which secret this provider was wired to,
   // so a message about a missing key names the one to set rather than the
   // adapter's generic default.
@@ -66,6 +67,7 @@ export function createOpenAICompatibleProvider({
           // got all of them.
           allowed: context.agent.tools,
           canSpawn: (context.agent.subagents ?? []).length > 0,
+          extraTools: context.extraTools ?? extraTools,
           fetchImpl,
         })
         : undefined;

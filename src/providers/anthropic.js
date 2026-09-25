@@ -52,6 +52,7 @@ export function createAnthropicProvider({
   // is summarised away. Well under any current model's window on purpose:
   // the point is to stay inside it, not to find its edge.
   contextTokens = 120_000,
+  extraTools = [],
   fetchImpl = globalThis.fetch,
   toolsImpl,
   apiKeySource,
@@ -86,6 +87,7 @@ export function createAnthropicProvider({
           // got all of them.
           allowed: context.agent.tools,
           canSpawn: (context.agent.subagents ?? []).length > 0,
+          extraTools: context.extraTools ?? extraTools,
           fetchImpl,
         })
         : undefined;

@@ -20,6 +20,7 @@ const BUILTIN_FACTORIES = {
   anthropic: async (name, config, context) => createAnthropicProvider({
     ...config,
     name,
+    extraTools: context.extraTools ?? [],
     apiKeySource: describeApiKeySource(config, context, "anthropic.apiKey", "ANTHROPIC_API_KEY"),
     workingDirectory: config.workingDirectory ?? context.workingDirectory,
     sandbox: context.sandbox,
@@ -36,6 +37,7 @@ const BUILTIN_FACTORIES = {
   "openai-compatible": async (name, config, context) => createOpenAICompatibleProvider({
     ...config,
     name,
+    extraTools: context.extraTools ?? [],
     apiKeySource: describeApiKeySource(config, context, "provider.apiKey", "ETNPILOT_PROVIDER_API_KEY"),
     workingDirectory: config.workingDirectory ?? context.workingDirectory,
     sandbox: context.sandbox,

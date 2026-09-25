@@ -214,6 +214,14 @@ policy:
       - id: shell-with-review
         effect: human
         kinds: [shell]
+      # A tool from an MCP server is code this project did not write, so it
+      # gets its own kind rather than passing as a file read. There is no rule
+      # for it below, and 'default: deny' means an MCP tool is refused until a
+      # project adds one — which is the right way round.
+      #
+      #   - id: mcp-tools
+      #     effect: human
+      #     kinds: [mcp]
       - id: approved-network-targets
         effect: human
         kinds: [network]
@@ -264,6 +272,17 @@ pluginIsolation:
   maxPendingRequests: 32
   memoryPollIntervalMs: 100
 plugins: []
+# Tools from Model Context Protocol servers, offered to every provider. Each
+# one is asked for under the 'mcp' operation kind, which 'policy.operations'
+# denies until a rule allows it.
+#
+# mcpServers:
+#   docs:
+#     command: npx
+#     args: [-y, some-mcp-server]
+#     tools: [search]        # omit to offer every tool the server lists
+mcpServers: {}
+
 workflow:
   concurrency: 1
   failFast: true

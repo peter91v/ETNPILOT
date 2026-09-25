@@ -32,6 +32,7 @@ import { createSecretResolver } from "../secrets/resolver.js";
 import { createTelemetry } from "../observability/telemetry.js";
 import { buildDevcontainerImage, createSandbox, readDevcontainerImage } from "./sandbox.js";
 import { createFixtureRecorder, fixtureProviderFactories, loadFixtures } from "./fixtures.js";
+import { connectMcpTools } from "../providers/mcp-client.js";
 
 // Every branch a run publishes from starts here, which is also how a surface
 // tells ETNPilot's own merge requests apart from everyone else's.
@@ -89,6 +90,8 @@ export async function runProject({
   let telemetry;
   let workspace;
   let codegraph;
+  let mcp;
+  const mcpErrors = [];
   let codegraphBefore;
   let codegraphUnavailable;
   let contentEvidence;
@@ -159,6 +162,16 @@ export async function runProject({
         codegraph = undefined;
       }
     }
+    // The project's own MCP servers, for every provider rather than one. A
+    // server that will not start costs its tools, not the run.
+    if (config.mcpServers && Object.keys(config.mcpServers).length > 0) {
+      mcp = await connectMcpTools(config.mcpServers, {
+        onError: ({ server, error }) => {
+          mcpErrors.push({ server, error });
+          harness.instructions.push(`The MCP server '${server}' is unavailable: ${error}`);
+        },
+      });
+    }
     sandbox = createSandbox(await resolveSandboxConfig(config.sandbox ?? {}, workspace.path), {
       workspace: workspace.path,
     });
@@ -180,6 +193,9 @@ export async function runProject({
       secretResolver: secrets,
       factories: effectiveFactories,
       sandbox,
+      // Whatever the project's MCP servers offer, handed to every provider as
+      // ordinary tools rather than to one provider as a special case.
+      extraTools: mcp?.tools ?? [],
       ...(codegraph ? {
         mcpServers: { codegraph: codegraph.mcp },
         readOnlyMcpTools: codegraph.mcp.tools,
@@ -209,6 +225,7 @@ export async function runProject({
     });
   } catch (error) {
     codegraph?.graph.close();
+    mcp?.close();
     await harness.close();
     // Setup never reached the workflow, so the run left no evidence worth
     // keeping. Remove the workspace instead of leaking a worktree per attempt.
@@ -328,6 +345,7 @@ export async function runProject({
       summary,
     });
     codegraph?.graph.close();
+    mcp?.close();
     await harness.close();
     error.run = {
       runId,

@@ -183,12 +183,22 @@ export function createWorkspaceTools({
   sandbox,
   allowed,
   canSpawn = true,
+  // Tools from somewhere else — an MCP server the project configured. They
+  // join the same list so that one approval path, one allow-list and one
+  // receipt cover them too.
+  extraTools = [],
   fetchImpl = globalThis.fetch,
 } = {}) {
   if (!workingDirectory) throw new TypeError("Workspace tools require a workingDirectory.");
   const root = resolve(workingDirectory);
   const bounds = { ...DEFAULT_LIMITS, ...limits };
-  const definitions = allowedDefinitions(allowed, { canSpawn });
+  const extra = new Map(extraTools.map((tool) => [tool.definition.name, tool]));
+  const definitions = [
+    ...allowedDefinitions(allowed, { canSpawn }),
+    ...extraTools
+      .filter((tool) => allowed === undefined || allowed.includes(tool.definition.name))
+      .map((tool) => tool.definition),
+  ];
   const permitted = new Set(definitions.map((definition) => definition.name));
 
   return {
@@ -197,7 +207,8 @@ export function createWorkspaceTools({
       if (!permitted.has(name)) {
         // Named as a refusal rather than as 'unknown tool': the tool exists,
         // this agent may not use it, and the receipt should say which it was.
-        return WORKSPACE_TOOL_DEFINITIONS.some((definition) => definition.name === name)
+        const exists = WORKSPACE_TOOL_DEFINITIONS.some((definition) => definition.name === name) || extra.has(name);
+        return exists
           ? { ok: false, error: `Agent '${context?.agent?.name ?? "this agent"}' may not use '${name}'.`, refused: "not-allowed" }
           : { ok: false, error: `Unknown tool '${name}'.` };
       }
@@ -207,6 +218,8 @@ export function createWorkspaceTools({
       // was that its JSON did not parse.
       if (parsed.ok === false) return parsed;
       const args = parsed.value;
+      const foreign = extra.get(name);
+      if (foreign) return foreign.invoke(args, context);
       switch (name) {
         case "read_file": return readWorkspaceFile(root, bounds, args, context);
         case "list_files": return listWorkspaceFiles(root, bounds, args, context);
