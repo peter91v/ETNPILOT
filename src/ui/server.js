@@ -328,12 +328,20 @@ function errorBody(error) {
 }
 
 function decideApproval(inbox, body) {
-  const decision = body.decision === "approve" ? "approved" : body.decision === "reject" ? "rejected" : undefined;
-  if (!decision) throw badRequest("decision must be 'approve' or 'reject'.");
+  // 'approve-for-run' is an approval with a reach: this operation and others
+  // like it, until this run ends. The scope is what the person saw, narrowed
+  // by them or defaulted from the request.
+  const decision = body.decision === "approve"
+    ? "approved"
+    : body.decision === "approve-for-run"
+      ? "approved-for-run"
+      : body.decision === "reject" ? "rejected" : undefined;
+  if (!decision) throw badRequest("decision must be 'approve', 'approve-for-run' or 'reject'.");
   if (!body.id) throw badRequest("An approval id is required.");
   return inbox.decide(String(body.id), decision, {
     actor: actorName(body, process.env),
     reason: body.reason ? String(body.reason) : undefined,
+    scope: body.scope ? String(body.scope) : undefined,
   });
 }
 

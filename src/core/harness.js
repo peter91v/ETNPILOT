@@ -8,7 +8,37 @@ const DEFAULT_MAX_SUBAGENT_DEPTH = 4;
 
 const WORKSPACE_TOOL_NAMES = new Set(WORKSPACE_TOOL_DEFINITIONS.map((definition) => definition.name));
 
+// What a yes covers when the person deciding named no scope of their own:
+// the directory a write was in, or the program a command ran. Never wider than
+// what was in front of them.
+function defaultScope(request) {
+  if (request?.kind === "write" && request.fileName) {
+    const at = String(request.fileName).lastIndexOf("/");
+    return at === -1 ? "*" : `${String(request.fileName).slice(0, at)}/**`;
+  }
+  if (request?.kind === "shell" && request.fullCommandText) {
+    return String(request.fullCommandText).trim().split(/\s+/)[0];
+  }
+  return undefined;
+}
+
+function matchesScope(scope, request) {
+  if (request?.kind === "write") {
+    const file = String(request.fileName ?? "");
+    if (scope === "*") return !file.includes("/");
+    if (scope.endsWith("/**")) return file.startsWith(scope.slice(0, -2));
+    return file === scope;
+  }
+  if (request?.kind === "shell") {
+    return String(request.fullCommandText ?? "").trim().split(/\s+/)[0] === scope;
+  }
+  return false;
+}
+
 export class Harness {
+  #grants;
+  #tainted;
+
   constructor({
     approvalPolicy,
     approvalHandler,
@@ -27,6 +57,8 @@ export class Harness {
     this.plugins = new Registry("plugin");
     this.agents = new Registry("agent");
     this.skills = new Registry("skill");
+    this.#grants = new Map();
+    this.#tainted = new Map();
     this.prompts = new Registry("prompt");
     this.instructions = [];
     this.approvalPolicy = approvalPolicy;
@@ -197,6 +229,18 @@ export class Harness {
           }
           return { answered: false, reason: decision.reason ?? "Not answered." };
         },
+        // Called by the one tool that brings in text nobody here wrote.
+        taint: (reason) => {
+          const dropped = this.markTainted(metadata.workflowRunId ?? runId, reason);
+          if (dropped?.dropped > 0) {
+            approvals.push({
+              operationKind: "grant-revoked",
+              decision: "revoked",
+              at: new Date().toISOString(),
+              evidence: { reason, grantsDropped: dropped.dropped },
+            });
+          }
+        },
         approve: async (request) => {
           const decision = await this.#approve(request, {
             runId,
@@ -282,6 +326,21 @@ export class Harness {
     if (!this.approvalPolicy) return { kind: "reject", reason: "No approval policy configured." };
     const decision = await this.approvalPolicy.evaluate(request, context);
     if (decision.kind !== "human-required") return decision;
+
+    // A yes given earlier in this run, for operations like this one. It never
+    // widens what the policy allows: this branch is only reached because the
+    // policy already said a human may decide it.
+    const covered = this.#coveringGrant(context.workflowRunId ?? context.runId, request);
+    if (covered) {
+      return {
+        kind: "approve-once",
+        coveredBy: covered.approvalId,
+        scope: covered.scope,
+        evidence: { ...covered.evidence, coveredBy: covered.approvalId },
+        ...(decision.policy ? { policy: decision.policy } : {}),
+      };
+    }
+
     if (!this.approvalHandler) {
       return { kind: "reject", reason: "Human approval is required, but no approval handler is available." };
     }
@@ -291,7 +350,54 @@ export class Harness {
       ...context,
       ...(decision.policy ? { policy: decision.policy } : {}),
     });
+    if (handled?.kind === "approve-for-run") {
+      this.#grant(context.workflowRunId ?? context.runId, request, handled);
+      return {
+        kind: "approve-once",
+        scope: handled.scope,
+        grantedForRun: true,
+        ...(handled.evidence ? { evidence: handled.evidence } : {}),
+        ...(decision.policy ? { policy: decision.policy } : {}),
+      };
+    }
     return decision.policy ? { ...handled, policy: decision.policy } : handled;
+  }
+
+  // Everything a run-scoped yes covers, per run. Cleared when the run ends and
+  // when the run reads something from outside — see 'markTainted'.
+  #grant(runId, request, decision) {
+    if (!runId || this.#tainted.has(runId)) return;
+    const scope = decision.scope ?? defaultScope(request);
+    if (!scope) return;
+    const grants = this.#grants.get(runId) ?? [];
+    grants.push({ kind: request?.kind, scope, approvalId: decision.approvalId, evidence: decision.evidence });
+    this.#grants.set(runId, grants);
+  }
+
+  #coveringGrant(runId, request) {
+    if (!runId || this.#tainted.has(runId)) return undefined;
+    return (this.#grants.get(runId) ?? []).find((grant) => grant.kind === request?.kind && matchesScope(grant.scope, request));
+  }
+
+  // The rule the plan made a condition rather than advice: once a run has
+  // pulled in text nobody here wrote, every run-scoped yes in it falls back to
+  // asking again. A fetched page saying 'change src/auth.js' must not ride
+  // through on a grant given for 'src/**' before the page was read.
+  markTainted(runId, reason) {
+    if (!runId) return;
+    this.#tainted.set(runId, reason);
+    const dropped = (this.#grants.get(runId) ?? []).length;
+    this.#grants.delete(runId);
+    return { dropped, reason };
+  }
+
+  taintReason(runId) {
+    return this.#tainted.get(runId);
+  }
+
+  releaseRun(runId) {
+    this.#grants.delete(runId);
+    this.#tainted.delete(runId);
   }
 
   async #invokeDirect(providerName, context) {

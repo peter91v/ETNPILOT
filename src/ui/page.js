@@ -1427,8 +1427,19 @@ function renderApprovals() {
       ]));
     }
     const approve = button("Approve once", { class: "btn primary", onClick: () => decide("approve") });
+    // The same yes, with a reach: this operation and others like it until the
+    // run ends. Offered only where a scope means something — twelve writes
+    // under one directory were twelve identical questions, and a tool that
+    // asks twelve times is one people switch off.
+    const forRun = ["write", "shell"].includes(approval.operationKind)
+      ? [button("Approve for this run", {
+        class: "btn tonal",
+        title: "Covers operations like this one until the run ends. A page fetched from outside cancels it.",
+        onClick: () => decide("approve-for-run"),
+      })]
+      : [];
     const reject = button("Reject", { class: "btn danger", onClick: () => decide("reject") });
-    body.push(el("div", { class: "row" }, [actor, reason, approve, reject]));
+    body.push(el("div", { class: "row" }, [actor, reason, approve, ...forRun, reject]));
     const fingerprint = details.fingerprint ?? "";
     body.push(el("p", {
       class: "muted mono",

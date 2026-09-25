@@ -5,8 +5,12 @@ import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
 import { redactSecrets, sanitizeForDisplay } from "./text-safety.js";
 
-const DECISIONS = new Set(["approved", "rejected"]);
-const STATUSES = new Set(["pending", "approved", "rejected", "expired", "all"]);
+// 'approved-for-run' is an approval with a reach: this operation, and others
+// like it, until this run ends. It exists because twelve writes under 'src/'
+// were twelve identical questions, and a tool that asks twelve times is a tool
+// people switch off — at which point the policy protects nothing.
+const DECISIONS = new Set(["approved", "rejected", "approved-for-run"]);
+const STATUSES = new Set(["pending", "approved", "rejected", "approved-for-run", "expired", "all"]);
 
 export class ApprovalInbox {
   constructor(databasePath, { now = Date.now, redact = false, maxDetailLength = 8192 } = {}) {
@@ -41,6 +45,10 @@ export class ApprovalInbox {
     `);
     ensureColumn(this.database, "approvals", "workflow_job_id", "TEXT");
     ensureColumn(this.database, "approvals", "policy_json", "TEXT");
+    // What an 'approved-for-run' decision covers: a path glob or a command
+    // prefix. Kept with the decision, because the receipt has to be able to
+    // say how wide a yes was.
+    ensureColumn(this.database, "approvals", "scope", "TEXT");
     this.database.exec("CREATE INDEX IF NOT EXISTS approvals_workflow_job ON approvals(workflow_job_id, created_at);");
   }
 
@@ -100,7 +108,7 @@ export class ApprovalInbox {
     return rows.map(fromRow);
   }
 
-  decide(id, decision, { actor = "cli", reason } = {}) {
+  decide(id, decision, { actor = "cli", reason, scope } = {}) {
     if (!DECISIONS.has(decision)) throw new TypeError(`Unsupported approval decision: '${decision}'.`);
     const decidedAt = this.now();
     this.expire();
@@ -110,9 +118,9 @@ export class ApprovalInbox {
       throw new ApprovalStateError(`Approval '${id}' is already ${row.status}.`, { code: "already_decided" });
     }
     const result = this.database.prepare(`
-      UPDATE approvals SET status = ?, decided_at = ?, decided_by = ?, reason = ?
+      UPDATE approvals SET status = ?, decided_at = ?, decided_by = ?, reason = ?, scope = ?
       WHERE id = ? AND status = 'pending'
-    `).run(decision, decidedAt, actor, reason ?? null, id);
+    `).run(decision, decidedAt, actor, reason ?? null, scope ?? null, id);
     if (Number(result.changes) !== 1) {
       const current = this.database.prepare("SELECT status FROM approvals WHERE id = ?").get(id);
       throw new ApprovalStateError(`Approval '${id}' is already ${current?.status ?? "unknown"}.`, {
@@ -178,14 +186,15 @@ export function createInboxApprovalHandler({
         evidence: approvalEvidence(record),
       };
     }
-    return record.status === "approved"
+    return record.status === "approved" || record.status === "approved-for-run"
       // The reason a person typed when approving. For an ordinary operation it
       // is a note; for a question asked with 'ask_human' it is the answer, and
       // there is no second field to keep them apart because they are the same
       // thing: what the person said when they decided.
       ? {
-        kind: "approve-once",
+        kind: record.status === "approved-for-run" ? "approve-for-run" : "approve-once",
         approvalId: record.id,
+        ...(record.scope ? { scope: record.scope } : {}),
         ...(record.reason ? { answer: record.reason } : {}),
         evidence: approvalEvidence(record),
       }
@@ -272,6 +281,7 @@ function fromRow(row) {
     decidedAt: row.decided_at === null ? undefined : Number(row.decided_at),
     decidedBy: row.decided_by ?? undefined,
     reason: row.reason ?? undefined,
+    scope: row.scope ?? undefined,
     serviceInstanceId: row.service_instance_id ?? undefined,
   });
 }
@@ -294,6 +304,7 @@ function approvalEvidence(record) {
     decidedBy: record.decidedBy,
     decidedAt: record.decidedAt,
     ...(record.reason ? { reason: record.reason } : {}),
+    ...(record.scope ? { scope: record.scope } : {}),
   };
 }
 

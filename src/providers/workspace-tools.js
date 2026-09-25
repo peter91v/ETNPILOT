@@ -609,6 +609,11 @@ async function fetchWorkspaceUrl(bounds, args, context, signal, fetchImpl) {
     if (!response.ok) {
       return { ok: false, error: `${current.host} answered ${response.status}.`, status: response.status };
     }
+    // From here on this run has read something from outside it. Any
+    // run-scoped approval it was given stops applying, so a page that says
+    // 'change src/auth.js' cannot ride through on a yes given before it was
+    // read. Marked before the body is returned, not after it is used.
+    context.taint?.(`fetch_url read ${current.origin}`);
     const type = response.headers.get("content-type") ?? "";
     if (!/^(text\/|application\/(json|xml|xhtml))/i.test(type)) {
       return { ok: false, error: `${current.href} is ${type || "of unknown type"}; only text can be read.` };

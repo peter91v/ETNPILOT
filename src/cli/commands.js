@@ -62,6 +62,8 @@ export const CLI_OPTIONS = Object.freeze({
   open: { type: "boolean", default: false },
   "no-open": { type: "boolean", default: false },
   events: { type: "string" },
+  "for-run": { type: "boolean", default: false },
+  scope: { type: "string" },
   cases: { type: "string" },
   json: { type: "boolean", default: false },
   "rotate-token": { type: "boolean", default: false },
@@ -122,7 +124,7 @@ Usage:
   etnpilot tui [--root directory]
   etnpilot approval list [--status pending|approved|rejected|expired|all] [--limit number]
   etnpilot approval show <id>
-  etnpilot approval approve <id> [--actor name] [--reason text]
+  etnpilot approval approve <id> [--actor name] [--reason text] [--for-run] [--scope pattern]
   etnpilot approval reject <id> [--actor name] [--reason text]
   etnpilot queue list [--status status] [--limit number]
   etnpilot queue show <id>
@@ -416,10 +418,13 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
   } else if (command === "approval" && (subcommand === "approve" || subcommand === "reject")) {
     if (!rest[0]) throw new Error("An approval ID is required.");
     await withApprovalInbox(resolve(values.root), async (inbox) => {
-      const decision = subcommand === "approve" ? "approved" : "rejected";
+      const decision = subcommand === "approve"
+        ? (values["for-run"] ? "approved-for-run" : "approved")
+        : "rejected";
       const result = inbox.decide(rest[0], decision, {
         actor: values.actor ?? process.env.USER ?? "cli",
         reason: values.reason,
+        scope: values.scope,
       });
       console.log(JSON.stringify(result, null, 2));
     });
