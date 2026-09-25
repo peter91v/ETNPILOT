@@ -109,7 +109,7 @@ test("the OpenAI-compatible provider runs an approved tool loop", async () => {
   // the next time one is added — which is exactly what happened.
   assert.equal(bodies[0].tools.length, WORKSPACE_TOOL_DEFINITIONS.length);
   assert.equal(bodies[1].messages.at(-1).role, "tool");
-  assert.equal(JSON.parse(bodies[1].messages.at(-1).content).ok, true);
+  assert.equal(insideEnvelope(bodies[1].messages.at(-1).content).ok, true);
 });
 
 test("the tool loop is bounded", async () => {
@@ -182,3 +182,12 @@ test("a command that failed says why, and an optional path may be left empty", a
   const wrongShape = await tools.invoke("write_file", "[1,2]", approving);
   assert.match(wrongShape.error, /Tool arguments must be a JSON object\./);
 });
+
+// A tool result reaches the model inside a marked envelope, so that outside
+// text is never mistaken for an instruction (src/providers/tool-results.js).
+// The payload is still the bounded JSON the receipt records.
+function insideEnvelope(content) {
+  const match = /^<tool_output id="[0-9a-f]+">\n([\s\S]*)\n<\/tool_output id="[0-9a-f]+">$/.exec(content.trim());
+  assert.ok(match, "the tool result is wrapped: " + content.slice(0, 40));
+  return JSON.parse(match[1]);
+}

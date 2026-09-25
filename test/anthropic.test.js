@@ -111,7 +111,7 @@ test("the Anthropic provider runs an approved tool loop", async () => {
   assert.equal(back.role, "user");
   assert.equal(back.content[0].type, "tool_result");
   assert.equal(back.content[0].tool_use_id, "toolu_1");
-  assert.equal(JSON.parse(back.content[0].content).ok, true);
+  assert.equal(insideEnvelope(back.content[0].content).ok, true);
 });
 
 test("the Anthropic tool loop is bounded", async () => {
@@ -268,3 +268,12 @@ test("the models this account can currently reach", async () => {
   assert.deepEqual(models.map((m) => m.id), ["claude-haiku-4-5", "claude-opus-5"]);
   assert.equal(models.find((m) => m.id === "claude-opus-5").displayName, "Claude Opus 5");
 });
+
+// A tool result reaches the model inside a marked envelope, so that outside
+// text is never mistaken for an instruction (src/providers/tool-results.js).
+// The payload is still the bounded JSON the receipt records.
+function insideEnvelope(content) {
+  const match = /^<tool_output id="[0-9a-f]+">\n([\s\S]*)\n<\/tool_output id="[0-9a-f]+">$/.exec(content.trim());
+  assert.ok(match, "the tool result is wrapped: " + content.slice(0, 40));
+  return JSON.parse(match[1]);
+}

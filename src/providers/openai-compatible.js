@@ -1,5 +1,6 @@
 import { ProviderError } from "./router.js";
 import { createWorkspaceTools } from "./workspace-tools.js";
+import { createResultEnvelope } from "./tool-results.js";
 
 const DEFAULT_MAX_TOOL_ITERATIONS = 12;
 
@@ -62,8 +63,9 @@ export function createOpenAICompatibleProvider({
           allowed: context.agent.tools,
         })
         : undefined;
+      const envelope = createResultEnvelope(context.runId);
       const messages = [
-        { role: "system", content: buildSystemMessage(context) },
+        { role: "system", content: buildSystemMessage(context, workspaceTools ? envelope : undefined) },
         { role: "user", content: String(context.input) },
       ];
       const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
@@ -119,7 +121,7 @@ export function createOpenAICompatibleProvider({
             role: "tool",
             tool_call_id: call.id,
             // The model sees the same bounded result the receipt records.
-            content: JSON.stringify(result),
+            content: envelope.wrap(result),
           });
         }
       }
@@ -303,9 +305,11 @@ function bodyHasToolResults(body) {
   return (body.messages ?? []).some((message) => message.role === "tool");
 }
 
-function buildSystemMessage(context) {
+function buildSystemMessage(context, envelope) {
   const parts = [context.agent.prompt, ...context.instructions];
   for (const skill of context.skills ?? []) parts.push(skill?.content ?? String(skill));
+  // Last, so it is the most recent thing said about how to read what follows.
+  if (envelope) parts.push(envelope.instruction);
   return parts.filter(Boolean).join("\n\n");
 }
 

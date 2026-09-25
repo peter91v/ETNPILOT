@@ -1,6 +1,7 @@
 import { missingApiKey } from "./openai-compatible.js";
 import { ProviderError } from "./router.js";
 import { createWorkspaceTools } from "./workspace-tools.js";
+import { createResultEnvelope } from "./tool-results.js";
 
 const DEFAULT_MAX_TOOL_ITERATIONS = 12;
 const DEFAULT_BASE_URL = "https://api.anthropic.com";
@@ -58,7 +59,10 @@ export function createAnthropicProvider({
         })
         : undefined;
       const messages = [{ role: "user", content: String(context.input) }];
-      const system = buildSystemMessage(context);
+      // One envelope per invocation: the marker a file could name is never
+      // the marker in use.
+      const envelope = createResultEnvelope(context.runId);
+      const system = buildSystemMessage(context, workspaceTools ? envelope : undefined);
       const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
       const toolCalls = [];
       let responseModel;
@@ -108,7 +112,7 @@ export function createAnthropicProvider({
             tool_use_id: call.id,
             ...(result.ok === true ? {} : { is_error: true }),
             // The model sees the same bounded result the receipt records.
-            content: JSON.stringify(result),
+            content: envelope.wrap(result),
           });
         }
         messages.push({ role: "user", content: results });
@@ -219,9 +223,11 @@ function textOf(content) {
     .join("");
 }
 
-function buildSystemMessage(context) {
+function buildSystemMessage(context, envelope) {
   const parts = [context.agent.prompt, ...context.instructions];
   for (const skill of context.skills ?? []) parts.push(skill?.content ?? String(skill));
+  // Last, so it is the most recent thing said about how to read what follows.
+  if (envelope) parts.push(envelope.instruction);
   return parts.filter(Boolean).join("\n\n");
 }
 
