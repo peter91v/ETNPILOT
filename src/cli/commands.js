@@ -61,6 +61,7 @@ export const CLI_OPTIONS = Object.freeze({
   // 'etnpilot ui' opens a browser; both spellings the help names must parse.
   open: { type: "boolean", default: false },
   "no-open": { type: "boolean", default: false },
+  events: { type: "string" },
   "rotate-token": { type: "boolean", default: false },
   host: { type: "string" },
   port: { type: "string" },
@@ -94,6 +95,7 @@ export const USAGE = `ETNPilot
 Usage:
   etnpilot init [directory] [--template default|minimal|regulated]
   etnpilot run <task> [--agent name] [--root directory] [--approvals terminal|inbox]
+    [--events jsonl]
     [--worktree | --no-worktree] [--cleanup-worktree] [--publish] [--dry-run]
     [--record-fixtures file | --fixtures file]
   etnpilot replay <receipt-file> [--root directory] [--public-key path]
@@ -166,10 +168,23 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     }
     const task = [subcommand, ...rest].filter(Boolean).join(" ");
     const worktree = values.worktree ? true : (values["no-worktree"] || values["in-place"]) ? false : undefined;
+    // In a pipeline this command printed nothing for minutes and then one
+    // JSON object. The events are already produced — the surfaces use them to
+    // show progress — and only the CLI threw them away.
+    const streaming = values.events === "jsonl";
+    if (values.events !== undefined && !streaming) {
+      throw new Error(`Unknown --events format '${values.events}'. The only one is 'jsonl'.`);
+    }
+    // A reader of this stream must get a last line either way; a run that
+    // throws would otherwise end mid-stream with the reason only on stderr.
+    const emit = (line) => { if (streaming) console.log(JSON.stringify(line)); };
     const result = await runProject({
       root: resolve(values.root),
       input: task,
       agent: values.agent,
+      ...(streaming
+        ? { onEvent: (event) => console.log(JSON.stringify(event)) }
+        : {}),
       worktree,
       cleanupPolicy: values["cleanup-worktree"] ? "on-success" : undefined,
       publish: values.publish,
@@ -177,8 +192,13 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
       recordFixtures: values["record-fixtures"],
       fixtures: values.fixtures,
       approvalHandler: await createRunApprovalHandler(resolve(values.root), values.approvals),
+    }).catch((error) => {
+      emit({ type: "run.error", at: new Date().toISOString(), error: error.message });
+      throw error;
     });
-    console.log(JSON.stringify(result, null, 2));
+    // The last line is the result, whichever mode: a reader that takes the
+    // final line gets the same answer either way.
+    console.log(streaming ? JSON.stringify({ event: "run.result", ...result }) : JSON.stringify(result, null, 2));
     return result.summary?.status === "succeeded" ? 0 : 1;
   } else if (command === "replay") {
     if (!subcommand) throw new Error("A receipt file is required.");
