@@ -30,9 +30,13 @@ export function renderManifest({ project = "" } = {}) {
     name: project ? `ETNPilot — ${project}` : "ETNPilot Review",
     short_name: "ETNPilot",
     description: "Approvals, runs and receipts for this project, on the machine that runs it.",
-    // The page is the whole app; the token travels in the URL that was
-    // installed, which is why the scope is the origin and not '/?token=…'.
-    start_url: ".",
+    // A browser resolves 'start_url' against the manifest's URL, not the
+    // page's — so an installed app opens this, with no query string and
+    // therefore no token. It used to be answered with a 401, because the
+    // comment here claimed the token travelled in the installed link and
+    // nothing ever launched one to check. What lets it in is the session
+    // cookie the server sets when the token-carrying link is opened.
+    start_url: "/",
     scope: "/",
     display: "standalone",
     orientation: "any",

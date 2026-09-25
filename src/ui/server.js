@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { networkInterfaces } from "node:os";
 import { ApprovalStateError } from "../core/approval-inbox.js";
@@ -9,40 +9,56 @@ import { createProject, describeProject } from "../runtime/first-run.js";
 import { renderReviewPage } from "./page.js";
 import { renderIcon, renderManifest, renderServiceWorker } from "./app.js";
 import { renderSetupPage } from "./setup-page.js";
+import { readOrCreateToken, writeToken } from "./token.js";
 
 // A local review surface for the evidence ETNPilot already produces: pending
 // approvals, queued work, and finished runs. It reads the same databases the
 // CLI does, so nothing here is a second source of truth.
 //
 // Security posture: bound to the loopback interface, and every request must
-// carry a token minted at startup. Mutating calls additionally require a
-// custom header, which a page on another origin cannot send without a
-// preflight this server refuses. Anyone who can read the token can approve
+// carry the project's token. It arrives one of two ways — in the URL a person
+// opened, or in a cookie this server set when they did. Mutating calls
+// additionally require a custom header, which a page on another origin cannot
+// send without a preflight this server refuses; the cookie alone is never
+// enough to change anything. Anyone who can read the token can approve
 // operations, exactly like anyone who can write the inbox database.
 export async function createReviewServer({
   root = process.cwd(),
   env = process.env,
-  token = randomBytes(24).toString("base64url"),
+  token,
+  rotateToken = false,
 } = {}) {
+  // Kept between starts, because an installed app holds a link: a token minted
+  // per start locks that icon out at the next restart. A caller may still pass
+  // one, which is what the tests do.
   // A directory with no project in it is not an error to crash on: the page
   // offers to create one, exactly as the terminal interface does. Until it
   // exists there is no state to open, and every route that needs one says so
   // rather than failing on a file nobody has heard of.
-  let state = (await describeProject({ root })).exists
-    ? await openProjectState({ root, env })
-    : undefined;
+  const project = await describeProject({ root });
+  let state = project.exists ? await openProjectState({ root, env }) : undefined;
+  const resolvedToken = token
+    ?? (await readOrCreateToken(root, { rotate: rotateToken, persist: project.exists })).token;
 
   const server = createServer(async (request, response) => {
     try {
       const url = new URL(request.url, "http://127.0.0.1");
       if (request.method === "OPTIONS") return send(response, 405, { error: "cross-origin-requests-are-not-served" });
+      // Two ways in, and the second is the one an installed app has: a link
+      // carries the token in its query, and opening it leaves a cookie behind
+      // so the next launch — which has no query at all — is still let in.
+      const fromQuery = authorized(url.searchParams.get("token"), resolvedToken);
+      const fromCookie = authorized(cookie(request, SESSION_COOKIE), resolvedToken);
       if (url.pathname === "/" && request.method === "GET") {
-        if (!authorized(url.searchParams.get("token"), token)) {
+        if (!fromQuery && !fromCookie) {
           return html(response, 401, "<h1>ETNPilot</h1><p>Open the URL printed by <code>etnpilot ui</code>.</p>");
         }
         return html(response, 200, state
-          ? renderReviewPage(token)
-          : renderSetupPage(token, await describeProject({ root })));
+          ? renderReviewPage(resolvedToken)
+          : renderSetupPage(resolvedToken, await describeProject({ root })), {
+          // Refreshed on every visit, so an app in daily use never falls out.
+          "set-cookie": sessionCookie(resolvedToken),
+        });
       }
       // The app's shell. These three carry no evidence — a name, two drawn
       // icons and a worker script — so they are served without the token:
@@ -58,10 +74,15 @@ export async function createReviewServer({
       if (request.method === "GET" && url.pathname === "/sw.js") {
         // The token is the cache's version, so a new session cannot be served
         // a previous one's shell.
-        return script(response, renderServiceWorker(token.slice(0, 8)));
+        return script(response, renderServiceWorker(resolvedToken.slice(0, 8)));
       }
       if (!url.pathname.startsWith("/api/")) return send(response, 404, { error: "not-found" });
-      if (!authorized(header(request, "x-etnpilot-token"), token)) {
+      // Reading may go through the cookie; changing anything may not. A page
+      // on another origin can make a browser send a cookie, but it cannot set
+      // this header, and it cannot read what comes back either way. That is
+      // the whole of the cross-site defence, so the cookie never widens it.
+      const headerToken = authorized(header(request, "x-etnpilot-token"), resolvedToken);
+      if (!headerToken && !(request.method === "GET" && fromCookie)) {
         return send(response, 401, { error: "unauthorized" });
       }
       // The only route that works before there is a project, and the only one
@@ -73,6 +94,9 @@ export async function createReviewServer({
         const created = await createProject({ root, template: String(body.template ?? "default") })
           .catch((error) => { throw error instanceof TypeError ? badRequest(error.message) : error; });
         state = await openProjectState({ root, env });
+        // Now there is somewhere to keep it, so the link survives a restart
+        // and the app this project can install is not locked out.
+        if (!token) await writeToken(root, resolvedToken).catch(() => {});
         return send(response, 201, created);
       }
       if (!state) return send(response, 409, { error: "no-project-here", root });
@@ -220,7 +244,7 @@ export async function createReviewServer({
 
   return {
     server,
-    token,
+    token: resolvedToken,
     // The state is created when the project is, so these read through rather
     // than being captured once.
     get state() { return state; },
@@ -243,7 +267,7 @@ export async function createReviewServer({
           resolveListen({
             ...address,
             exposed,
-            url: `http://${bracket(displayed)}:${address.port}/?token=${token}`,
+            url: `http://${bracket(displayed)}:${address.port}/?token=${resolvedToken}`,
           });
         };
         server.once("error", onError);
@@ -397,8 +421,30 @@ function send(response, status, payload) {
   response.end(`${JSON.stringify(payload)}\n`);
 }
 
-function html(response, status, body) {
+// The session cookie is the token itself: no second secret to leak, and
+// nothing a person has to keep. 'Strict' keeps it off every cross-site
+// request, 'HttpOnly' keeps it out of the page's own script, and there is no
+// 'Secure' because this server is loopback http by design.
+const SESSION_COOKIE = "etnpilot_ui";
+
+function sessionCookie(token) {
+  return `${SESSION_COOKIE}=${token}; Path=/; Max-Age=${30 * 24 * 60 * 60}; HttpOnly; SameSite=Strict`;
+}
+
+function cookie(request, name) {
+  const jar = request.headers.cookie;
+  if (typeof jar !== "string") return undefined;
+  for (const part of jar.split(";")) {
+    const at = part.indexOf("=");
+    if (at === -1) continue;
+    if (part.slice(0, at).trim() === name) return part.slice(at + 1).trim();
+  }
+  return undefined;
+}
+
+function html(response, status, body, extra = {}) {
   response.writeHead(status, {
+    ...extra,
     "content-type": "text/html; charset=utf-8",
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",

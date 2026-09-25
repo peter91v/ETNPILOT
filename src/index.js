@@ -67,6 +67,11 @@ export {
   telemetryProviderAttributes,
 } from "./observability/telemetry.js";
 export { runProject } from "./runtime/project-runner.js";
+// The one read path the terminal, the TUI and the page all stand on. A
+// caller embedding ETNPilot could start a run but not see what the
+// surfaces see, which made the library half of a library.
+export { openProjectState } from "./runtime/project-state.js";
+export { listChecks, runProjectCheck } from "./runtime/project-checks.js";
 export { WorkflowEngine } from "./workflow/engine.js";
 export { WorkflowQueue, WorkflowQueueStateError, WORKFLOW_JOB_STATUSES } from "./workflow/queue.js";
 export { WorkflowQueueWorker } from "./workflow/queue-worker.js";

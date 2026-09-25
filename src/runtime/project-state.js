@@ -10,7 +10,7 @@ import { escapeControlCharacters } from "../core/text-safety.js";
 import { WorktreeManager } from "../git/worktrees.js";
 import { GitLabClient } from "../gitlab/client.js";
 import { summarizeTelemetryFile } from "../observability/telemetry.js";
-import { listChecks, runCheck } from "./project-checks.js";
+import { listChecks, runProjectCheck } from "./project-checks.js";
 import { runProject, RUN_BRANCH_PREFIX } from "./project-runner.js";
 import { createSecretResolver } from "../secrets/resolver.js";
 import { resolveConfiguredApiKey } from "../providers/register.js";
@@ -219,7 +219,7 @@ export async function openProjectState({ root = process.cwd(), env = process.env
     // surface calls this same registry rather than reimplementing a check per
     // window.
     checks: () => listChecks(),
-    runCheck: (id) => runCheck(id, { root: projectRoot, config: current }),
+    runCheck: (id) => runProjectCheck(id, { root: projectRoot, config: current }),
     // Whether a receipt is what it claims: the hash chain, and the signature
     // where the project signs. The same name check 'readReceipt' applies, for
     // the same reason — a file name from a surface never decides what is read.

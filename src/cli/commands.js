@@ -31,7 +31,7 @@ import { describeProject } from "../runtime/first-run.js";
 import { agentRawResponses, openProjectState, readMergeRequests, readWorktrees } from "../runtime/project-state.js";
 // 'diagnose' moved to the runtime layer, because the TUI and the page run the
 // same check; 'etnpilot doctor' is one of its callers, not its home.
-import { knownCheck, listChecks, runCheck } from "../runtime/project-checks.js";
+import { knownCheck, listChecks, runProjectCheck } from "../runtime/project-checks.js";
 import { diagnose } from "../runtime/diagnose.js";
 export { diagnose } from "../runtime/diagnose.js";
 import { runProject } from "../runtime/project-runner.js";
@@ -61,6 +61,7 @@ export const CLI_OPTIONS = Object.freeze({
   // 'etnpilot ui' opens a browser; both spellings the help names must parse.
   open: { type: "boolean", default: false },
   "no-open": { type: "boolean", default: false },
+  "rotate-token": { type: "boolean", default: false },
   host: { type: "string" },
   port: { type: "string" },
   status: { type: "string" },
@@ -113,7 +114,7 @@ Usage:
   etnpilot content lock [--root directory]
   etnpilot content verify [--root directory]
   etnpilot webhook serve [--root directory] [--host address] [--port number]
-  etnpilot ui [--root directory] [--host address] [--port number] [--no-open]
+  etnpilot ui [--root directory] [--host address] [--port number] [--no-open] [--rotate-token]
   etnpilot tui [--root directory]
   etnpilot approval list [--status pending|approved|rejected|expired|all] [--limit number]
   etnpilot approval show <id>
@@ -345,11 +346,18 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     if (port !== undefined && (!Number.isInteger(port) || port < 0 || port > 65_535)) {
       throw new Error("--port must be an integer between 0 and 65535.");
     }
-    const review = await createReviewServer({ root: resolve(values.root) });
+    const review = await createReviewServer({
+      root: resolve(values.root),
+      rotateToken: values["rotate-token"],
+    });
     const address = await review.listen({ host: values.host, port });
     console.log(`ETNPilot review UI: ${address.url}`);
-    console.log("The link contains a one-time token. Anyone who has it can approve operations,");
-    console.log("change local settings, and start runs.");
+    // The token is no longer minted per start — an installed app holds a link,
+    // and a link that expires at the next restart is an icon that 401s. So it
+    // says what it is: a stored credential, and how to throw it away.
+    console.log("The link carries this project's token, kept in .etnpilot/state/ and never committed.");
+    console.log("Anyone who has it can approve operations, change local settings, and start runs.");
+    console.log("Replace it with 'etnpilot ui --rotate-token', which locks out every link and app.");
     if (address.exposed) {
       // Binding away from loopback drops the guarantee the rest of this
       // surface is built on, so it is said plainly rather than left to the
@@ -599,7 +607,7 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     }
     const wanted = names.length > 0 ? names : listChecks().map((one) => one.id);
     const results = [];
-    for (const id of wanted) results.push(await runCheck(id, { root }));
+    for (const id of wanted) results.push(await runProjectCheck(id, { root }));
     console.log(JSON.stringify(names.length === 1 ? results[0] : { checks: results }, null, 2));
     // A check with no verdict of its own — no telemetry recorded yet — is not
     // a failure, so it does not decide the exit code.

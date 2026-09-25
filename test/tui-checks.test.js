@@ -8,7 +8,7 @@ import { createStyle, stripAnsi } from "../src/tui/ansi.js";
 import { renderChecks, viewList } from "../src/tui/render.js";
 import { createTuiApp } from "../src/tui/app.js";
 import { initializeProject } from "../src/config/init.js";
-import { knownCheck, listChecks, runCheck } from "../src/runtime/project-checks.js";
+import { knownCheck, listChecks, runProjectCheck } from "../src/runtime/project-checks.js";
 import { openProjectState } from "../src/runtime/project-state.js";
 import { runCli } from "../src/cli/commands.js";
 import { git } from "../src/git/command.js";
@@ -30,13 +30,13 @@ test("the registry is the one list every surface reads", () => {
 });
 
 test("an unknown check is named, not silently skipped", async () => {
-  await assert.rejects(() => runCheck("nope", { root: process.cwd() }), /Unknown check 'nope'/);
+  await assert.rejects(() => runProjectCheck("nope", { root: process.cwd() }), /Unknown check 'nope'/);
 });
 
 test("each check reports what it found, against a real project", async () => {
   const root = await createProject();
 
-  const secrets = await runCheck("secrets", { root });
+  const secrets = await runProjectCheck("secrets", { root });
   assert.equal(secrets.id, "secrets");
   assert.equal(secrets.ok, true);
   assert.match(secrets.summary, /nothing found/);
@@ -47,7 +47,7 @@ test("each check reports what it found, against a real project", async () => {
   // without echoing the value itself. It has to be tracked: the scan reads
   // what git tracks, so an untracked file is not in its scope at all.
   await plantSecret(root);
-  const leaked = await runCheck("secrets", { root });
+  const leaked = await runProjectCheck("secrets", { root });
   assert.equal(leaked.ok, false);
   assert.equal(leaked.findings.length > 0, true);
   assert.match(leaked.findings[0].text, /leak\.txt:1/);
@@ -57,29 +57,29 @@ test("each check reports what it found, against a real project", async () => {
   assert.equal(leaked.findings.some((finding) => finding.text.includes("IOSFODNN7EXAMPLE")), false);
 
   // doctor answers whether a run could start here, and its hints are findings.
-  const doctor = await runCheck("doctor", { root });
+  const doctor = await runProjectCheck("doctor", { root });
   assert.equal(typeof doctor.ok, "boolean");
   assert.equal(doctor.detail.node, process.versions.node);
 
   // Every provider the project configures, against the policy in effect.
-  const policy = await runCheck("policy", { root });
+  const policy = await runProjectCheck("policy", { root });
   assert.deepEqual(policy.findings.map((finding) => finding.label), ["github-copilot", "anthropic", "openai"]);
   assert.equal(policy.findings.every((finding) => finding.tone === "ok"), true, "the shipped project allows its own providers");
 
   // 'deps' names the ecosystem it found; a list of records joined as text
   // reads as '[object Object]', which is what a first run of this showed.
-  const deps = await runCheck("deps", { root });
+  const deps = await runProjectCheck("deps", { root });
   assert.equal(deps.summary.includes("[object"), false);
 
   // Nothing has run in this project, so telemetry has no verdict to give —
   // which is not the same as passing.
-  const telemetry = await runCheck("telemetry", { root });
+  const telemetry = await runProjectCheck("telemetry", { root });
   assert.equal(telemetry.ok, undefined);
   assert.match(telemetry.summary, /nothing recorded yet/);
 
   // A fresh project has no content lock yet, and that is a finding about the
   // project rather than a broken check.
-  const content = await runCheck("content", { root });
+  const content = await runProjectCheck("content", { root });
   assert.equal(content.ok, false);
   assert.match(content.summary, /content-lock-missing/);
 });
@@ -89,14 +89,14 @@ test("a check that cannot ask its question says so, rather than passing", async 
   // 'nothing found' there would be a claim about a tree it never opened.
   const copied = await mkdtemp(join(tmpdir(), "etnpilot-checks-nogit-"));
   await initializeProject(copied);
-  const secrets = await runCheck("secrets", { root: copied });
+  const secrets = await runProjectCheck("secrets", { root: copied });
   assert.equal(secrets.ok, undefined);
   assert.match(secrets.summary, /not a git checkout/);
   assert.match(secrets.findings[0].text, /files git tracks/);
 
   // Provenance switched off is the same shape of answer: no verdict, and the
   // reason on screen.
-  const off = await runCheck("content", { root: copied, config: { content: { provenance: { mode: "off" } } } });
+  const off = await runProjectCheck("content", { root: copied, config: { content: { provenance: { mode: "off" } } } });
   assert.equal(off.ok, undefined);
   assert.match(off.summary, /provenance is off/);
 });
