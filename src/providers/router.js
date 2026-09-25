@@ -1,12 +1,15 @@
 import { telemetryProviderAttributes } from "../observability/telemetry.js";
 
 export class ProviderError extends Error {
-  constructor(message, { code = "provider_error", retryable = false, safeToRetry = false, cause } = {}) {
+  constructor(message, { code = "provider_error", retryable = false, safeToRetry = false, retryAfterMs, cause } = {}) {
     super(message, { cause });
     this.name = "ProviderError";
     this.code = code;
     this.retryable = retryable;
     this.safeToRetry = safeToRetry;
+    // What the rate limiter itself asked for. Waiting less than it said is
+    // how a rate limit becomes a ban, so a guess never overrides it.
+    if (retryAfterMs !== undefined) this.retryAfterMs = retryAfterMs;
   }
 }
 

@@ -54,8 +54,11 @@ test("the Anthropic provider speaks the Messages API and counts its tokens", asy
   assert.equal(request.headers["x-api-key"], "sk-test");
   assert.equal(request.headers["anthropic-version"], "2023-06-01");
   // The prompt, the instructions and the skills are one system prompt; the
-  // input is the first user message.
-  assert.match(request.body.system, /Do the work\.\n\nFollow the checklist\.\n\nSkill text\./);
+  // input is the first user message. It travels as a block list, which is the
+  // shape that can carry a cache breakpoint.
+  assert.equal(request.body.system.length, 1);
+  assert.equal(request.body.system[0].type, "text");
+  assert.match(request.body.system[0].text, /Do the work\.\n\nFollow the checklist\.\n\nSkill text\./);
   assert.deepEqual(request.body.messages, [{ role: "user", content: "hello" }]);
   assert.equal(request.body.max_tokens, 8192);
   // Current models take adaptive thinking; a thinking budget is rejected.

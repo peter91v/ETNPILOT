@@ -85,10 +85,15 @@ test("an agent with no tools is told nothing about markers it will never see", a
       return new Response(JSON.stringify({ content: [{ type: "text", text: "ok" }] }), { status: 200 });
     },
   }).invoke({ agent: { name: "reader", prompt: "Answer." }, input: "hi", instructions: [], skills: [] });
-  assert.equal(/tool_output/.test(bodies[0].system ?? ""), false);
+  const system = Array.isArray(bodies[0].system)
+    ? bodies[0].system.map((block) => block.text).join("\n\n")
+    : bodies[0].system ?? "";
+  assert.equal(/tool_output/.test(system), false);
 });
 
-function assertWrapped(system, result) {
+function assertWrapped(rawSystem, result) {
+  // Anthropic takes the system prompt as blocks, the OpenAI shape as a string.
+  const system = Array.isArray(rawSystem) ? rawSystem.map((block) => block.text).join("\n\n") : rawSystem;
   const nonce = /<tool_output id="([0-9a-f]+)">/.exec(system)?.[1];
   assert.ok(nonce, "the system prompt names the markers");
   assert.match(system, /data to work with/);

@@ -1,7 +1,9 @@
 import { missingApiKey } from "./openai-compatible.js";
 import { ProviderError } from "./router.js";
+import { retryAfterMs, withRetry } from "./retry.js";
 import { createWorkspaceTools } from "./workspace-tools.js";
 import { createResultEnvelope } from "./tool-results.js";
+import { compactConversation } from "./compaction.js";
 
 const DEFAULT_MAX_TOOL_ITERATIONS = 12;
 const DEFAULT_BASE_URL = "https://api.anthropic.com";
@@ -12,6 +14,26 @@ const API_VERSION = "2023-06-01";
 // The Anthropic Messages API, spoken directly. This project depends on no SDK
 // on purpose: every adapter takes an injectable 'fetchImpl', which is what the
 // tests, the replay fixtures, and the offline paths use.
+// A rolling breakpoint at the end of the conversation, so each iteration
+// reads back everything the one before it wrote instead of paying for it
+// again. The previous breakpoint is removed first: they are positions, not
+// accumulating marks, and four is the limit.
+function withConversationBreakpoint(messages) {
+  if (messages.length === 0) return messages;
+  const cleaned = messages.map((message) => (Array.isArray(message.content)
+    ? { ...message, content: message.content.map(({ cache_control: _dropped, ...block }) => block) }
+    : message));
+  const last = cleaned.at(-1);
+  const blocks = Array.isArray(last.content)
+    ? last.content
+    : [{ type: "text", text: String(last.content) }];
+  if (blocks.length === 0) return cleaned;
+  return [
+    ...cleaned.slice(0, -1),
+    { ...last, content: [...blocks.slice(0, -1), { ...blocks.at(-1), cache_control: { type: "ephemeral" } }] },
+  ];
+}
+
 export function createAnthropicProvider({
   name = "anthropic",
   baseUrl = DEFAULT_BASE_URL,
@@ -23,6 +45,13 @@ export function createAnthropicProvider({
   toolLimits,
   sandbox,
   maxToolIterations = DEFAULT_MAX_TOOL_ITERATIONS,
+  // Off only where a proxy in front of the API rejects the field.
+  caching = true,
+  retry,
+  // What this agent's conversation may grow to before the oldest tool output
+  // is summarised away. Well under any current model's window on purpose:
+  // the point is to stay inside it, not to find its edge.
+  contextTokens = 120_000,
   fetchImpl = globalThis.fetch,
   toolsImpl,
   apiKeySource,
@@ -65,23 +94,45 @@ export function createAnthropicProvider({
       const envelope = createResultEnvelope(context.runId);
       const system = buildSystemMessage(context, workspaceTools ? envelope : undefined);
       const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+      // Marks the last block of a list so everything before it is cached.
+      // Anthropic allows four such breakpoints; this uses three — the tools,
+      // the system prompt, and a rolling one at the end of the conversation.
+      const cacheable = (blocks) => {
+        if (!caching || blocks.length === 0) return blocks;
+        return [...blocks.slice(0, -1), { ...blocks.at(-1), cache_control: { type: "ephemeral" } }];
+      };
       const toolCalls = [];
+      // Every attempt that was made and failed, so a receipt never reads as
+      // though the provider answered first time.
+      const retried = [];
+      const compactions = [];
       let responseModel;
 
       for (let iteration = 0; iteration <= maxToolIterations; iteration += 1) {
-        const payload = await request({
+        const attempt = await withRetry((number) => request({
           endpoint,
           apiKey,
           fetchImpl,
           context,
+          attempt: number,
           body: {
             model: context.agent.model ?? model,
             max_tokens: maxTokens,
-            ...(system ? { system } : {}),
-            messages,
-            ...(workspaceTools ? { tools: toolSchema(workspaceTools.definitions) } : {}),
+            // Cached, because the expensive half of a tool loop is what does
+            // not change: the same system prompt and the same tool schemas go
+            // up again on every iteration, and by the twelfth they are the
+            // largest item on the bill this project itself reports.
+            ...(system ? { system: cacheable([{ type: "text", text: system }]) } : {}),
+            // Only once there is a conversation worth caching. On the first
+            // request there is one short user message: a breakpoint there
+            // rewrites it into blocks for nothing, because a prompt that
+            // short is under the minimum a cache entry needs anyway.
+            messages: caching && messages.length > 1 ? withConversationBreakpoint(messages) : messages,
+            ...(workspaceTools ? { tools: cacheable(toolSchema(workspaceTools.definitions)) } : {}),
           },
-        });
+        }), { ...retry, signal: context.signal });
+        const payload = attempt.value;
+        retried.push(...attempt.tried);
         addUsage(usage, payload.usage);
         responseModel = payload.model ?? responseModel;
         const content = Array.isArray(payload.content) ? payload.content : [];
@@ -92,6 +143,8 @@ export function createAnthropicProvider({
             raw: payload,
             model: responseModel ?? context.agent.model ?? model,
             usage,
+            ...(retried.length > 0 ? { retries: retried } : {}),
+            ...(compactions.length > 0 ? { compactions } : {}),
             ...(workspaceTools ? { toolCalls } : {}),
           };
         }
@@ -117,6 +170,25 @@ export function createAnthropicProvider({
           });
         }
         messages.push({ role: "user", content: results });
+        // Before the next request, not after it fails: the provider's refusal
+        // would be a 400 that reads like a provider problem.
+        const bounded = compactConversation(messages, {
+          maxTokens: contextTokens,
+          isToolResult: (message) => Array.isArray(message.content)
+            && message.content.some((block) => block?.type === "tool_result"),
+          contentOf: (message) => message.content,
+          replace: (message, note) => ({
+            ...message,
+            content: message.content.map((block) => (block?.type === "tool_result"
+              ? { ...block, content: note }
+              : block)),
+          }),
+        });
+        if (bounded.compacted.length > 0) {
+          messages.length = 0;
+          messages.push(...bounded.messages);
+          compactions.push(...bounded.compacted);
+        }
       }
       throw new ProviderError("Provider tool loop did not terminate.", { code: "tool_loop_error" });
     },
@@ -193,6 +265,7 @@ async function request({ endpoint, apiKey, fetchImpl, context, body }) {
       {
         code: `http_${response.status}`,
         retryable,
+        retryAfterMs: retryAfterMs(response.headers?.get?.("retry-after")),
         // A failed call that already ran tools is not safe to replay blindly.
         safeToRetry: retryable && !bodyHasToolResults(body),
       },

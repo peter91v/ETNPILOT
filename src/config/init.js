@@ -173,7 +173,13 @@ observability:
   pricing:
     currency: USD
     models: {}
-  budgets: {}
+  # A ceiling per workflow run, so a loop that goes wrong costs this much and
+  # no more. Raise it for real work; the point of a default is that there is
+  # one. Exceeding it stops the run with 'budget_exceeded' in the receipt.
+  budgets:
+    maxEstimatedCostPerWorkflow: 5
+    maxInputTokensPerWorkflow: 2000000
+    maxOutputTokensPerWorkflow: 200000
 approval:
   allow: [read]
   requireHuman: [write, shell, network]

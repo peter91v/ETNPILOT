@@ -766,13 +766,43 @@ function assertStepExpectation(step, receipt) {
   );
 }
 
+// What the next step is told about the one before it. This used to be
+// 'JSON.stringify(result, null, 2)' of the whole thing — every field, indented
+// — so four steps with long answers filled the context window before the
+// fourth agent had read its own task.
+//
+// What a following step actually needs is what the previous one concluded and
+// what it touched, not the shape of the object that carried it.
+const DEPENDENCY_TEXT_LIMIT = 4000;
+
+export const composeAgentInputForTest = (input, dependencies) => composeAgentInput(input, dependencies);
+
 function composeAgentInput(input, dependencies) {
   if (Object.keys(dependencies).length === 0) return String(input);
   const evidence = Object.entries(dependencies).map(([id, result]) => {
-    const payload = result?.result ?? result;
-    return `### ${id}\n${JSON.stringify(payload, null, 2)}`;
+    const payload = result?.result ?? result ?? {};
+    const parts = [];
+    const text = typeof payload === "string" ? payload : payload.text;
+    if (text) {
+      parts.push(text.length > DEPENDENCY_TEXT_LIMIT
+        ? `${text.slice(0, DEPENDENCY_TEXT_LIMIT)}\n[…${text.length - DEPENDENCY_TEXT_LIMIT} more characters]`
+        : text);
+    }
+    const files = payload.workspace?.changedPaths ?? payload.changedPaths;
+    if (Array.isArray(files) && files.length > 0) {
+      parts.push(`Files it changed: ${files.slice(0, 50).join(", ")}${files.length > 50 ? `, and ${files.length - 50} more` : ""}`);
+    }
+    const tools = payload.toolCalls;
+    if (Array.isArray(tools) && tools.length > 0) {
+      const refused = tools.filter((call) => call.ok === false);
+      parts.push(`Tools: ${tools.length} call${tools.length === 1 ? "" : "s"}`
+        + (refused.length > 0 ? `, ${refused.length} refused (${[...new Set(refused.map((call) => call.tool))].join(", ")})` : ""));
+    }
+    if (payload.status && payload.status !== "succeeded") parts.push(`Status: ${payload.status}`);
+    if (payload.error) parts.push(`Error: ${payload.error}`);
+    return `### ${id}\n${parts.join("\n\n") || "(it produced no text)"}`;
   }).join("\n\n");
-  return `${input}\n\nDependency results:\n\n${evidence}`;
+  return `${input}\n\nWhat the earlier steps did:\n\n${evidence}`;
 }
 
 async function collectGitEvidence(cwd) {
