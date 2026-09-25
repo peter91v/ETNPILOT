@@ -80,7 +80,15 @@ test("the provider offers the agent's list, not the provider's", async () => {
 
   // The same provider, a different agent: the tools follow the agent.
   await provider.invoke(context("builder"));
-  assert.equal(bodies[1].tools.length, WORKSPACE_TOOL_DEFINITIONS.length);
+  assert.deepEqual(
+    bodies[1].tools.map((tool) => tool.name).sort(),
+    WORKSPACE_TOOL_DEFINITIONS.map((one) => one.name).filter((name) => name !== "spawn_subagent").sort(),
+    "everything except the one tool an agent with no subagents could not use",
+  );
+
+  // An agent that does declare subagents is offered it.
+  await provider.invoke({ ...context("orchestrator"), agent: { name: "orchestrator", prompt: "p", subagents: ["builder"] } });
+  assert.equal(bodies[2].tools.some((tool) => tool.name === "spawn_subagent"), true);
 });
 
 test("a misspelt tool name is refused when the agent is registered", () => {

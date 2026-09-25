@@ -86,6 +86,19 @@ export class Harness {
     return this.#approve(request, context);
   }
 
+  // A decision about the run itself rather than about an operation on the
+  // workspace: does this plan go ahead, is this question answered. The
+  // operation policy does not govern it — 'policy.operations' is about reads,
+  // writes, commands and hosts — so it goes straight to whoever answers, and
+  // no 'approval.allow' entry can wave it through. A gate nobody answers is
+  // not a gate.
+  async requestDecision(request, context = {}) {
+    if (!this.approvalHandler) {
+      return { kind: "reject", reason: "Nobody is available to answer: no approval handler is configured." };
+    }
+    return this.approvalHandler(request, context);
+  }
+
   registerAgent(agent) {
     if (!agent?.name || (!agent.provider && !agent.providers?.length) || !agent.prompt) {
       throw new TypeError(
@@ -168,6 +181,21 @@ export class Harness {
             },
             signal,
           });
+        },
+        // A question for a person. It shares the approval path's plumbing and
+        // none of its meaning: an answer decides nothing, and the operations
+        // the model attempts afterwards are each approved on their own.
+        ask: async ({ question, options }) => {
+          const decision = await this.requestDecision({
+            kind: "question",
+            toolName: "ask_human",
+            fullCommandText: question,
+            ...(options ? { toolArguments: { options } } : {}),
+          }, { runId, agent: agentName, workspace: metadata.workspace });
+          if (decision.kind === "approve-once") {
+            return { answered: true, text: decision.answer ?? decision.reason ?? "yes" };
+          }
+          return { answered: false, reason: decision.reason ?? "Not answered." };
         },
         approve: async (request) => {
           const decision = await this.#approve(request, {

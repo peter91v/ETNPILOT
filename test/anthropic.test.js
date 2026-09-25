@@ -106,9 +106,12 @@ test("the Anthropic provider runs an approved tool loop", async () => {
   assert.deepEqual(result.usage, { inputTokens: 22, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 });
   // The tools are declared in the API's own shape, and the result goes back as
   // a tool_result block the model can read.
-  // Every tool the workspace offers, rather than a number that goes stale
-  // the next time one is added — which is exactly what happened.
-  assert.equal(bodies[0].tools.length, WORKSPACE_TOOL_DEFINITIONS.length);
+  // Every tool this agent may use. It declares no subagents, so it is not
+  // offered the one tool the harness would refuse it anyway.
+  assert.deepEqual(
+    bodies[0].tools.map((tool) => tool.name ?? tool.function?.name).sort(),
+    WORKSPACE_TOOL_DEFINITIONS.map((one) => one.name).filter((name) => name !== "spawn_subagent").sort(),
+  );
   assert.equal(bodies[0].tools[0].input_schema.type, "object");
   const back = bodies[1].messages.at(-1);
   assert.equal(back.role, "user");

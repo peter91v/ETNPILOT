@@ -263,6 +263,15 @@ export async function runProject({
           workspace,
         });
       }
+      // A person reads what the previous step produced and says whether the
+      // rest of the run should happen. This is the cheapest place to stop a
+      // run that is about to spend money and open a merge request on a plan
+      // nobody agreed with — and it is mechanical, so it appears in the
+      // receipt like every other decision.
+      if (step.type === "gate") {
+        if (dryRun) return { step: step.id, skipped: true, reason: "dry-run" };
+        return runGateStep(step, harness, { execution, runId, workspace });
+      }
       if (step.type === "check") {
         // Checks execute commands, so a dry run records them instead.
         if (dryRun) return { name: step.name ?? step.id, command: step.command, skipped: true, reason: "dry-run" };
@@ -281,7 +290,7 @@ export async function runProject({
       // someone reading a workflow file with no idea which line is wrong.
       throw new Error(
         `Workflow step '${step.id}' has an unsupported type: '${step.type}'.`
-        + " Every step needs one of 'agent', 'quorum' or 'check'.",
+        + " Every step needs one of 'agent', 'quorum', 'check' or 'gate'.",
       );
     }, { signal, context: { runId, workspace } });
     contentEvidence = await verifyContentAfterRun(workspace.path, config, contentEvidence);
@@ -607,6 +616,36 @@ async function verifyContentAfterRun(root, config, initial) {
 // Independent reviewers, usually on different providers, must agree before a
 // change is considered reviewed. Their verdicts and the arithmetic are part of
 // the receipt, so the decision can be re-checked later.
+// The approval path, used for a decision about the run rather than about an
+// operation: same inbox, same surfaces, same receipt. 'approval.allow' cannot
+// wave it through, because a gate nobody answers is not a gate.
+async function runGateStep(step, harness, { execution, runId, workspace }) {
+  const previous = Object.entries(execution.dependencyResults ?? {});
+  const forReview = previous
+    .map(([id, result]) => {
+      const payload = result?.result ?? result ?? {};
+      return `### ${id}\n${payload.result?.text ?? payload.text ?? "(it produced no text)"}`;
+    })
+    .join("\n\n");
+  const decision = await harness.requestDecision({
+    kind: step.kind ?? "plan",
+    toolName: step.id,
+    // The whole thing, because this is the one decision whose entire point is
+    // that somebody read it.
+    toolArguments: { step: step.id, waitingOn: previous.map(([id]) => id) },
+    diff: forReview,
+    fullCommandText: step.prompt ?? `Continue the run past '${step.id}'?`,
+  }, { runId, agent: step.id, workspace: workspace.path });
+  if (decision.kind !== "approve-once") {
+    const error = new Error(
+      `Stopped at '${step.id}': ${decision.reason ?? "the plan was not approved"}.`,
+    );
+    error.code = "gate_rejected";
+    throw error;
+  }
+  return { step: step.id, approved: true, evidence: decision.evidence, reviewed: previous.map(([id]) => id) };
+}
+
 async function runQuorumStep(step, harness, { input, execution, metadata, traceMetadata, runId, workspace }) {
   const agents = step.agents ?? [];
   if (agents.length === 0) throw new Error(`Quorum step '${step.id}' requires at least one agent.`);

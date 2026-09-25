@@ -87,6 +87,45 @@ export const WORKSPACE_TOOL_DEFINITIONS = Object.freeze([
     },
   },
   {
+    name: "ask_human",
+    description:
+      "Ask the person running this a question and wait for their answer."
+      + " For a decision only they can make — which of two approaches, a missing detail."
+      + " Not for permission: every write and command is already approved separately,"
+      + " and an answer here grants nothing. Use it sparingly; it stops the run until"
+      + " somebody replies.",
+    parameters: {
+      type: "object",
+      properties: {
+        question: { type: "string", description: "The question, in full. They cannot see this conversation." },
+        options: {
+          type: "array",
+          items: { type: "string" },
+          description: "The answers you would accept, if it is a choice.",
+        },
+      },
+      required: ["question"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "spawn_subagent",
+    description:
+      "Hand a piece of work to another agent and get back what it produced."
+      + " Only agents this one's manifest lists under 'subagents'. Use it to delegate"
+      + " work that needs different tools or a fresh context, not to avoid doing the work:"
+      + " the subagent runs with its own budget and its own approvals.",
+    parameters: {
+      type: "object",
+      properties: {
+        agent: { type: "string", description: "The name of an agent listed in this agent's 'subagents'." },
+        task: { type: "string", description: "What it should do, in full. It cannot see this conversation." },
+      },
+      required: ["agent", "task"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "fetch_url",
     description:
       "Fetch a URL and return it as text, for documentation or an API reference."
@@ -126,17 +165,30 @@ export const WORKSPACE_TOOL_DEFINITIONS = Object.freeze([
 // Enforced twice on purpose. The filtered list is what the model is offered,
 // and 'invoke' refuses anything outside it — a model can name a tool nobody
 // showed it, and an offer is not a boundary.
-function allowedDefinitions(allowed) {
-  if (allowed === undefined) return WORKSPACE_TOOL_DEFINITIONS;
+function allowedDefinitions(allowed, { canSpawn = true } = {}) {
+  const offered = canSpawn
+    ? WORKSPACE_TOOL_DEFINITIONS
+    // An agent with no 'subagents' has nothing it may spawn, so offering the
+    // tool is offering a refusal.
+    : WORKSPACE_TOOL_DEFINITIONS.filter((definition) => definition.name !== "spawn_subagent");
+  if (allowed === undefined) return offered;
   const wanted = new Set(allowed);
-  return WORKSPACE_TOOL_DEFINITIONS.filter((definition) => wanted.has(definition.name));
+  return offered.filter((definition) => wanted.has(definition.name));
 }
 
-export function createWorkspaceTools({ workingDirectory, limits = {}, signal, sandbox, allowed, fetchImpl = globalThis.fetch } = {}) {
+export function createWorkspaceTools({
+  workingDirectory,
+  limits = {},
+  signal,
+  sandbox,
+  allowed,
+  canSpawn = true,
+  fetchImpl = globalThis.fetch,
+} = {}) {
   if (!workingDirectory) throw new TypeError("Workspace tools require a workingDirectory.");
   const root = resolve(workingDirectory);
   const bounds = { ...DEFAULT_LIMITS, ...limits };
-  const definitions = allowedDefinitions(allowed);
+  const definitions = allowedDefinitions(allowed, { canSpawn });
   const permitted = new Set(definitions.map((definition) => definition.name));
 
   return {
@@ -161,6 +213,8 @@ export function createWorkspaceTools({ workingDirectory, limits = {}, signal, sa
         case "search_files": return searchWorkspaceFiles(root, bounds, args, context, signal);
         case "write_file": return writeWorkspaceFile(root, bounds, args, context);
         case "edit_file": return editWorkspaceFile(root, bounds, args, context);
+        case "ask_human": return askHuman(args, context);
+        case "spawn_subagent": return spawnSubagent(args, context);
         case "fetch_url": return fetchWorkspaceUrl(bounds, args, context, signal, fetchImpl);
         case "run_command": return runWorkspaceCommand(root, bounds, args, context, signal, sandbox);
         default: return { ok: false, error: `Unknown tool '${name}'.` };
@@ -425,6 +479,67 @@ function countOccurrences(haystack, needle) {
     at = haystack.indexOf(needle, at + needle.length);
   }
   return total;
+}
+
+// A question for the person, through the same inbox every approval uses, so it
+// appears wherever approvals appear and lands in the receipt.
+//
+// It is not an approval and can never become one: the answer is text the model
+// reads, and every write and command it then attempts is decided separately.
+// Otherwise an agent could talk its way past the one mechanism this project
+// rests on.
+async function askHuman(args, context) {
+  if (typeof args.question !== "string" || args.question.trim() === "") {
+    return { ok: false, error: "'question' must say what you are asking." };
+  }
+  if (typeof context.ask !== "function") {
+    return { ok: false, error: "Nobody is available to answer a question in this run." };
+  }
+  const options = Array.isArray(args.options) ? args.options.filter((one) => typeof one === "string") : undefined;
+  const answer = await context.ask({
+    question: args.question.trim(),
+    ...(options?.length ? { options } : {}),
+  });
+  if (answer?.answered !== true) {
+    // A run waiting on an answer that never comes ends with that as the
+    // reason, not with a timeout nobody can interpret.
+    return { ok: false, error: answer?.reason ?? "The question was not answered." };
+  }
+  return { ok: true, question: args.question.trim(), answer: answer.text };
+}
+
+// Delegation, which the harness has always been able to do and no provider
+// could reach: 'context.spawn' has cycle and depth checks and one caller in
+// the whole repository, the plugin host. So 'subagents:' in a manifest was a
+// claim nothing honoured, and an orchestrator could only describe delegating.
+//
+// The checks stay where they are. This exposes them; it does not repeat them.
+async function spawnSubagent(args, context) {
+  if (typeof args.agent !== "string" || args.agent === "") return { ok: false, error: "'agent' must be a name." };
+  if (typeof args.task !== "string" || args.task.trim() === "") {
+    return { ok: false, error: "'task' must say what the subagent should do; it cannot see this conversation." };
+  }
+  if (typeof context.spawn !== "function") {
+    return { ok: false, error: "This provider cannot spawn subagents." };
+  }
+  try {
+    const result = await context.spawn(args.agent, args.task);
+    const payload = result?.result ?? result ?? {};
+    // What came back, not the object that carried it: the same reduction a
+    // workflow step makes for the step after it.
+    return {
+      ok: payload.status !== "failed",
+      agent: args.agent,
+      status: payload.status ?? "succeeded",
+      text: payload.result?.text ?? payload.text ?? "",
+      ...(payload.error ? { error: payload.error } : {}),
+      toolCalls: payload.result?.toolCalls ?? payload.toolCalls,
+    };
+  } catch (error) {
+    // A cycle, a depth limit, or an agent this one may not spawn: all three
+    // are the harness refusing, and the model should read why.
+    return { ok: false, error: describe(error) };
+  }
 }
 
 // Reading something off the internet. The policy decides which hosts, through

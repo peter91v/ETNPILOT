@@ -105,9 +105,12 @@ test("the OpenAI-compatible provider runs an approved tool loop", async () => {
   assert.deepEqual(result.usage, { inputTokens: 22, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 });
   // Instructions and skills reach the model, and tool results are fed back.
   assert.match(bodies[0].messages[0].content, /Do the work\.\n\nFollow the checklist\.\n\nSkill text\./);
-  // Every tool the workspace offers, rather than a number that goes stale
-  // the next time one is added — which is exactly what happened.
-  assert.equal(bodies[0].tools.length, WORKSPACE_TOOL_DEFINITIONS.length);
+  // Every tool this agent may use. It declares no subagents, so it is not
+  // offered the one tool the harness would refuse it anyway.
+  assert.deepEqual(
+    bodies[0].tools.map((tool) => tool.name ?? tool.function?.name).sort(),
+    WORKSPACE_TOOL_DEFINITIONS.map((one) => one.name).filter((name) => name !== "spawn_subagent").sort(),
+  );
   assert.equal(bodies[1].messages.at(-1).role, "tool");
   assert.equal(insideEnvelope(bodies[1].messages.at(-1).content).ok, true);
 });

@@ -179,7 +179,16 @@ export function createInboxApprovalHandler({
       };
     }
     return record.status === "approved"
-      ? { kind: "approve-once", approvalId: record.id, evidence: approvalEvidence(record) }
+      // The reason a person typed when approving. For an ordinary operation it
+      // is a note; for a question asked with 'ask_human' it is the answer, and
+      // there is no second field to keep them apart because they are the same
+      // thing: what the person said when they decided.
+      ? {
+        kind: "approve-once",
+        approvalId: record.id,
+        ...(record.reason ? { answer: record.reason } : {}),
+        evidence: approvalEvidence(record),
+      }
       : {
           kind: "reject",
           reason: record.status === "expired" ? "Approval request expired." : record.reason ?? "Rejected by the user.",
@@ -284,6 +293,7 @@ function approvalEvidence(record) {
     status: record.status,
     decidedBy: record.decidedBy,
     decidedAt: record.decidedAt,
+    ...(record.reason ? { reason: record.reason } : {}),
   };
 }
 
