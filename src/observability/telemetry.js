@@ -97,29 +97,13 @@ export class Telemetry {
     });
   }
 
-  // What the maintained table of published prices says for this model, when the
-  // configuration names none: pricing follows the model in use without anyone
-  // typing rates. The table is in USD, so it only applies when the configured
-  // currency is USD; a rate the user wrote always wins.
-  tabulatedRate(model) {
-    if (this.pricing.currency !== "USD") return undefined;
-    const known = typeof model === "string" ? knownPriceForModel(model) : undefined;
-    if (!known) return undefined;
-    return {
-      inputPerMillion: known.inputPerMillion,
-      outputPerMillion: known.outputPerMillion,
-      cacheReadPerMillion: known.cacheReadPerMillion ?? known.inputPerMillion,
-      cacheWritePerMillion: known.cacheWritePerMillion ?? known.inputPerMillion,
-    };
-  }
-
   recordProviderUsage({ workflowRunId, agentRunId, provider, model, usage = {} }) {
     const normalized = normalizeUsage(usage);
     const key = workflowRunId ?? agentRunId;
     const rate = this.pricing.models[model]
       ?? this.pricing.models[undatedModel(model)]
       ?? this.pricing.models["*"]
-      ?? this.tabulatedRate(model);
+      ?? tabulatedRate(model, this.pricing.currency);
     const estimatedCost = rate ? calculateCost(normalized, rate) : undefined;
     const previous = this.totals.get(key) ?? emptySummary(this.pricing.currency);
     const total = {
@@ -209,6 +193,13 @@ export async function summarizeTelemetryFile(path, { workflowRunId } = {}) {
             summary.estimatedCost = (summary.estimatedCost ?? 0) + attributes["etnpilot.cost.estimated"];
             summary.pricedInvocations += 1;
             priced.add(model);
+          } else if (retroactive(attributes, summary, model)) {
+            // Recorded before a rate existed for it: the table prices it now, so a
+            // run is not stuck unpriced for having happened earlier.
+            summary.estimatedCost = (summary.estimatedCost ?? 0) + retroactive(attributes, summary, model);
+            summary.pricedInvocations += 1;
+            summary.currency ??= "USD";
+            priced.add(model);
           } else {
             summary.unpricedInvocations += 1;
             unpriced.set(model, (unpriced.get(model) ?? 0) + 1);
@@ -235,6 +226,17 @@ export async function summarizeTelemetryFile(path, { workflowRunId } = {}) {
       }
       : {}),
   };
+}
+
+function retroactive(attributes, summary, model) {
+  const rate = tabulatedRate(model, summary.currency ?? "USD");
+  if (!rate) return undefined;
+  return calculateCost({
+    inputTokens: attributes["gen_ai.usage.input_tokens"] ?? 0,
+    outputTokens: attributes["gen_ai.usage.output_tokens"] ?? 0,
+    cacheReadTokens: attributes["gen_ai.usage.cache_read.input_tokens"] ?? 0,
+    cacheWriteTokens: attributes["gen_ai.usage.cache_creation.input_tokens"] ?? 0,
+  }, rate);
 }
 
 function normalizeConfig(config = {}) {
@@ -328,6 +330,22 @@ function normalizeUsage(usage) {
     cacheWriteTokens: nonNegativeInteger(usage.cacheWriteTokens ?? 0, "cacheWriteTokens"),
     providerUnits: nonNegative(usage.providerUnits ?? 0, "providerUnits"),
   });
+}
+
+// What the maintained table of published prices says for this model, for when
+// the configuration names none: pricing follows the model in use without
+// anyone typing rates. The table is in USD, so it only applies to USD; a rate
+// the user wrote always wins over it.
+function tabulatedRate(model, currency) {
+  if (currency !== "USD") return undefined;
+  const known = typeof model === "string" ? knownPriceForModel(model) : undefined;
+  if (!known) return undefined;
+  return {
+    inputPerMillion: known.inputPerMillion,
+    outputPerMillion: known.outputPerMillion,
+    cacheReadPerMillion: known.cacheReadPerMillion ?? known.inputPerMillion,
+    cacheWritePerMillion: known.cacheWritePerMillion ?? known.inputPerMillion,
+  };
 }
 
 function calculateCost(usage, rates) {

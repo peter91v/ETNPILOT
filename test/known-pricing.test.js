@@ -89,3 +89,22 @@ test("telemetry prices a model from the table when the configuration names no ra
   const eur = new Telemetry({ enabled: false, pricing: { currency: "EUR" } }).recordProviderUsage({ workflowRunId: "w", provider: "openai", model: "gpt-6-luna", usage });
   assert.equal(eur.estimatedCost, undefined);
 });
+
+test("a call recorded before any rate existed is priced from the table when read back", async () => {
+  const { Telemetry, summarizeTelemetryFile, telemetryProviderAttributes } = await import("../src/observability/telemetry.js");
+  const { mkdtemp } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const path = join(await mkdtemp(join(tmpdir(), "etnpilot-retro-")), "t.jsonl");
+  // Record as an older version would have: a rate-less telemetry whose table lookup is bypassed.
+  const telemetry = new Telemetry({ enabled: true, file: path, serviceName: "s", environment: "t", pricing: { currency: "USD", models: {} } });
+  const accounting = telemetry.recordProviderUsage({ workflowRunId: "w", provider: "openai", model: "gpt-6-luna", usage: { inputTokens: 1000, outputTokens: 1000 } });
+  const { estimatedCost, currency, ...unpriced } = accounting;
+  await telemetry.startSpan("gen_ai.invoke_agent", { attributes: { "etnpilot.workflow.run_id": "w" } })
+    .end({ attributes: telemetryProviderAttributes(unpriced) });
+  await telemetry.flush();
+  const summary = await summarizeTelemetryFile(path);
+  assert.ok(Math.abs(summary.estimatedCost - (1000 * 0.2 + 1000 * 1.2) / 1e6) < 1e-12);
+  assert.equal(summary.unpricedInvocations, 0);
+  assert.equal(summary.currency, "USD");
+});

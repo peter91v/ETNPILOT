@@ -410,13 +410,13 @@ function describeUsage(summary) {
 // sends someone to set a rate they may already have set.
 function pricingHint(described) {
   const models = described.unpricedModels;
-  if (models.length === 0) return described.cost ? "from observability.pricing" : "set observability.pricing to see it";
+  if (models.length === 0) return described.cost ? "from observability.pricing" : "no published rate known for this model";
   const named = models.slice(0, 2).map((row) => "'" + row.model + "'").join(", ");
   const more = models.length > 2 ? " and " + (models.length - 2) + " more" : "";
   const calls = described.unpriced + (described.unpriced === 1 ? " call has" : " calls have");
   return models.every((row) => row.pricedSince)
     ? calls + " no cost: they ran before the rate for " + named + " was set"
-    : calls + " no rate: set observability.pricing.models for " + named + more;
+    : calls + " no rate known for " + named + more + " (observability.pricing.models can add one)";
 }
 
 // One row per agent invocation, indented by how deep it was spawned. Each
