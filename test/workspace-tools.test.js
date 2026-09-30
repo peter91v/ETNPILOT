@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { createWorkspaceTools } from "../src/providers/workspace-tools.js";
 import { createOpenAICompatibleProvider } from "../src/providers/openai-compatible.js";
+import { WORKSPACE_TOOL_DEFINITIONS } from "../src/providers/workspace-tools.js";
 
 test("workspace tools stay inside the workspace and require approval", async () => {
   const root = await mkdtemp(join(tmpdir(), "etnpilot-tools-"));
@@ -104,9 +105,14 @@ test("the OpenAI-compatible provider runs an approved tool loop", async () => {
   assert.deepEqual(result.usage, { inputTokens: 22, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 });
   // Instructions and skills reach the model, and tool results are fed back.
   assert.match(bodies[0].messages[0].content, /Do the work\.\n\nFollow the checklist\.\n\nSkill text\./);
-  assert.equal(bodies[0].tools.length, 4);
+  // Every tool this agent may use. It declares no subagents, so it is not
+  // offered the one tool the harness would refuse it anyway.
+  assert.deepEqual(
+    bodies[0].tools.map((tool) => tool.name ?? tool.function?.name).sort(),
+    WORKSPACE_TOOL_DEFINITIONS.map((one) => one.name).filter((name) => name !== "spawn_subagent" && name !== "load_skill").sort(),
+  );
   assert.equal(bodies[1].messages.at(-1).role, "tool");
-  assert.equal(JSON.parse(bodies[1].messages.at(-1).content).ok, true);
+  assert.equal(insideEnvelope(bodies[1].messages.at(-1).content).ok, true);
 });
 
 test("the tool loop is bounded", async () => {
@@ -179,3 +185,12 @@ test("a command that failed says why, and an optional path may be left empty", a
   const wrongShape = await tools.invoke("write_file", "[1,2]", approving);
   assert.match(wrongShape.error, /Tool arguments must be a JSON object\./);
 });
+
+// A tool result reaches the model inside a marked envelope, so that outside
+// text is never mistaken for an instruction (src/providers/tool-results.js).
+// The payload is still the bounded JSON the receipt records.
+function insideEnvelope(content) {
+  const match = /^<tool_output id="[0-9a-f]+">\n([\s\S]*)\n<\/tool_output id="[0-9a-f]+">$/.exec(content.trim());
+  assert.ok(match, "the tool result is wrapped: " + content.slice(0, 40));
+  return JSON.parse(match[1]);
+}

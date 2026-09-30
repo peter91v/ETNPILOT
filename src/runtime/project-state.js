@@ -10,7 +10,7 @@ import { escapeControlCharacters } from "../core/text-safety.js";
 import { WorktreeManager } from "../git/worktrees.js";
 import { GitLabClient } from "../gitlab/client.js";
 import { summarizeTelemetryFile } from "../observability/telemetry.js";
-import { listChecks, runCheck } from "./project-checks.js";
+import { listChecks, runProjectCheck } from "./project-checks.js";
 import { runProject, RUN_BRANCH_PREFIX } from "./project-runner.js";
 import { createSecretResolver } from "../secrets/resolver.js";
 import { resolveConfiguredApiKey } from "../providers/register.js";
@@ -219,7 +219,7 @@ export async function openProjectState({ root = process.cwd(), env = process.env
     // surface calls this same registry rather than reimplementing a check per
     // window.
     checks: () => listChecks(),
-    runCheck: (id) => runCheck(id, { root: projectRoot, config: current }),
+    runCheck: (id) => runProjectCheck(id, { root: projectRoot, config: current }),
     // Whether a receipt is what it claims: the hash chain, and the signature
     // where the project signs. The same name check 'readReceipt' applies, for
     // the same reason — a file name from a surface never decides what is read.
@@ -298,15 +298,37 @@ function settingsUnreadable(error) {
 
 // Runs are read from their receipt files, so every surface shows what was
 // sealed rather than a summary kept somewhere else.
-export async function readRuns(directory, { limit = 20 } = {}) {
+// A sealed receipt never changes again, and the surfaces read the last twenty
+// of them on every poll — once a second in the terminal interface. One receipt
+// of an eleven-second run in this repository is 68 KB; a real multi-step run
+// with file contents in its tool results is a multiple of that, and the
+// machine this runs on is a phone.
+//
+// So a receipt is parsed once and kept, keyed by what would have to change for
+// the answer to differ: its size and its modification time. A receipt that is
+// still being written fails that key on the next poll and is read again.
+const receiptCache = new Map();
+
+export async function readRuns(directory, { limit = 20, cache = receiptCache } = {}) {
   const entries = await readdir(directory).catch((error) => {
     if (error.code === "ENOENT") return [];
     throw error;
   });
   const files = entries.filter((name) => name.endsWith(".jsonl")).sort().reverse().slice(0, limit);
+  // Anything no longer in the window cannot be asked for again through here.
+  const wanted = new Set(files.map((file) => join(directory, file)));
+  for (const key of cache.keys()) if (!wanted.has(key)) cache.delete(key);
   const runs = [];
   for (const file of files) {
-    const content = await readFile(join(directory, file), "utf8").catch(() => "");
+    const path = join(directory, file);
+    const details = await stat(path).catch(() => undefined);
+    const fingerprint = details ? `${details.size}:${details.mtimeMs}` : undefined;
+    const hit = cache.get(path);
+    if (hit && fingerprint !== undefined && hit.fingerprint === fingerprint) {
+      runs.push(hit.run);
+      continue;
+    }
+    const content = await readFile(path, "utf8").catch(() => "");
     const lines = content.split("\n").filter(Boolean);
     if (lines.length === 0) continue;
     const parsed = [];
@@ -324,7 +346,7 @@ export async function readRuns(directory, { limit = 20 } = {}) {
     // run's. What is sealed is what carries 'terminal: true', and nothing
     // else.
     const sealed = parsed.findLast((entry) => entry.terminal === true);
-    runs.push({
+    const run = {
       // A receipt carries two kinds of id: each agent invocation writes its
       // own, and the workflow writes the run's. The run's is what every
       // surface names and what the file is called, so an unsealed receipt
@@ -342,7 +364,11 @@ export async function readRuns(directory, { limit = 20 } = {}) {
       sandbox: sealed?.workspace?.sandbox?.image,
       approvals: countApprovals(lines),
       receiptFile: file,
-    });
+    };
+    // Only a sealed receipt is worth keeping: an unsealed one is still being
+    // appended to, and its answer changes with the next line.
+    if (fingerprint !== undefined && sealed) cache.set(path, { fingerprint, run });
+    runs.push(run);
   }
   return runs;
 }

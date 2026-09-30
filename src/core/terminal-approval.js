@@ -41,6 +41,9 @@ function describeRequest(request) {
       typeof request.toolArguments === "string" ? request.toolArguments : JSON.stringify(request.toolArguments),
     )}`);
   }
+  // Last, and whole: it is the thing being decided, and it is the only field
+  // that runs to several lines.
+  if (request.diff) lines.push(`Changes:\n${display(request.diff)}`);
   return lines.length > 0 ? `\n${lines.join("\n")}` : "";
 }
 

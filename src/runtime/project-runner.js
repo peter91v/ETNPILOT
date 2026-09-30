@@ -32,6 +32,10 @@ import { createSecretResolver } from "../secrets/resolver.js";
 import { createTelemetry } from "../observability/telemetry.js";
 import { buildDevcontainerImage, createSandbox, readDevcontainerImage } from "./sandbox.js";
 import { createFixtureRecorder, fixtureProviderFactories, loadFixtures } from "./fixtures.js";
+import { connectMcpTools } from "../providers/mcp-client.js";
+import { describeProposals, summarizeProposal, writeProposals } from "../content/proposals.js";
+
+const PROPOSALS_ROOT = ".etnpilot/proposals";
 
 // Every branch a run publishes from starts here, which is also how a surface
 // tells ETNPilot's own merge requests apart from everyone else's.
@@ -89,6 +93,8 @@ export async function runProject({
   let telemetry;
   let workspace;
   let codegraph;
+  let mcp;
+  const mcpErrors = [];
   let codegraphBefore;
   let codegraphUnavailable;
   let contentEvidence;
@@ -139,12 +145,14 @@ export async function runProject({
       bootstrapPluginsLoaded: true,
       layerRoot: repositoryRoot,
     }).catch((error) => { throw describeProjectLoadError(error, useWorktree); }));
+    harness.hooks = config.hooks ?? {};
     codegraph = createCodegraph(workspace.path, config, { importer: codegraphImporter });
     if (codegraph) {
       try {
         codegraphBefore = await codegraph.graph.indexDirectory(workspace.path, { signal });
         harness.instructions.push([
-          "CodeGraph is available through the local codegraph_explore MCP tool.",
+          "CodeGraph is available through the codegraph_explore MCP tool"
+            + " (offered as codegraph.codegraph_explore by providers that prefix a server name).",
           "Query it before planning broad edits and use its refreshed index when reviewing changes.",
         ].join("\n"));
       } catch (error) {
@@ -158,6 +166,24 @@ export async function runProject({
         codegraph.graph.close();
         codegraph = undefined;
       }
+    }
+    // The project's own MCP servers, for every provider rather than one. A
+    // server that will not start costs its tools, not the run.
+    // CodeGraph is one of them for the chat providers: the same descriptor the
+    // Copilot adapter is handed, spoken through the same client as any other
+    // server. Without this the prompt below promised a tool that 'anthropic'
+    // and 'openai' were never given.
+    const servers = {
+      ...(codegraph ? { codegraph: codegraphAsServer(codegraph.mcp) } : {}),
+      ...config.mcpServers,
+    };
+    if (Object.keys(servers).length > 0) {
+      mcp = await connectMcpTools(servers, {
+        onError: ({ server, error }) => {
+          mcpErrors.push({ server, error });
+          harness.instructions.push(`The MCP server '${server}' is unavailable: ${error}`);
+        },
+      });
     }
     sandbox = createSandbox(await resolveSandboxConfig(config.sandbox ?? {}, workspace.path), {
       workspace: workspace.path,
@@ -180,6 +206,9 @@ export async function runProject({
       secretResolver: secrets,
       factories: effectiveFactories,
       sandbox,
+      // Whatever the project's MCP servers offer, handed to every provider as
+      // ordinary tools rather than to one provider as a special case.
+      extraTools: mcp?.tools ?? [],
       ...(codegraph ? {
         mcpServers: { codegraph: codegraph.mcp },
         readOnlyMcpTools: codegraph.mcp.tools,
@@ -209,6 +238,7 @@ export async function runProject({
     });
   } catch (error) {
     codegraph?.graph.close();
+    mcp?.close();
     await harness.close();
     // Setup never reached the workflow, so the run left no evidence worth
     // keeping. Remove the workspace instead of leaking a worktree per attempt.
@@ -263,6 +293,15 @@ export async function runProject({
           workspace,
         });
       }
+      // A person reads what the previous step produced and says whether the
+      // rest of the run should happen. This is the cheapest place to stop a
+      // run that is about to spend money and open a merge request on a plan
+      // nobody agreed with — and it is mechanical, so it appears in the
+      // receipt like every other decision.
+      if (step.type === "gate") {
+        if (dryRun) return { step: step.id, skipped: true, reason: "dry-run" };
+        return runGateStep(step, harness, { execution, runId, workspace });
+      }
       if (step.type === "check") {
         // Checks execute commands, so a dry run records them instead.
         if (dryRun) return { name: step.name ?? step.id, command: step.command, skipped: true, reason: "dry-run" };
@@ -281,7 +320,7 @@ export async function runProject({
       // someone reading a workflow file with no idea which line is wrong.
       throw new Error(
         `Workflow step '${step.id}' has an unsupported type: '${step.type}'.`
-        + " Every step needs one of 'agent', 'quorum' or 'check'.",
+        + " Every step needs one of 'agent', 'quorum', 'check' or 'gate'.",
       );
     }, { signal, context: { runId, workspace } });
     contentEvidence = await verifyContentAfterRun(workspace.path, config, contentEvidence);
@@ -319,6 +358,7 @@ export async function runProject({
       summary,
     });
     codegraph?.graph.close();
+    mcp?.close();
     await harness.close();
     error.run = {
       runId,
@@ -378,6 +418,10 @@ export async function runProject({
       codegraph.graph.close();
     }
   }
+  // The servers were only ever closed when a run failed. A run that succeeded
+  // left every one of them running — invisible while a project configured
+  // none, and a hung process on every run now that codegraph is one.
+  mcp?.close();
   const observability = await finishTelemetry({
     telemetry,
     span: workflowSpan,
@@ -386,6 +430,12 @@ export async function runProject({
     durationMs: Date.now() - startedAt,
     file: bootstrapConfig.observability?.file,
   });
+  // What agents suggested for the project's instructions. Written into the
+  // worktree here, by the harness, after the evidence about the run's own
+  // changes was taken — so it is neither counted as the agent's edit nor
+  // able to alter what the run itself was told.
+  const proposals = dryRun ? [] : harness.proposals;
+  if (proposals.length > 0) await writeProposals(workspace.path, proposals, runId);
   const receiptHash = await receiptStore.append({
     type: "workflow",
     terminal: true,
@@ -402,6 +452,7 @@ export async function runProject({
       ...(mergeTrain ? { mergeTrain } : {}),
     },
     ...(fixtureEvidence ? { fixtures: fixtureEvidence } : {}),
+    ...(proposals.length > 0 ? { proposals: proposals.map(summarizeProposal) } : {}),
     codegraph: codegraphEvidence,
     observability,
     summary,
@@ -420,7 +471,9 @@ export async function runProject({
       branch,
       targetBranch: config.git?.targetBranch ?? "main",
       title: `ETNPilot: ${firstLine(input)}`,
-      description: `Automated ETNPilot run \`${runId}\`. Review the attached evidence before merging.`,
+      description: `Automated ETNPilot run \`${runId}\`. Review the attached evidence before merging.`
+        + describeProposals(proposals, { tainted: proposals.find((entry) => entry.tainted)?.tainted }),
+      proposalsPath: proposals.length > 0 ? PROPOSALS_ROOT : undefined,
       receipt: receiptHash,
       receiptProof: receiptSigner ? {
         algorithm: receiptSigner.algorithm,
@@ -607,6 +660,36 @@ async function verifyContentAfterRun(root, config, initial) {
 // Independent reviewers, usually on different providers, must agree before a
 // change is considered reviewed. Their verdicts and the arithmetic are part of
 // the receipt, so the decision can be re-checked later.
+// The approval path, used for a decision about the run rather than about an
+// operation: same inbox, same surfaces, same receipt. 'approval.allow' cannot
+// wave it through, because a gate nobody answers is not a gate.
+async function runGateStep(step, harness, { execution, runId, workspace }) {
+  const previous = Object.entries(execution.dependencyResults ?? {});
+  const forReview = previous
+    .map(([id, result]) => {
+      const payload = result?.result ?? result ?? {};
+      return `### ${id}\n${payload.result?.text ?? payload.text ?? "(it produced no text)"}`;
+    })
+    .join("\n\n");
+  const decision = await harness.requestDecision({
+    kind: step.kind ?? "plan",
+    toolName: step.id,
+    // The whole thing, because this is the one decision whose entire point is
+    // that somebody read it.
+    toolArguments: { step: step.id, waitingOn: previous.map(([id]) => id) },
+    diff: forReview,
+    fullCommandText: step.prompt ?? `Continue the run past '${step.id}'?`,
+  }, { runId, agent: step.id, workspace: workspace.path });
+  if (decision.kind !== "approve-once") {
+    const error = new Error(
+      `Stopped at '${step.id}': ${decision.reason ?? "the plan was not approved"}.`,
+    );
+    error.code = "gate_rejected";
+    throw error;
+  }
+  return { step: step.id, approved: true, evidence: decision.evidence, reviewed: previous.map(([id]) => id) };
+}
+
 async function runQuorumStep(step, harness, { input, execution, metadata, traceMetadata, runId, workspace }) {
   const agents = step.agents ?? [];
   if (agents.length === 0) throw new Error(`Quorum step '${step.id}' requires at least one agent.`);
@@ -766,13 +849,43 @@ function assertStepExpectation(step, receipt) {
   );
 }
 
+// What the next step is told about the one before it. This used to be
+// 'JSON.stringify(result, null, 2)' of the whole thing — every field, indented
+// — so four steps with long answers filled the context window before the
+// fourth agent had read its own task.
+//
+// What a following step actually needs is what the previous one concluded and
+// what it touched, not the shape of the object that carried it.
+const DEPENDENCY_TEXT_LIMIT = 4000;
+
+export const composeAgentInputForTest = (input, dependencies) => composeAgentInput(input, dependencies);
+
 function composeAgentInput(input, dependencies) {
   if (Object.keys(dependencies).length === 0) return String(input);
   const evidence = Object.entries(dependencies).map(([id, result]) => {
-    const payload = result?.result ?? result;
-    return `### ${id}\n${JSON.stringify(payload, null, 2)}`;
+    const payload = result?.result ?? result ?? {};
+    const parts = [];
+    const text = typeof payload === "string" ? payload : payload.text;
+    if (text) {
+      parts.push(text.length > DEPENDENCY_TEXT_LIMIT
+        ? `${text.slice(0, DEPENDENCY_TEXT_LIMIT)}\n[…${text.length - DEPENDENCY_TEXT_LIMIT} more characters]`
+        : text);
+    }
+    const files = payload.workspace?.changedPaths ?? payload.changedPaths;
+    if (Array.isArray(files) && files.length > 0) {
+      parts.push(`Files it changed: ${files.slice(0, 50).join(", ")}${files.length > 50 ? `, and ${files.length - 50} more` : ""}`);
+    }
+    const tools = payload.toolCalls;
+    if (Array.isArray(tools) && tools.length > 0) {
+      const refused = tools.filter((call) => call.ok === false);
+      parts.push(`Tools: ${tools.length} call${tools.length === 1 ? "" : "s"}`
+        + (refused.length > 0 ? `, ${refused.length} refused (${[...new Set(refused.map((call) => call.tool))].join(", ")})` : ""));
+    }
+    if (payload.status && payload.status !== "succeeded") parts.push(`Status: ${payload.status}`);
+    if (payload.error) parts.push(`Error: ${payload.error}`);
+    return `### ${id}\n${parts.join("\n\n") || "(it produced no text)"}`;
   }).join("\n\n");
-  return `${input}\n\nDependency results:\n\n${evidence}`;
+  return `${input}\n\nWhat the earlier steps did:\n\n${evidence}`;
 }
 
 async function collectGitEvidence(cwd) {
@@ -820,6 +933,18 @@ function createPublisher(config, token, fetchImpl) {
     token,
     fetchImpl,
   });
+}
+
+function codegraphAsServer(descriptor) {
+  return {
+    command: descriptor.command,
+    args: descriptor.args,
+    cwd: descriptor.cwd,
+    env: descriptor.env,
+    timeoutMs: descriptor.timeout,
+    tools: descriptor.tools,
+    readOnlyTools: descriptor.tools,
+  };
 }
 
 function createCodegraph(workspaceRoot, config, { importer } = {}) {

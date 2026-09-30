@@ -37,7 +37,7 @@ export async function captureProjectContent(root, options = {}) {
   await assertDirectory(etnRoot, projectRoot, { optional: false });
 
   const items = [
-    ...await captureFlatDirectory(etnRoot, "instructions", ".md", "instruction", limits),
+    ...await captureInstructions(etnRoot, limits),
     ...await captureFlatDirectory(etnRoot, "prompts", ".md", "prompt", limits),
     ...await captureSkills(etnRoot, limits),
     ...await captureFlatDirectory(etnRoot, "agents", ".yaml", "agent", limits),
@@ -172,6 +172,44 @@ async function captureFlatDirectory(etnRoot, directoryName, extension, type, lim
       : basename(entry.name, extension);
     items.push(contentItem(type, name, absolutePath, etnRoot, content));
   }
+  return items;
+}
+
+// Instructions may sit in subdirectories that mirror the workspace: a file at
+// instructions/src/ui/rules.md applies where the run works under src/ui, and
+// nowhere else. Walked here rather than by the loader so a scoped instruction
+// is pinned, size-limited and symlink-checked exactly like a top-level one —
+// a directory of rules that skipped the lock would be the easy way around it.
+const MAX_INSTRUCTION_DEPTH = 6;
+
+async function captureInstructions(etnRoot, limits) {
+  const items = [];
+  const walk = async (directory, depth) => {
+    const entries = await readDirectory(directory, etnRoot);
+    for (const entry of entries) {
+      if (entry.isSymbolicLink()) {
+        throw new ContentProvenanceError(
+          "unsafe-content-path",
+          "Symbolic links are not allowed in .etnpilot/instructions.",
+        );
+      }
+      const absolutePath = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        if (depth >= MAX_INSTRUCTION_DEPTH) {
+          throw new ContentProvenanceError(
+            "content-limit-exceeded",
+            `Instructions nest deeper than ${MAX_INSTRUCTION_DEPTH} directories: ${relativePath(etnRoot, absolutePath)}.`,
+          );
+        }
+        await walk(absolutePath, depth + 1);
+        continue;
+      }
+      if (!entry.isFile() || extname(entry.name) !== ".md") continue;
+      const content = await readSafeContentFile(absolutePath, etnRoot, limits.maxFileBytes);
+      items.push(contentItem("instruction", basename(entry.name, ".md"), absolutePath, etnRoot, content));
+    }
+  };
+  await walk(join(etnRoot, "instructions"), 0);
   return items;
 }
 

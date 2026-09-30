@@ -6,22 +6,22 @@
       "type": "agent",
       "name": "builder",
       "path": ".etnpilot/agents/builder.yaml",
-      "digest": "sha256:f68f40f04b0af45525c558a81dc48051f01dcd63e2eb9fa045b67e0096502e87",
-      "bytes": 101
+      "digest": "sha256:1a89802112c59a7b9e986f6f8e50fc865a4de58825b7dea584850d7585c6f0f0",
+      "bytes": 238
     },
     {
       "type": "agent",
       "name": "orchestrator",
       "path": ".etnpilot/agents/orchestrator.yaml",
-      "digest": "sha256:a422e1aa03249300820efb612d0dd527755637e735bd2ad177a66d18523f9752",
-      "bytes": 121
+      "digest": "sha256:b95eb3c30168020c72e0c0af651e27f585fa5011596bdcd4b37f873388a869d8",
+      "bytes": 250
     },
     {
       "type": "agent",
       "name": "reviewer",
       "path": ".etnpilot/agents/reviewer.yaml",
-      "digest": "sha256:e7654e1b847f390697b27e9573310d29843ec03643e821c4477fa2e1747eb1f8",
-      "bytes": 96
+      "digest": "sha256:af80754a337503e42194df199aa81a92382984a7a95c0b0c51323c2ec53afbba",
+      "bytes": 261
     },
     {
       "type": "instruction",
@@ -34,8 +34,8 @@
       "type": "prompt",
       "name": "builder",
       "path": ".etnpilot/prompts/builder.md",
-      "digest": "sha256:9cf50d5507a1ec90fe6ec38af66a0ef5cb0fab5e6bd5132db052a3c33f91f4f0",
-      "bytes": 628
+      "digest": "sha256:446a679e4e83e09649cbae9e15d0d1f0bd37bb5a43c6701d46cebf4f741c64c3",
+      "bytes": 1191
     },
     {
       "type": "prompt",
@@ -66,5 +66,5 @@
       "bytes": 175
     }
   ],
-  "digest": "sha256:d53761ec1ea854283bd3d574026722e35477b96ad434e30316a1690f06b35620"
+  "digest": "sha256:b1d31b80a03ebacd68f946877a407300084fa86cddedae5a88405784b96ad106"
 }

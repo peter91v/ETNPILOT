@@ -212,6 +212,17 @@ function renderApprovalDetail(state, { style, width, height, cursor }) {
   field("URL", details.url);
   field("Tool", details.tool);
   field("Arguments", details.arguments);
+  // The change itself, read as a diff rather than wrapped as prose: a person
+  // decides on this, so it keeps its own shape and its own colours.
+  if (details.diff) {
+    lines.push(style.dim("Changes"));
+    for (const line of String(details.diff).split("\n")) {
+      if (line.startsWith("---") || line.startsWith("+++")) continue;
+      const tone = line.startsWith("+") ? "ok" : line.startsWith("-") ? "bad" : line.startsWith("@@") ? "muted" : "ink";
+      lines.push(`  ${style.tone(truncate(line, width - 4), tone)}`);
+    }
+    lines.push("");
+  }
   if (details.truncated) lines.push(style.warn("Shown up to the display limit; the full text is in the receipt."), "");
   if (approval.policy) {
     lines.push(style.dim("Why you are being asked"));

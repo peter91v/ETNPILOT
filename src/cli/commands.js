@@ -31,7 +31,7 @@ import { describeProject } from "../runtime/first-run.js";
 import { agentRawResponses, openProjectState, readMergeRequests, readWorktrees } from "../runtime/project-state.js";
 // 'diagnose' moved to the runtime layer, because the TUI and the page run the
 // same check; 'etnpilot doctor' is one of its callers, not its home.
-import { knownCheck, listChecks, runCheck } from "../runtime/project-checks.js";
+import { knownCheck, listChecks, runProjectCheck } from "../runtime/project-checks.js";
 import { diagnose } from "../runtime/diagnose.js";
 export { diagnose } from "../runtime/diagnose.js";
 import { runProject } from "../runtime/project-runner.js";
@@ -61,6 +61,12 @@ export const CLI_OPTIONS = Object.freeze({
   // 'etnpilot ui' opens a browser; both spellings the help names must parse.
   open: { type: "boolean", default: false },
   "no-open": { type: "boolean", default: false },
+  events: { type: "string" },
+  "for-run": { type: "boolean", default: false },
+  scope: { type: "string" },
+  cases: { type: "string" },
+  json: { type: "boolean", default: false },
+  "rotate-token": { type: "boolean", default: false },
   host: { type: "string" },
   port: { type: "string" },
   status: { type: "string" },
@@ -93,6 +99,7 @@ export const USAGE = `ETNPilot
 Usage:
   etnpilot init [directory] [--template default|minimal|regulated]
   etnpilot run <task> [--agent name] [--root directory] [--approvals terminal|inbox]
+    [--events jsonl]
     [--worktree | --no-worktree] [--cleanup-worktree] [--publish] [--dry-run]
     [--record-fixtures file | --fixtures file]
   etnpilot replay <receipt-file> [--root directory] [--public-key path]
@@ -113,11 +120,11 @@ Usage:
   etnpilot content lock [--root directory]
   etnpilot content verify [--root directory]
   etnpilot webhook serve [--root directory] [--host address] [--port number]
-  etnpilot ui [--root directory] [--host address] [--port number] [--no-open]
+  etnpilot ui [--root directory] [--host address] [--port number] [--no-open] [--rotate-token]
   etnpilot tui [--root directory]
   etnpilot approval list [--status pending|approved|rejected|expired|all] [--limit number]
   etnpilot approval show <id>
-  etnpilot approval approve <id> [--actor name] [--reason text]
+  etnpilot approval approve <id> [--actor name] [--reason text] [--for-run] [--scope pattern]
   etnpilot approval reject <id> [--actor name] [--reason text]
   etnpilot queue list [--status status] [--limit number]
   etnpilot queue show <id>
@@ -138,6 +145,7 @@ Usage:
   etnpilot telemetry summary [workflow-run-id] [--root directory]
   etnpilot doctor [--root directory]
   etnpilot check [name...] [--root directory]
+  etnpilot eval [name...] [--provider name] [--cases directory] [--json]
 
 Exit codes:
   0  the command succeeded
@@ -165,10 +173,23 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     }
     const task = [subcommand, ...rest].filter(Boolean).join(" ");
     const worktree = values.worktree ? true : (values["no-worktree"] || values["in-place"]) ? false : undefined;
+    // In a pipeline this command printed nothing for minutes and then one
+    // JSON object. The events are already produced — the surfaces use them to
+    // show progress — and only the CLI threw them away.
+    const streaming = values.events === "jsonl";
+    if (values.events !== undefined && !streaming) {
+      throw new Error(`Unknown --events format '${values.events}'. The only one is 'jsonl'.`);
+    }
+    // A reader of this stream must get a last line either way; a run that
+    // throws would otherwise end mid-stream with the reason only on stderr.
+    const emit = (line) => { if (streaming) console.log(JSON.stringify(line)); };
     const result = await runProject({
       root: resolve(values.root),
       input: task,
       agent: values.agent,
+      ...(streaming
+        ? { onEvent: (event) => console.log(JSON.stringify(event)) }
+        : {}),
       worktree,
       cleanupPolicy: values["cleanup-worktree"] ? "on-success" : undefined,
       publish: values.publish,
@@ -176,8 +197,13 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
       recordFixtures: values["record-fixtures"],
       fixtures: values.fixtures,
       approvalHandler: await createRunApprovalHandler(resolve(values.root), values.approvals),
+    }).catch((error) => {
+      emit({ type: "run.error", at: new Date().toISOString(), error: error.message });
+      throw error;
     });
-    console.log(JSON.stringify(result, null, 2));
+    // The last line is the result, whichever mode: a reader that takes the
+    // final line gets the same answer either way.
+    console.log(streaming ? JSON.stringify({ event: "run.result", ...result }) : JSON.stringify(result, null, 2));
     return result.summary?.status === "succeeded" ? 0 : 1;
   } else if (command === "replay") {
     if (!subcommand) throw new Error("A receipt file is required.");
@@ -345,11 +371,18 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     if (port !== undefined && (!Number.isInteger(port) || port < 0 || port > 65_535)) {
       throw new Error("--port must be an integer between 0 and 65535.");
     }
-    const review = await createReviewServer({ root: resolve(values.root) });
+    const review = await createReviewServer({
+      root: resolve(values.root),
+      rotateToken: values["rotate-token"],
+    });
     const address = await review.listen({ host: values.host, port });
     console.log(`ETNPilot review UI: ${address.url}`);
-    console.log("The link contains a one-time token. Anyone who has it can approve operations,");
-    console.log("change local settings, and start runs.");
+    // The token is no longer minted per start — an installed app holds a link,
+    // and a link that expires at the next restart is an icon that 401s. So it
+    // says what it is: a stored credential, and how to throw it away.
+    console.log("The link carries this project's token, kept in .etnpilot/state/ and never committed.");
+    console.log("Anyone who has it can approve operations, change local settings, and start runs.");
+    console.log("Replace it with 'etnpilot ui --rotate-token', which locks out every link and app.");
     if (address.exposed) {
       // Binding away from loopback drops the guarantee the rest of this
       // surface is built on, so it is said plainly rather than left to the
@@ -385,10 +418,13 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
   } else if (command === "approval" && (subcommand === "approve" || subcommand === "reject")) {
     if (!rest[0]) throw new Error("An approval ID is required.");
     await withApprovalInbox(resolve(values.root), async (inbox) => {
-      const decision = subcommand === "approve" ? "approved" : "rejected";
+      const decision = subcommand === "approve"
+        ? (values["for-run"] ? "approved-for-run" : "approved")
+        : "rejected";
       const result = inbox.decide(rest[0], decision, {
         actor: values.actor ?? process.env.USER ?? "cli",
         reason: values.reason,
+        scope: values.scope,
       });
       console.log(JSON.stringify(result, null, 2));
     });
@@ -587,6 +623,37 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"));
     const path = resolve(root, config.observability?.file ?? ".etnpilot/state/telemetry.jsonl");
     console.log(JSON.stringify(await summarizeTelemetryFile(path, { workflowRunId: rest[0] }), null, 2));
+  } else if (command === "eval") {
+    // Whether a run does the job, rather than whether the code runs. Against
+    // the scripted provider this is free and deterministic and measures the
+    // harness; against a real one it costs money and measures the agent.
+    const { listEvalCases, runEvalCase, formatEvalTable, summarizeEvals } = await import("../runtime/evals.js");
+    const { mkdtemp } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const directory = resolve(values.root, values.cases ?? "test/evals");
+    const all = await listEvalCases(directory);
+    if (all.length === 0) throw new Error(`No eval cases in ${directory}.`);
+    const names = [subcommand, ...rest].filter(Boolean);
+    const unknown = names.filter((name) => !all.some((one) => one.id === name));
+    if (unknown.length > 0) {
+      throw new Error(`Unknown eval${unknown.length === 1 ? "" : "s"}: ${unknown.join(", ")}.`
+        + ` Known: ${all.map((one) => one.id).join(", ")}.`);
+    }
+    const wanted = names.length > 0 ? all.filter((one) => names.includes(one.id)) : all;
+    const provider = values.provider ?? "scripted";
+    if (provider !== "scripted") {
+      console.log(`Running ${wanted.length} case(s) against '${provider}'. This spends real tokens.`);
+    }
+    const results = [];
+    for (const one of wanted) {
+      results.push(await runEvalCase(one, { root: await mkdtemp(join(tmpdir(), `etnpilot-eval-${one.id}-`)), provider }));
+    }
+    if (values.json) {
+      console.log(JSON.stringify({ ...summarizeEvals(results), results }, null, 2));
+    } else {
+      console.log(formatEvalTable(results));
+    }
+    return results.every((result) => result.ok) ? 0 : 1;
   } else if (command === "check") {
     // The same registry the TUI and the page list, so 'what can this project
     // check about itself' has one answer, wherever it is asked.
@@ -599,7 +666,7 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     }
     const wanted = names.length > 0 ? names : listChecks().map((one) => one.id);
     const results = [];
-    for (const id of wanted) results.push(await runCheck(id, { root }));
+    for (const id of wanted) results.push(await runProjectCheck(id, { root }));
     console.log(JSON.stringify(names.length === 1 ? results[0] : { checks: results }, null, 2));
     // A check with no verdict of its own — no telemetry recorded yet — is not
     // a failure, so it does not decide the exit code.

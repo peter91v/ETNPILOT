@@ -15,7 +15,8 @@
   "scripts": {
     "test": "node --test test/*.test.js",
     "check": "node scripts/check-syntax.mjs && node --test test/*.test.js",
-    "etnpilot": "node bin/etnpilot.js"
+    "etnpilot": "node bin/etnpilot.js",
+    "eval": "node bin/etnpilot.js eval"
   },
   "engines": {
     "node": ">=22.13"

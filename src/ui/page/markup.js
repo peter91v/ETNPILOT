@@ -1,0 +1,109 @@
+// The static markup of the page: the sidebar, the top bar, the modals.
+export const MARKUP = `</head>
+<body>
+<div class="shell">
+  <aside class="sidebar" id="sidebar" aria-label="Views">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">E</span>
+      <span>
+        <span class="brand-name">ETNPilot</span>
+        <span class="brand-sub">Review</span>
+      </span>
+    </div>
+    <p class="nav-label" id="nav-label">Surface</p>
+    <nav class="nav-list" id="nav" aria-labelledby="nav-label"></nav>
+    <div class="sidebar-footer">
+      <div class="runtime-card">
+        <div class="runtime-line"><span class="dot" id="runtime-dot"></span> <span id="runtime-state">reading…</span></div>
+        <p class="runtime-meta" id="runtime-meta"></p>
+      </div>
+    </div>
+  </aside>
+  <button class="scrim" id="scrim" aria-label="Close the view list" tabindex="-1"></button>
+
+  <div class="main">
+    <header class="topbar">
+      <button class="btn icon state menu-button" id="menu" aria-label="Collapse the view list" aria-expanded="true">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <div class="context">
+        <p class="eyebrow">Project</p>
+        <h1 class="context-title" id="context-title">…</h1>
+      </div>
+      <div class="top-actions">
+        <button class="btn state" id="open-palette" aria-label="Open the command palette">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <span>Commands</span>
+          <span class="kbd">ctrl K</span>
+        </button>
+        <button class="btn state" id="install" hidden>Install</button>
+        <button class="btn primary state" id="open-run" aria-label="Start a run">
+          <span class="wide-only">Start a run</span><span class="narrow-only">Run</span>
+        </button>
+      </div>
+    </header>
+
+    <main class="content">
+      <div class="page-head">
+        <div class="grow">
+          <h2 class="page-title" id="page-title">Overview</h2>
+          <p class="page-description" id="page-description"></p>
+        </div>
+        <div class="page-actions" id="page-actions"></div>
+      </div>
+      <p class="notice bad" id="error" hidden></p>
+      <section id="view-overview" class="view"></section>
+      <section id="view-approvals" class="view" hidden></section>
+      <section id="view-queue" class="view" hidden></section>
+      <section id="view-runs" class="view" hidden></section>
+      <section id="view-worktrees" class="view" hidden></section>
+      <section id="view-merges" class="view" hidden></section>
+      <section id="view-checks" class="view" hidden></section>
+      <section id="view-settings" class="view" hidden></section>
+    </main>
+  </div>
+</div>
+
+<div class="backdrop" id="run-modal" role="dialog" aria-modal="true" aria-labelledby="run-modal-title">
+  <div class="modal">
+    <div class="modal-head">
+      <h2 class="modal-title" id="run-modal-title">Start a run</h2>
+      <button class="btn icon state" style="margin-left:auto" data-close="run-modal" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <form id="run-form">
+      <div class="modal-body">
+        <div class="field">
+          <label for="run-task">Task</label>
+          <input id="run-task" placeholder="what the run should do" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="run-agent">Agent</label>
+          <select id="run-agent"></select>
+        </div>
+        <p class="muted" id="run-hint"></p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn link state" data-close="run-modal">Cancel</button>
+        <button type="submit" class="btn primary state" id="run-submit">Start</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="backdrop" id="palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="modal palette">
+    <div class="palette-search">
+      <input id="palette-input" placeholder="Go to a view, or run a command…" autocomplete="off" aria-label="Search commands">
+    </div>
+    <div class="palette-list" id="palette-list" role="listbox" aria-label="Commands"></div>
+  </div>
+</div>
+
+<nav class="nav-bar" id="nav-bar" aria-label="Views"></nav>
+<button class="fab state" id="fab-run" aria-label="Start a run">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+</button>
+
+<div class="toast-region" id="toasts" role="status" aria-live="polite"></div>`;

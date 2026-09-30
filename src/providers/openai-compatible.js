@@ -1,5 +1,9 @@
 import { ProviderError } from "./router.js";
-import { createWorkspaceTools } from "./workspace-tools.js";
+import { retryAfterMs, withRetry } from "./retry.js";
+import { createWorkspaceTools, lazySkills, skillsOf } from "./workspace-tools.js";
+import { collectChatStream } from "./sse.js";
+import { createResultEnvelope } from "./tool-results.js";
+import { compactConversation } from "./compaction.js";
 
 const DEFAULT_MAX_TOOL_ITERATIONS = 12;
 
@@ -23,6 +27,12 @@ export function createOpenAICompatibleProvider({
   // is configured, never guessed at here.
   reasoningEffort,
   requestBody,
+  retry,
+  contextTokens = 120_000,
+  extraTools = [],
+  // Read the answer as a stream and fold it into the same payload. Off by
+  // default: it changes how a long answer travels, not what it says.
+  stream = false,
   // Which environment variable and which secret this provider was wired to,
   // so a message about a missing key names the one to set rather than the
   // adapter's generic default.
@@ -56,19 +66,31 @@ export function createOpenAICompatibleProvider({
           limits: toolLimits,
           signal: context.signal,
           sandbox,
+          // What this agent is allowed to use, from its manifest. The tools
+          // used to hang on the provider alone, so every agent sharing one
+          // got all of them.
+          allowed: context.agent.tools,
+          canSpawn: (context.agent.subagents ?? []).length > 0,
+          extraTools: context.extraTools ?? extraTools,
+          scopedInstructions: context.scopedInstructions,
+          skills: skillsOf(context),
+          fetchImpl,
         })
         : undefined;
+      const envelope = createResultEnvelope(context.runId);
       const messages = [
-        { role: "system", content: buildSystemMessage(context) },
+        { role: "system", content: buildSystemMessage(context, workspaceTools ? envelope : undefined, workspaceTools) },
         { role: "user", content: String(context.input) },
       ];
       const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
       const toolCalls = [];
+      const retried = [];
+      const compactions = [];
       let payload;
       let responseModel;
 
       for (let iteration = 0; iteration <= maxToolIterations; iteration += 1) {
-        payload = await request({
+        const attempt = await withRetry((number) => request({
           endpoint,
           apiKey,
           fetchImpl,
@@ -79,12 +101,20 @@ export function createOpenAICompatibleProvider({
           // never overwritten by a passthrough.
           body: {
             ...extraBody,
+            // The agent's own choice beats the provider's default, which is
+            // what makes one provider serve a planner and a builder.
+            ...(context.agent.effort ? { reasoning_effort: context.agent.effort } : {}),
             model: context.agent.model ?? model,
             messages,
+            // Usage arrives in a last chunk only when asked for.
+            ...(stream ? { stream: true, stream_options: { include_usage: true } } : {}),
             ...(workspaceTools ? { tools: toolSchema(workspaceTools.definitions), tool_choice: "auto" } : {}),
           },
-          reasoningEffortConfigured: extraBody.reasoning_effort !== undefined,
-        });
+          reasoningEffortConfigured: extraBody.reasoning_effort !== undefined || Boolean(context.agent.effort),
+          stream,
+        }), { ...retry, signal: context.signal });
+        payload = attempt.value;
+        retried.push(...attempt.tried);
         addUsage(usage, payload.usage);
         responseModel = payload.model ?? responseModel;
         const message = payload.choices?.[0]?.message ?? {};
@@ -95,6 +125,9 @@ export function createOpenAICompatibleProvider({
             raw: payload,
             model: responseModel ?? context.agent.model ?? model,
             usage,
+            ...(context.agent.effort ? { effort: context.agent.effort } : {}),
+            ...(retried.length > 0 ? { retries: retried } : {}),
+            ...(compactions.length > 0 ? { compactions } : {}),
             ...(workspaceTools ? { toolCalls } : {}),
           };
         }
@@ -110,13 +143,24 @@ export function createOpenAICompatibleProvider({
           context.signal?.throwIfAborted();
           const toolName = call.function?.name ?? call.name;
           const result = await workspaceTools.invoke(toolName, call.function?.arguments ?? call.arguments, context);
-          toolCalls.push({ tool: toolName, ok: result.ok === true, ...(result.error ? { error: result.error } : {}) });
+          toolCalls.push({ tool: toolName, ok: result.ok === true, ...(result.error ? { error: result.error } : {}), ...(result.afterWrite ? { afterWrite: result.afterWrite } : {}) });
           messages.push({
             role: "tool",
             tool_call_id: call.id,
             // The model sees the same bounded result the receipt records.
-            content: JSON.stringify(result),
+            content: envelope.render(result),
           });
+        }
+        const bounded = compactConversation(messages, {
+          maxTokens: contextTokens,
+          isToolResult: (message) => message.role === "tool",
+          contentOf: (message) => message.content,
+          replace: (message, note) => ({ ...message, content: note }),
+        });
+        if (bounded.compacted.length > 0) {
+          messages.length = 0;
+          messages.push(...bounded.messages);
+          compactions.push(...bounded.compacted);
         }
       }
       throw new ProviderError("Provider tool loop did not terminate.", { code: "tool_loop_error" });
@@ -148,7 +192,7 @@ function normalizeExtraBody(requestBody, reasoningEffort) {
   return body;
 }
 
-async function request({ endpoint, apiKey, fetchImpl, context, body, name, reasoningEffortConfigured }) {
+async function request({ endpoint, apiKey, fetchImpl, context, body, name, reasoningEffortConfigured, stream }) {
   let response;
   try {
     response = await fetchImpl(endpoint, {
@@ -188,12 +232,20 @@ async function request({ endpoint, apiKey, fetchImpl, context, body, name, reaso
       {
         code: `http_${response.status}`,
         retryable,
+        retryAfterMs: retryAfterMs(response.headers?.get?.("retry-after")),
         // A failed call that already ran tools is not safe to replay blindly.
         safeToRetry: retryable && !bodyHasToolResults(body),
       },
     );
   }
-  return response.json();
+  if (!stream) return response.json();
+  try {
+    return await collectChatStream(response);
+  } catch (error) {
+    // Same rule as a failed status: what already ran tools is not replayed blindly.
+    if (error instanceof ProviderError && bodyHasToolResults(body)) error.safeToRetry = false;
+    throw error;
+  }
 }
 
 // A 400 that names 'reasoning_effort' next to function tools is the one
@@ -299,9 +351,18 @@ function bodyHasToolResults(body) {
   return (body.messages ?? []).some((message) => message.role === "tool");
 }
 
-function buildSystemMessage(context) {
+function buildSystemMessage(context, envelope, tools) {
   const parts = [context.agent.prompt, ...context.instructions];
-  for (const skill of context.skills ?? []) parts.push(skill?.content ?? String(skill));
+  // Listed by name when the agent can open them; sent whole when it cannot,
+  // because a skill it may neither see nor load would be a skill it lacks.
+  const lazy = lazySkills(context, tools);
+  if (lazy.length > 0) {
+    parts.push(["Skills you can load with load_skill (name: what it is for):", ...lazy.map((skill) => `- ${skill.name}: ${skill.summary}`)].join("\n"));
+  } else {
+    for (const skill of context.skills ?? []) parts.push(skill?.content ?? String(skill));
+  }
+  // Last, so it is the most recent thing said about how to read what follows.
+  if (envelope) parts.push(envelope.instruction);
   return parts.filter(Boolean).join("\n\n");
 }
 

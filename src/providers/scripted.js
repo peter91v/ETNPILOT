@@ -1,5 +1,5 @@
 import { ProviderError } from "./router.js";
-import { createWorkspaceTools } from "./workspace-tools.js";
+import { createWorkspaceTools, WORKSPACE_TOOL_DEFINITIONS } from "./workspace-tools.js";
 
 // A provider that asks no model anything. It performs exactly the workspace
 // tool calls the configuration lists, through the same mediated tools and the
@@ -15,7 +15,10 @@ import { createWorkspaceTools } from "./workspace-tools.js";
 // the model as 'scripted', and it decides nothing: the steps are whatever the
 // configuration already said they would be.
 
-const TOOLS = Object.freeze(["read_file", "list_files", "write_file", "run_command"]);
+// Whatever the workspace offers, rather than a copy of the list: this one was
+// written when there were four tools and stopped being true the moment there
+// were more, so a script could not name 'edit_file' or 'search_files'.
+const TOOLS = WORKSPACE_TOOL_DEFINITIONS.map((definition) => definition.name);
 
 export function createScriptedProvider({
   name = "scripted",
@@ -50,6 +53,7 @@ export function createScriptedProvider({
         limits: toolLimits,
         signal: context.signal,
         sandbox,
+        allowed: context.agent.tools,
       });
       const performed = [];
       for (const step of script) {

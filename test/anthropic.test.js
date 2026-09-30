@@ -12,6 +12,7 @@ import { registerConfiguredProviders } from "../src/providers/register.js";
 import { ProviderError, ProviderRouter } from "../src/providers/router.js";
 import { createSecretResolver } from "../src/secrets/resolver.js";
 import { Harness } from "../src/core/harness.js";
+import { WORKSPACE_TOOL_DEFINITIONS } from "../src/providers/workspace-tools.js";
 
 const context = (overrides = {}) => ({
   agent: { name: "worker", prompt: "Do the work." },
@@ -53,8 +54,11 @@ test("the Anthropic provider speaks the Messages API and counts its tokens", asy
   assert.equal(request.headers["x-api-key"], "sk-test");
   assert.equal(request.headers["anthropic-version"], "2023-06-01");
   // The prompt, the instructions and the skills are one system prompt; the
-  // input is the first user message.
-  assert.match(request.body.system, /Do the work\.\n\nFollow the checklist\.\n\nSkill text\./);
+  // input is the first user message. It travels as a block list, which is the
+  // shape that can carry a cache breakpoint.
+  assert.equal(request.body.system.length, 1);
+  assert.equal(request.body.system[0].type, "text");
+  assert.match(request.body.system[0].text, /Do the work\.\n\nFollow the checklist\.\n\nSkill text\./);
   assert.deepEqual(request.body.messages, [{ role: "user", content: "hello" }]);
   assert.equal(request.body.max_tokens, 8192);
   // Current models take adaptive thinking; a thinking budget is rejected.
@@ -102,13 +106,18 @@ test("the Anthropic provider runs an approved tool loop", async () => {
   assert.deepEqual(result.usage, { inputTokens: 22, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 });
   // The tools are declared in the API's own shape, and the result goes back as
   // a tool_result block the model can read.
-  assert.equal(bodies[0].tools.length, 4);
+  // Every tool this agent may use. It declares no subagents, so it is not
+  // offered the one tool the harness would refuse it anyway.
+  assert.deepEqual(
+    bodies[0].tools.map((tool) => tool.name ?? tool.function?.name).sort(),
+    WORKSPACE_TOOL_DEFINITIONS.map((one) => one.name).filter((name) => name !== "spawn_subagent" && name !== "load_skill").sort(),
+  );
   assert.equal(bodies[0].tools[0].input_schema.type, "object");
   const back = bodies[1].messages.at(-1);
   assert.equal(back.role, "user");
   assert.equal(back.content[0].type, "tool_result");
   assert.equal(back.content[0].tool_use_id, "toolu_1");
-  assert.equal(JSON.parse(back.content[0].content).ok, true);
+  assert.equal(insideEnvelope(back.content[0].content).ok, true);
 });
 
 test("the Anthropic tool loop is bounded", async () => {
@@ -265,3 +274,12 @@ test("the models this account can currently reach", async () => {
   assert.deepEqual(models.map((m) => m.id), ["claude-haiku-4-5", "claude-opus-5"]);
   assert.equal(models.find((m) => m.id === "claude-opus-5").displayName, "Claude Opus 5");
 });
+
+// A tool result reaches the model inside a marked envelope, so that outside
+// text is never mistaken for an instruction (src/providers/tool-results.js).
+// The payload is still the bounded JSON the receipt records.
+function insideEnvelope(content) {
+  const match = /^<tool_output id="[0-9a-f]+">\n([\s\S]*)\n<\/tool_output id="[0-9a-f]+">$/.exec(content.trim());
+  assert.ok(match, "the tool result is wrapped: " + content.slice(0, 40));
+  return JSON.parse(match[1]);
+}

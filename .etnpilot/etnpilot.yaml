@@ -9,6 +9,8 @@ settings:
     "content.provenance.**": locked
     "receipts.signing.**": locked
     "supplyChain.**": locked
+    "hooks.**": locked
+    "mcpServers.**": locked
     "policy.**": stricter-only
     "approval.allow": stricter-only
     "approval.requireHuman": stricter-only
@@ -194,6 +196,11 @@ workflow:
     - id: plan
       type: agent
       agent: orchestrator
+    # Uncomment to have a person approve the plan before anything is built.
+    # It is the cheapest place to stop a run, and it costs one prompt.
+    # - id: approve-plan
+    #   type: gate
+    #   needs: [plan]
     - id: build
       type: agent
       agent: builder

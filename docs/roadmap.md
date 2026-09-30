@@ -87,7 +87,17 @@ Every surface should be able to do everything; none of them is the junior one.
 - [ ] The remaining CLI commands from every surface
 
 The surfaces have a roadmap of their own, with exact steps, file paths and
-acceptance criteria: [roadmap-ui.md](roadmap-ui.md).
+acceptance criteria: [roadmap-ui.md](roadmap-ui.md). That one is now finished
+apart from two items it names.
+
+## M8 — The agent itself (next)
+
+The surfaces show an agent that can do less than the tools it is modelled on.
+[roadmap-agent.md](roadmap-agent.md) is the critical read-through of the
+project and the plan from it, measured against Claude Code: what to take, what
+to adapt, and what would be wrong here. Its first two phases — the agent can
+search and edit rather than rewrite whole files, and it stops paying for the
+same context twice — are the difference between 'runs' and 'usable'.
 
 ## Brainstorming backlog
 

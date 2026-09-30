@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -130,7 +130,11 @@ const sources = {
   tuiApp: await readFile(join(root, "src/tui/app.js"), "utf8"),
   tuiRender: await readFile(join(root, "src/tui/render.js"), "utf8"),
   server: await readFile(join(root, "src/ui/server.js"), "utf8"),
-  page: await readFile(join(root, "src/ui/page.js"), "utf8"),
+  // The page is text assembled from several files; the claims are about all of it.
+  page: (await Promise.all([
+    "src/ui/page.js",
+    ...(await readdir(join(root, "src/ui/page"))).sort().map((name) => `src/ui/page/${name}`),
+  ].map((path) => readFile(join(root, path), "utf8")))).join("\n"),
 };
 
 test("every capability the table claims is in the code", async () => {

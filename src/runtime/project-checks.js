@@ -201,7 +201,7 @@ export function knownCheck(id) {
 // Runs one check and returns what it found, never throwing: a check that blew
 // up is itself a result — it says which one and why, and the other checks stay
 // usable. 'ok' is undefined where the check has no pass/fail to report.
-export async function runCheck(id, { root, config, now = Date.now } = {}) {
+export async function runProjectCheck(id, { root, config, now = Date.now } = {}) {
   const check = CHECKS.find((candidate) => candidate.id === id);
   if (!check) throw new Error(`Unknown check '${id}'. Known: ${CHECKS.map((one) => one.id).join(", ")}.`);
   const startedAt = now();
