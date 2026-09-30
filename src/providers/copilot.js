@@ -81,7 +81,7 @@ export function createCopilotProvider(options = {}) {
         stopOnAbort = () => { void cancelSession(session); };
         context.signal?.addEventListener("abort", stopOnAbort, { once: true });
         promptSent = true;
-        const message = await session.sendAndWait({ prompt: String(context.input) });
+        const message = await session.sendAndWait({ prompt: withTranscript(context) });
         context.signal?.throwIfAborted();
         return {
           text: message?.data?.content ?? "",
@@ -135,4 +135,14 @@ function buildSystemMessage(context) {
   const instructions = [context.agent.prompt, ...context.instructions];
   for (const skill of context.skills) instructions.push(skill.content ?? String(skill));
   return { mode: "replace", content: instructions.filter(Boolean).join("\n\n") };
+}
+
+// This adapter has no message list to put earlier turns in, so they go in front
+// of the prompt as a transcript. Dropping them instead would give the person a
+// conversation that quietly forgot what it had just said.
+function withTranscript(context) {
+  const history = context.history ?? [];
+  if (history.length === 0) return String(context.input);
+  const lines = history.map((message) => `${message.role === "user" ? "User" : "Assistant"}: ${message.content}`);
+  return `Earlier in this conversation:\n${lines.join("\n\n")}\n\nNow:\n${String(context.input)}`;
 }

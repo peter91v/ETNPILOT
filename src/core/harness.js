@@ -1,3 +1,4 @@
+import { normalizeHistory } from "./history.js";
 import { randomUUID } from "node:crypto";
 import { EventBus } from "./events.js";
 import { Registry } from "./registry.js";
@@ -202,6 +203,8 @@ export class Harness {
         signal,
         instructions: [...this.instructions],
         scopedInstructions: [...this.scopedInstructions],
+        // Earlier turns of a conversation, when this run is one of them.
+        history: normalizeHistory(metadata.history),
         hooks: this.hooks,
         // Tells subscribers a tool call finished. Watching only: nothing a
         // subscriber returns changes the call.
@@ -307,6 +310,7 @@ export class Harness {
         // its parent instead. This is what lets a run's agents be read back
         // as the tree they actually ran in, rather than a flat list of lines.
         ...(metadata.workflowStep ? { workflowStep: metadata.workflowStep } : {}),
+        ...(metadata.sessionId ? { session: { id: metadata.sessionId, turn: metadata.turn } } : {}),
         provider: routed.provider,
         providerAttempts: routed.attempts,
         status: "succeeded",
@@ -332,6 +336,7 @@ export class Harness {
         parentRunId,
         agent: agentName,
         ...(metadata.workflowStep ? { workflowStep: metadata.workflowStep } : {}),
+        ...(metadata.sessionId ? { session: { id: metadata.sessionId, turn: metadata.turn } } : {}),
         provider: error.provider ?? agent.provider,
         providerAttempts: error.providerAttempts ?? [],
         status: "failed",

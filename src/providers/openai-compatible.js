@@ -80,6 +80,7 @@ export function createOpenAICompatibleProvider({
       const envelope = createResultEnvelope(context.runId);
       const messages = [
         { role: "system", content: buildSystemMessage(context, workspaceTools ? envelope : undefined, workspaceTools) },
+        ...(context.history ?? []),
         { role: "user", content: String(context.input) },
       ];
       const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };

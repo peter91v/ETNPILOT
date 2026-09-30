@@ -979,7 +979,7 @@ Verlauf, eine Eingabezeile und Kommandos.
 
 **Bauplan.** Jede Stufe ist für sich mergefähig und hat ein „Fertig wenn".
 
-**D0 — Der Verlauf (Kern, ohne Oberfläche).** Sitzung als
+**D0 ✅ — Der Verlauf (Kern, ohne Oberfläche).** Sitzung als
 `.etnpilot/state/sessions/<id>.jsonl` (eine Zeile je Runde: Text, Anhänge
 mit Digest, Agent, Modell, `runId`). Die Provider nehmen einen `history`-Teil
 im Kontext an und stellen ihn der Runde voran; die Kompaktierung gilt für den

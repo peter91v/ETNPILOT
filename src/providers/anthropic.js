@@ -97,7 +97,8 @@ export function createAnthropicProvider({
           fetchImpl,
         })
         : undefined;
-      const messages = [{ role: "user", content: String(context.input) }];
+      // A conversation's earlier turns come first, as plain text.
+      const messages = [...(context.history ?? []), { role: "user", content: String(context.input) }];
       // One envelope per invocation: the marker a file could name is never
       // the marker in use.
       const envelope = createResultEnvelope(context.runId);

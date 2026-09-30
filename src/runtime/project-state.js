@@ -1,3 +1,4 @@
+import { listSessions, readSession, verifySession } from "./chat-session.js";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import YAML from "yaml";
@@ -53,6 +54,19 @@ export async function openProjectState({ root = process.cwd(), env = process.env
       { inbox, queue, runsDirectory, root: projectRoot, env, running, runErrors },
       options,
     ),
+    // Conversations, read from the same place as everything else. Sending a
+    // turn is not here: that starts a run, and starting runs is the caller's.
+    chat: {
+      list: () => listSessions(projectRoot),
+      read: (id) => readSession(projectRoot, id),
+      verify: (id) => verifySession(projectRoot, id, {
+        verifyReceipt: (file) => verifyProjectReceipt(runsDirectory, file, { root: projectRoot, config: current }),
+        readEntries: async (file) => {
+          const text = await readFile(join(runsDirectory, file), "utf8");
+          return text.split("\n").filter(Boolean).map((line) => JSON.parse(line));
+        },
+      }),
+    },
     settings: () => describeSettings({ root: projectRoot, env }),
     // The models a configured provider can currently reach, read live — never
     // cached here, because the answer is the provider's own and changes on

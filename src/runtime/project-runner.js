@@ -60,6 +60,8 @@ export async function runProject({
   approvalHandler,
   signal,
   metadata = {},
+  // Set by a conversation: { id, turn, history }. The run is one turn of it.
+  session,
   secretResolver,
   onEvent,
 } = {}) {
@@ -277,6 +279,7 @@ export async function runProject({
             workflowRunId: runId,
             workflowStep: step.id,
             workspace: workspace.path,
+            ...(session ? { sessionId: session.id, turn: session.turn, history: session.history } : {}),
           },
           signal: execution.signal,
         });
@@ -451,6 +454,7 @@ export async function runProject({
       ...(rehearsal ? { mergeRehearsal: rehearsal } : {}),
       ...(mergeTrain ? { mergeTrain } : {}),
     },
+    ...(session ? { session: { id: session.id, turn: session.turn } } : {}),
     ...(fixtureEvidence ? { fixtures: fixtureEvidence } : {}),
     ...(proposals.length > 0 ? { proposals: proposals.map(summarizeProposal) } : {}),
     codegraph: codegraphEvidence,
