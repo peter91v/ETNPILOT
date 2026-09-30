@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { knownPriceForModel } from "./known-pricing.js";
 
 const TELEMETRY_VERSION = 1;
 const SCOPE_NAME = "etnpilot";
@@ -96,12 +97,29 @@ export class Telemetry {
     });
   }
 
+  // What the maintained table of published prices says for this model, when the
+  // configuration names none: pricing follows the model in use without anyone
+  // typing rates. The table is in USD, so it only applies when the configured
+  // currency is USD; a rate the user wrote always wins.
+  tabulatedRate(model) {
+    if (this.pricing.currency !== "USD") return undefined;
+    const known = typeof model === "string" ? knownPriceForModel(model) : undefined;
+    if (!known) return undefined;
+    return {
+      inputPerMillion: known.inputPerMillion,
+      outputPerMillion: known.outputPerMillion,
+      cacheReadPerMillion: known.cacheReadPerMillion ?? known.inputPerMillion,
+      cacheWritePerMillion: known.cacheWritePerMillion ?? known.inputPerMillion,
+    };
+  }
+
   recordProviderUsage({ workflowRunId, agentRunId, provider, model, usage = {} }) {
     const normalized = normalizeUsage(usage);
     const key = workflowRunId ?? agentRunId;
     const rate = this.pricing.models[model]
       ?? this.pricing.models[undatedModel(model)]
-      ?? this.pricing.models["*"];
+      ?? this.pricing.models["*"]
+      ?? this.tabulatedRate(model);
     const estimatedCost = rate ? calculateCost(normalized, rate) : undefined;
     const previous = this.totals.get(key) ?? emptySummary(this.pricing.currency);
     const total = {

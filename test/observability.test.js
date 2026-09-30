@@ -138,7 +138,7 @@ test("a cost that cannot be worked out names the model whose rate is missing", a
     environment: "test",
     pricing: { currency: "USD", models: {} },
   });
-  for (const model of ["gpt-5", "gpt-5", "claude-opus-5"]) {
+  for (const model of ["gpt-5", "gpt-5", "claude-mystery-1"]) {
     const accounting = unpriced.recordProviderUsage({
       workflowRunId: "w",
       provider: "p",
@@ -156,7 +156,7 @@ test("a cost that cannot be worked out names the model whose rate is missing", a
   // Most-used model first, so the rate worth setting is the one named first.
   assert.deepEqual(before.unpricedModels, [
     { model: "gpt-5", calls: 2 },
-    { model: "claude-opus-5", calls: 1 },
+    { model: "claude-mystery-1", calls: 1 },
   ]);
 
   // Now a rate exists, and one more call is made with it.
@@ -184,7 +184,7 @@ test("a cost that cannot be worked out names the model whose rate is missing", a
   // a rate still to be set.
   assert.deepEqual(after.unpricedModels, [
     { model: "gpt-5", calls: 2, pricedSince: true },
-    { model: "claude-opus-5", calls: 1 },
+    { model: "claude-mystery-1", calls: 1 },
   ]);
 });
 

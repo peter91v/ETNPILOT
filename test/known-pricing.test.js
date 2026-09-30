@@ -68,3 +68,24 @@ test("every priced row of the pasted page is there, Spark (no rates) is not", ()
   assert.equal(price("gpt-6-astra-law").inputPerMillion, 12.5);
   assert.equal(price("gpt-5.3-codex-spark"), undefined);
 });
+
+test("telemetry prices a model from the table when the configuration names no rate", async () => {
+  const { Telemetry } = await import("../src/observability/telemetry.js");
+  const usage = { inputTokens: 7034, outputTokens: 1510 };
+  const auto = new Telemetry({ enabled: false }).recordProviderUsage({ workflowRunId: "w", provider: "openai", model: "gpt-6-luna", usage });
+  // 7034 * 0.20 + 1510 * 1.20 per million
+  assert.ok(Math.abs(auto.estimatedCost - (7034 * 0.2 + 1510 * 1.2) / 1e6) < 1e-12);
+  assert.equal(auto.workflow.unpricedInvocations, 0);
+
+  const unknown = new Telemetry({ enabled: false }).recordProviderUsage({ workflowRunId: "w", provider: "x", model: "mystery-1", usage });
+  assert.equal(unknown.estimatedCost, undefined);
+
+  // A rate the user wrote wins over the table.
+  const own = new Telemetry({ enabled: false, pricing: { models: { "gpt-6-luna": { inputPerMillion: 1, outputPerMillion: 1 } } } })
+    .recordProviderUsage({ workflowRunId: "w", provider: "openai", model: "gpt-6-luna", usage });
+  assert.ok(Math.abs(own.estimatedCost - (7034 + 1510) / 1e6) < 1e-12);
+
+  // The table is in USD: under another currency it does not apply.
+  const eur = new Telemetry({ enabled: false, pricing: { currency: "EUR" } }).recordProviderUsage({ workflowRunId: "w", provider: "openai", model: "gpt-6-luna", usage });
+  assert.equal(eur.estimatedCost, undefined);
+});

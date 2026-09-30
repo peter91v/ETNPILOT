@@ -77,3 +77,15 @@ export function knownPriceFor(providerType, modelId) {
   const rate = table.rates[modelId] ?? table.rates[undated];
   return rate ? { ...rate, asOf: table.asOf, source: table.source } : undefined;
 }
+
+// The same lookup when only the model id is at hand (telemetry records the
+// provider's configured name, not its type). Ids do not collide across the
+// tables — 'claude-…' versus 'gpt-…' — so the first table that knows the id
+// answers. Undefined when none does.
+export function knownPriceForModel(modelId) {
+  for (const type of Object.keys(RATE_TABLES)) {
+    const rate = knownPriceFor(type, modelId);
+    if (rate) return rate;
+  }
+  return undefined;
+}
