@@ -102,7 +102,8 @@ test("the Anthropic provider runs an approved tool loop", async () => {
   assert.equal(result.text, "wrote it");
   assert.equal(await readFile(join(root, "out.txt"), "utf8"), "generated");
   assert.deepEqual(approvals, ["write"]);
-  assert.deepEqual(result.toolCalls, [{ tool: "write_file", ok: true }]);
+  // The record says what was asked of the tool, not only that it ran.
+  assert.deepEqual(result.toolCalls, [{ tool: "write_file", label: "write_file out.txt", ok: true }]);
   assert.deepEqual(result.usage, { inputTokens: 22, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 });
   // The tools are declared in the API's own shape, and the result goes back as
   // a tool_result block the model can read.

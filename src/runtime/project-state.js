@@ -870,6 +870,8 @@ export async function readAgents({ root, config }) {
       file,
       ...(provider ? { provider, ...(manifest.provider ? {} : { inheritedProvider: true }) } : {}),
       ...(Array.isArray(manifest.requires) ? { requires: manifest.requires } : {}),
+      // What it may do, so a surface can say an agent only reads before anyone asks it to write.
+      ...(Array.isArray(manifest.tools) ? { tools: manifest.tools } : {}),
       ...(typeof manifest.description === "string" ? { description: manifest.description } : {}),
     });
   }

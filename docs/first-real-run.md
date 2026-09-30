@@ -190,3 +190,28 @@ A complete run against a real provider, and anything at all against a real
 GitLab instance. Until those two lines are filled in, this project's
 end-to-end behaviour is an expectation rather than an observation, and the
 table at the top of this file says so rather than implying otherwise.
+
+### 2026-09-30 — the chat, on a phone, against OpenAI (`gpt-6-luna`)
+
+The first real conversation. What it showed:
+
+- **It works end to end.** Turns are answered, the tokens are counted (1,340 on one
+  turn), a failed turn stays in the thread as a failed turn and the next one
+  carries on, and the page is usable on a phone.
+- **The known `reasoning_effort` 400 appeared in the chat** ("Function tools with
+  reasoning_effort are not supported for gpt-6-luna…"). The error carried no
+  advice, which means the effort came from something that was set — the agent's
+  `effort:`, `/effort`, or `providers.<name>.reasoningEffort` — not from the
+  server's default. The message now says so and how to clear it.
+- **"Ich kann in dieser Umgebung keine Dateiänderung direkt ausführen"** for an
+  edit of `.etnpilot/etnpilot.yaml`. That was the policy doing its job
+  (`protect-etnpilot-governance` denies an agent's writes under `.etnpilot/`), but
+  the reply did not say so and the person could not tell it from a model that
+  cannot write. Each turn now lists what the agent did and what was refused, and
+  why, from the record and not from the reply.
+- **"Was gibt es neues bei openai"** was answered from the model's own knowledge:
+  the starter agents have no `fetch_url` (it reads text nobody here wrote, so it is
+  opt-in). To let an agent read the web: add `fetch_url` to its `tools:` and allow
+  the host under `policy.operations`.
+- Not addressed: answers are shown as plain text, so the model's Markdown
+  (`**…**`, links, fences) appears literally.

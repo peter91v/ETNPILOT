@@ -888,3 +888,18 @@ export function skillsOf(context) {
 export function lazySkills(context, tools) {
   return tools?.definitions?.some((definition) => definition.name === "load_skill") ? skillsOf(context) : [];
 }
+
+// One short line for a tool call: what was asked of which tool, so a surface can
+// show what an agent did (and what it was refused) without the whole arguments.
+// The text came from a model, so control characters are made harmless here.
+export function describeCall(name, rawArguments) {
+  let args = rawArguments;
+  if (typeof args === "string") {
+    try { args = JSON.parse(args); } catch { args = {}; }
+  }
+  const a = args && typeof args === "object" ? args : {};
+  const detail = a.path ?? a.pattern ?? a.glob ?? a.url ?? (Array.isArray(a.command) ? a.command.join(" ") : a.command)
+    ?? a.name ?? a.agent ?? a.question ?? "";
+  const text = String(detail).replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 120);
+  return text ? `${name} ${text}` : name;
+}

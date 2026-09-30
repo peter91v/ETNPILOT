@@ -26,6 +26,13 @@ export const CHAT_HELP = [
   "  /exit                leave",
 ].join("\n");
 
+// An agent whose tool list has no way to change anything. Named because a
+// conversation asking it to write ends in a diff to paste by hand, and the
+// person should know why before asking.
+export function readsOnly(entry) {
+  return Array.isArray(entry?.tools) && !entry.tools.some((name) => ["write_file", "edit_file", "run_command"].includes(name));
+}
+
 export function createChoice(agent) {
   return { agent, model: undefined, provider: undefined, effort: undefined };
 }
@@ -52,7 +59,7 @@ export async function runChatCommand(text, { choice, known, config, policy, root
       return say(CHAT_HELP);
     case "agent": {
       if (!argument) {
-        return say(...known.agents.map((entry) => `${entry.name === choice.agent ? "*" : " "} ${entry.name}${entry.description ? ` — ${entry.description}` : ""}`));
+        return say(...known.agents.map((entry) => `${entry.name === choice.agent ? "*" : " "} ${entry.name}${readsOnly(entry) ? " (only reads)" : ""}${entry.description ? ` — ${entry.description}` : ""}`));
       }
       if (!names.includes(argument)) return say(`No agent '${argument}'. Known: ${names.join(", ")}.`);
       choice.agent = argument;

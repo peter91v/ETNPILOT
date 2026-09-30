@@ -147,6 +147,25 @@ export function usageOf(outcome) {
   return undefined;
 }
 
+// What the agent did this turn, in one line each: the tool and what it was asked
+// to touch, whether it went through, and why not when it did not. The reply is
+// the model's account; this is the record's, and a refusal by policy is visible
+// even when the reply glosses over it.
+export function callsOf(outcome, limit = 30) {
+  const calls = [];
+  for (const step of Object.values(outcome?.summary?.steps ?? {})) {
+    const result = step?.result?.result ?? step?.result;
+    for (const call of result?.toolCalls ?? []) {
+      calls.push({
+        label: call.label ?? call.tool,
+        ok: call.ok === true,
+        ...(call.error ? { error: String(call.error).slice(0, 200) } : {}),
+      });
+    }
+  }
+  return calls.slice(0, limit);
+}
+
 export const DEFAULT_MAX_SESSION_TOKENS = 1_000_000;
 
 // Everything this conversation has spent: its turns and its summaries.
@@ -246,6 +265,7 @@ export async function runChatTurn({
     runId: outcome.runId,
     status,
     ...(usageOf(outcome) ? { usage: usageOf(outcome) } : {}),
+    ...(callsOf(outcome).length > 0 ? { calls: callsOf(outcome) } : {}),
     snapshots: before && after ? { before, after } : { unavailable: dryRun ? "a dry run" : "not a git repository" },
     ...(reply !== undefined ? { reply } : {}),
     ...(bounded.omitted > 0 ? { historyOmitted: bounded.omitted } : {}),

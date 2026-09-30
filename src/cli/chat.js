@@ -7,9 +7,9 @@ import { PolicyEngine } from "../policy/engine.js";
 import { describeRequest, display } from "../core/terminal-approval.js";
 import { git } from "../git/command.js";
 import { openProjectState } from "../runtime/project-state.js";
-import { createSessionId, listSessions, readSession, runChatTurn, undoLastTurn, compactSession, compactionCheck } from "../runtime/chat-session.js";
+import { callsOf, createSessionId, listSessions, readSession, runChatTurn, undoLastTurn, compactSession, compactionCheck } from "../runtime/chat-session.js";
 import { resolveAttachments } from "../runtime/chat-attachments.js";
-import { createChoice, overrideOf, runChatCommand } from "../runtime/chat-commands.js";
+import { createChoice, overrideOf, readsOnly, runChatCommand } from "../runtime/chat-commands.js";
 
 // 'etnpilot chat': a conversation with an agent, in the terminal.
 //
@@ -145,6 +145,9 @@ export async function runChat({
       const count = status.stdout.split("\n").filter(Boolean).length;
       say(`Note: ${count} uncommitted change${count === 1 ? "" : "s"} in this directory. The agent works here, not in a copy; every write is still asked for.`);
     }
+    if (readsOnly(known.agents.find((entry) => entry.name === choice.agent))) {
+      say(`Note: '${choice.agent}' can only read (its tools list has no write_file, edit_file or run_command). /agent lists the others.`);
+    }
     say("/help lists the commands.");
     // Before the first message rather than in its answer: a missing key found
     // by spending a turn is one turn too late.
@@ -195,6 +198,7 @@ export async function runChat({
       sessionId = result.sessionId;
       if (streamed) say("");
       else say(`\n${choice.agent}> ${result.reply ?? "(no answer)"}`);
+      for (const call of callsOf(result.outcome)) say(`  ${call.ok ? "did" : "refused"}: ${call.label}${call.ok ? "" : ` — ${call.error ?? "no reason recorded"}`}`);
       say(`  turn ${result.turn} · ${result.status}${usageLine(result.outcome)} · ${result.tokensUsed} tokens in this conversation\n`);
     } catch (error) {
       say(`\n! ${error.message}\n`);

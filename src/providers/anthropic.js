@@ -2,7 +2,7 @@ import { missingApiKey } from "./openai-compatible.js";
 import { ProviderError } from "./router.js";
 import { collectAnthropicStream } from "./sse.js";
 import { retryAfterMs, withRetry } from "./retry.js";
-import { createWorkspaceTools, lazySkills, skillsOf } from "./workspace-tools.js";
+import { createWorkspaceTools, describeCall, lazySkills, skillsOf } from "./workspace-tools.js";
 import { createResultEnvelope } from "./tool-results.js";
 import { compactConversation } from "./compaction.js";
 
@@ -181,7 +181,7 @@ export function createAnthropicProvider({
         for (const call of requested) {
           context.signal?.throwIfAborted();
           const result = await workspaceTools.invoke(call.name, call.input ?? {}, context);
-          toolCalls.push({ tool: call.name, ok: result.ok === true, ...(result.error ? { error: result.error } : {}), ...(result.afterWrite ? { afterWrite: result.afterWrite } : {}) });
+          toolCalls.push({ tool: call.name, label: describeCall(call.name, call.input), ok: result.ok === true, ...(result.error ? { error: result.error } : {}), ...(result.afterWrite ? { afterWrite: result.afterWrite } : {}) });
           results.push({
             type: "tool_result",
             tool_use_id: call.id,

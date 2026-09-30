@@ -556,7 +556,7 @@ export const STYLES = `  /* Material Design 3, implemented rather than approxima
   .chat { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-content: start; }
   .chat-head { margin-left: auto; justify-content: flex-end; }
   .chat-thread { display: grid; gap: 16px; align-content: start; min-height: 120px; }
-  .msg { display: grid; gap: 4px; max-width: min(760px, 100%); min-width: 0; }
+  .msg { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; max-width: min(760px, 100%); min-width: 0; }
   .msg.you { justify-self: end; }
   .msg .who { color: var(--md-on-surface-variant); font: var(--md-label-medium); letter-spacing: .5px; }
   .msg.you .who { justify-self: end; }
@@ -570,6 +570,12 @@ export const STYLES = `  /* Material Design 3, implemented rather than approxima
   .msg .meta { color: var(--md-on-surface-variant); font: var(--md-label-small); letter-spacing: .5px; }
   .chat-rule { margin: 0; text-align: center; font: var(--md-label-medium); }
   .attach-row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+  .attach-row.calls { justify-content: flex-start; }
+  .attach-row.calls .pill {
+    width: auto; max-width: 100%; height: auto; min-height: 32px; padding: 6px 12px; white-space: normal;
+    overflow-wrap: anywhere; align-items: flex-start; text-align: left;
+  }
+  .attach-row.calls .pill::before { flex: none; margin-top: 5px; }
   .chat-approvals { display: grid; gap: 16px; }
   .composer {
     position: sticky; bottom: 0; z-index: 4; display: grid; gap: 12px; padding: 16px;

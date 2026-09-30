@@ -1,6 +1,6 @@
 import { ProviderError } from "./router.js";
 import { retryAfterMs, withRetry } from "./retry.js";
-import { createWorkspaceTools, lazySkills, skillsOf } from "./workspace-tools.js";
+import { createWorkspaceTools, describeCall, lazySkills, skillsOf } from "./workspace-tools.js";
 import { collectChatStream } from "./sse.js";
 import { createResultEnvelope } from "./tool-results.js";
 import { compactConversation } from "./compaction.js";
@@ -144,7 +144,7 @@ export function createOpenAICompatibleProvider({
           context.signal?.throwIfAborted();
           const toolName = call.function?.name ?? call.name;
           const result = await workspaceTools.invoke(toolName, call.function?.arguments ?? call.arguments, context);
-          toolCalls.push({ tool: toolName, ok: result.ok === true, ...(result.error ? { error: result.error } : {}), ...(result.afterWrite ? { afterWrite: result.afterWrite } : {}) });
+          toolCalls.push({ tool: toolName, label: describeCall(toolName, call.function?.arguments ?? call.arguments), ok: result.ok === true, ...(result.error ? { error: result.error } : {}), ...(result.afterWrite ? { afterWrite: result.afterWrite } : {}) });
           messages.push({
             role: "tool",
             tool_call_id: call.id,
@@ -255,9 +255,19 @@ async function request({ endpoint, apiKey, fetchImpl, context, body, name, reaso
 // dead end into one command — but only when it is not already set, because
 // repeating advice that was taken sends people in a circle.
 function reasoningEffortAdvice({ status, detail, body, name, reasoningEffortConfigured }) {
-  if (status !== 400 || reasoningEffortConfigured) return "";
+  if (status !== 400) return "";
   if (!/reasoning_effort/i.test(detail ?? "")) return "";
   if (!Array.isArray(body?.tools) || body.tools.length === 0) return "";
+  if (reasoningEffortConfigured) {
+    // Something set it, and it is not 'none': the agent's own 'effort:' (or a
+    // conversation's /effort), or this provider's setting. Either way the same
+    // model refuses function tools with it.
+    if (!body.reasoning_effort || body.reasoning_effort === "none") return "";
+    return `\nThis request sent reasoning_effort '${body.reasoning_effort}' — from the agent's 'effort:' (or /effort in a`
+      + ` conversation) or from 'providers.${name}.reasoningEffort'. '${body.model}' refuses function tools with it.`
+      + ` Use 'none' (etnpilot config set providers.${name}.reasoningEffort none — that stays local, and /effort reset`
+      + ` clears a conversation's choice), or an agent without tools.`;
+  }
   return `\nThis provider sends no reasoning_effort, so that is the server's own default for`
     + ` '${body.model}'. To keep the workspace tools, set 'providers.${name}.reasoningEffort'`
     + ` to 'none' (etnpilot config set providers.${name}.reasoningEffort none — that stays local),`
