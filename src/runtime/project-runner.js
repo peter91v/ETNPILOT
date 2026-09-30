@@ -147,7 +147,8 @@ export async function runProject({
       try {
         codegraphBefore = await codegraph.graph.indexDirectory(workspace.path, { signal });
         harness.instructions.push([
-          "CodeGraph is available through the local codegraph_explore MCP tool.",
+          "CodeGraph is available through the codegraph_explore MCP tool"
+            + " (offered as codegraph.codegraph_explore by providers that prefix a server name).",
           "Query it before planning broad edits and use its refreshed index when reviewing changes.",
         ].join("\n"));
       } catch (error) {
@@ -164,8 +165,16 @@ export async function runProject({
     }
     // The project's own MCP servers, for every provider rather than one. A
     // server that will not start costs its tools, not the run.
-    if (config.mcpServers && Object.keys(config.mcpServers).length > 0) {
-      mcp = await connectMcpTools(config.mcpServers, {
+    // CodeGraph is one of them for the chat providers: the same descriptor the
+    // Copilot adapter is handed, spoken through the same client as any other
+    // server. Without this the prompt below promised a tool that 'anthropic'
+    // and 'openai' were never given.
+    const servers = {
+      ...(codegraph ? { codegraph: codegraphAsServer(codegraph.mcp) } : {}),
+      ...config.mcpServers,
+    };
+    if (Object.keys(servers).length > 0) {
+      mcp = await connectMcpTools(servers, {
         onError: ({ server, error }) => {
           mcpErrors.push({ server, error });
           harness.instructions.push(`The MCP server '${server}' is unavailable: ${error}`);
@@ -405,6 +414,10 @@ export async function runProject({
       codegraph.graph.close();
     }
   }
+  // The servers were only ever closed when a run failed. A run that succeeded
+  // left every one of them running — invisible while a project configured
+  // none, and a hung process on every run now that codegraph is one.
+  mcp?.close();
   const observability = await finishTelemetry({
     telemetry,
     span: workflowSpan,
@@ -907,6 +920,18 @@ function createPublisher(config, token, fetchImpl) {
     token,
     fetchImpl,
   });
+}
+
+function codegraphAsServer(descriptor) {
+  return {
+    command: descriptor.command,
+    args: descriptor.args,
+    cwd: descriptor.cwd,
+    env: descriptor.env,
+    timeoutMs: descriptor.timeout,
+    tools: descriptor.tools,
+    readOnlyTools: descriptor.tools,
+  };
 }
 
 function createCodegraph(workspaceRoot, config, { importer } = {}) {

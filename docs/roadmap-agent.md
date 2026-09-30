@@ -28,7 +28,7 @@ Geprüft gegen `git log` und den Code, nicht gegen die Erinnerung. Branch
 | P2.5 `--events jsonl`, P2.6 Poll-Cache | ✅ | `b1eddf7` |
 | P6.1 Evals (`npm run eval`) | ✅ gegen den Scripted-Provider | `ab332cd` |
 | P3.1 `spawn_subagent`, P3.3 `gate`, P3.4 `ask_human` | ✅ | `ce90c94` |
-| P3.2 MCP-Client für alle Provider | ✅ bis auf codegraph | `e05673a` |
+| P3.2 MCP-Client für alle Provider | ✅ (codegraph für die Chat-Provider über denselben Client; Copilot behält seinen Deskriptor) | `e05673a` + A-23 |
 | P4.3 `approve-for-run` + Taint-Regel | ✅ | `ca85cc8` |
 | P4.1 Verzeichnisbezogene Instruktionen | ✅ | `2a9c472` |
 | P4.2, P4.4, P4.5, P4.6 | offen | — |
@@ -67,6 +67,7 @@ bekommen den Satz, aber nicht das Werkzeug; ein Modell, das ihm folgt, ruft
 einen Namen auf, den es nicht gibt, und bekommt „Unknown tool". Das ist
 dieselbe Klasse von Fehler wie „Prompts nennen Werkzeuge, die nicht mehr
 existieren", nur in die andere Richtung.
+**Behoben** (codegraph läuft für die Chat-Provider über den MCP-Client, `readOnlyTools` fragt als `read`; ein Agent darf `server.tool` in `tools:` nennen; und `mcp.close()` fehlte auf dem Erfolgspfad — ein Server blieb nach jedem erfolgreichen Lauf offen). Ursprünglicher Vorschlag:
 **Fix (klein):** codegraph als MCP-Server über `connectMcpTools` anbinden —
 dann stimmt das Fertig-wenn von P3.2 und der Satz gilt für alle. Bis dahin:
 den Satz nur für Copilot ablegen.
@@ -697,7 +698,7 @@ aus P2.3 zwingend.
 Oberflächen erscheinen — der schon gebaut ist und heute nur eine Ebene zeigt —
 und ein Zyklus abgelehnt wird.
 
-**P3.2 ◐ MCP für alle Provider** *(codegraph offen, siehe A-23)* (A-6) — ein MCP-Client im Harness statt im
+**P3.2 ✅ MCP für alle Provider** *(A-23 behoben)* (A-6) — ein MCP-Client im Harness statt im
 Copilot-Adapter, konfiguriert unter `mcpServers:`, dessen Werkzeuge in dieselbe
 Approval- und Policy-Kette gehen wie die eingebauten. Ein MCP-Werkzeug ist
 fremder Code: es braucht eine eigene Policy-Art, keine Ausnahme.

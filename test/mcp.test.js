@@ -152,3 +152,40 @@ test("a server does not inherit this process's environment", async () => {
   assert.deepEqual(Object.keys(seen[0]).sort(), ["EXTRA", "HOME", "PATH"]);
   client.close();
 });
+
+test("a tool the project declares read-only asks as the read it is", async () => {
+  const mcp = await connectMcpTools({ fixture: { ...server(), readOnlyTools: ["shout"] } });
+  try {
+    const requests = [];
+    await mcp.tools[0].invoke({ text: "x" }, approve(requests));
+    await mcp.tools[1].invoke({}, approve(requests));
+    // The read-only one is a read (as codegraph already was for Copilot); the
+    // other keeps the 'mcp' kind and so still needs a rule of its own.
+    assert.equal(requests[0].kind, "read");
+    assert.equal(requests[0].sourceKind, "mcp");
+    assert.equal(requests[1].kind, "mcp");
+  } finally {
+    mcp.close();
+  }
+});
+
+test("an agent may list an MCP tool by its server.tool name", async () => {
+  const { Harness } = await import("../src/core/harness.js");
+  const harness = new Harness();
+  harness.registerAgent({ name: "a", provider: "p", prompt: "x", tools: ["read_file", "codegraph.codegraph_explore"] });
+  assert.throws(
+    () => harness.registerAgent({ name: "b", provider: "p", prompt: "x", tools: ["raed_file"] }),
+    /do not exist/,
+  );
+  const mcp = await connectMcpTools({ fixture: server() });
+  try {
+    const tools = createWorkspaceTools({
+      workingDirectory: await mkdtemp(join(tmpdir(), "etn-mcp-")),
+      allowed: ["read_file", "fixture.shout"],
+      extraTools: mcp.tools,
+    });
+    assert.deepEqual(tools.definitions.map((definition) => definition.name), ["read_file", "fixture.shout"]);
+  } finally {
+    mcp.close();
+  }
+});

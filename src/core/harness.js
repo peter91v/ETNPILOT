@@ -146,7 +146,10 @@ export class Harness {
       }
       // A misspelt name would otherwise read as 'this agent may use nothing',
       // which looks like a model that refuses to work.
-      const unknown = agent.tools.filter((name) => !WORKSPACE_TOOL_NAMES.has(name));
+      // A dotted name is an MCP tool ('server.tool'); the servers are not
+      // connected yet at registration, so it is checked when the run offers
+      // its tools, and one that is not there is simply not offered.
+      const unknown = agent.tools.filter((name) => !WORKSPACE_TOOL_NAMES.has(name) && !name.includes("."));
       if (unknown.length > 0) {
         throw new TypeError(
           `Agent '${agent.name}' lists tools that do not exist: ${unknown.join(", ")}.`

@@ -180,11 +180,14 @@ export async function connectMcpTools(servers = {}, { onError } = {}) {
             parameters: tool.parameters,
           },
           async invoke(args, context) {
-            const decision = await context.approve({
-              kind: "mcp",
-              toolName: `${name}.${tool.name}`,
-              toolArguments: args,
-            });
+            // A tool the project declares read-only asks as the read it is,
+            // the same way the Copilot adapter treats codegraph: otherwise a
+            // read of an index would need a policy rule for 'mcp' that the
+            // generated configuration deliberately does not have.
+            const readOnly = config.readOnlyTools?.includes(tool.name) === true;
+            const decision = await context.approve(readOnly
+              ? { kind: "read", path: ".", sourceKind: "mcp", toolName: `${name}.${tool.name}`, toolArguments: args }
+              : { kind: "mcp", toolName: `${name}.${tool.name}`, toolArguments: args });
             if (decision.kind !== "approve-once") {
               return { ok: false, error: decision.reason ?? "Refused." };
             }
