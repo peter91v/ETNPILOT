@@ -339,6 +339,11 @@ subagents: []
 # text nobody here wrote, so add it to the agent that needs it rather than
 # to all of them, and see 'policy.operations' for which hosts it may reach.
 tools: [read_file, list_files, search_files, write_file, edit_file, run_command]
+# How hard the model thinks: low, medium or high. Leave it out for the
+# provider's own default. A planner or reviewer usually earns 'high'; a builder
+# that follows a plan often does not. Anthropic models older than the 4.6
+# generation refuse adaptive thinking, so set it only where the model allows.
+# effort: medium
 `;
 
 const STARTER_PROMPT = `You implement one requested change at a time in the current repository.

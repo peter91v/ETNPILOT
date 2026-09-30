@@ -6,6 +6,8 @@ import { telemetryProviderAttributes } from "../observability/telemetry.js";
 
 const DEFAULT_MAX_SUBAGENT_DEPTH = 4;
 
+const EFFORT_LEVELS = Object.freeze(["low", "medium", "high"]);
+
 const WORKSPACE_TOOL_NAMES = new Set(WORKSPACE_TOOL_DEFINITIONS.map((definition) => definition.name));
 
 // What a yes covers when the person deciding named no scope of their own:
@@ -139,6 +141,9 @@ export class Harness {
         `An agent requires name, prompt, and a provider: ${agent?.name ? `'${agent.name}'` : "this manifest"}`
         + " names none, and the project sets no 'defaultProvider' to fall back on.",
       );
+    }
+    if (agent.effort !== undefined && !EFFORT_LEVELS.includes(agent.effort)) {
+      throw new TypeError(`Agent '${agent.name}': 'effort' must be one of ${EFFORT_LEVELS.join(", ")}.`);
     }
     if (agent.tools !== undefined) {
       if (!Array.isArray(agent.tools) || agent.tools.some((name) => typeof name !== "string")) {

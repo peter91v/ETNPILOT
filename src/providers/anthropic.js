@@ -123,6 +123,12 @@ export function createAnthropicProvider({
           body: {
             model: context.agent.model ?? model,
             max_tokens: maxTokens,
+            // Only when the agent asks: adaptive thinking is refused by models
+            // older than the 4.6 generation, so it is never a default sent to
+            // everybody. The agent's manifest chose it, for this agent.
+            ...(context.agent.effort
+              ? { thinking: { type: "adaptive" }, output_config: { effort: context.agent.effort } }
+              : {}),
             // Cached, because the expensive half of a tool loop is what does
             // not change: the same system prompt and the same tool schemas go
             // up again on every iteration, and by the twelfth they are the
@@ -148,6 +154,7 @@ export function createAnthropicProvider({
             raw: payload,
             model: responseModel ?? context.agent.model ?? model,
             usage,
+            ...(context.agent.effort ? { effort: context.agent.effort } : {}),
             ...(retried.length > 0 ? { retries: retried } : {}),
             ...(compactions.length > 0 ? { compactions } : {}),
             ...(workspaceTools ? { toolCalls } : {}),

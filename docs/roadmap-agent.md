@@ -32,7 +32,8 @@ Geprüft gegen `git log` und den Code, nicht gegen die Erinnerung. Branch
 | P4.3 `approve-for-run` + Taint-Regel | ✅ | `ca85cc8` |
 | P4.1 Verzeichnisbezogene Instruktionen | ✅ | `2a9c472` |
 | P4.2 `load_skill` | ✅ | (dieser Commit) |
-| P4.4, P4.5, P4.6 | offen | — |
+| P4.5 `effort:` | ✅ | (dieser Commit) |
+| P4.4, P4.6 | offen | — |
 | P5.1, P5.2 | offen | — |
 | P6.2, P6.3 | offen | — |
 
@@ -760,7 +761,7 @@ und erst dann steht er im Content-Lock.
 Instruktionen nachweislich *nicht* geändert hat, und `content verify` bis zum
 Merge unverändert grün bleibt.
 
-**P4.5 Denk-Aufwand je Agent** — ein Feld `effort:` im Manifest (`low`,
+**P4.5 ✅ Denk-Aufwand je Agent** — ein Feld `effort:` im Manifest (`low`,
 `medium`, `high`), je Provider übersetzt: `reasoning_effort` bei OpenAI,
 adaptives Thinking bei Anthropic. Planer und Reviewer profitieren davon, der
 Builder oft nicht. Die bestehende Provider-Einstellung `reasoningEffort` bleibt

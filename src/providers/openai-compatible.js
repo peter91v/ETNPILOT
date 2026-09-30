@@ -97,11 +97,14 @@ export function createOpenAICompatibleProvider({
           // never overwritten by a passthrough.
           body: {
             ...extraBody,
+            // The agent's own choice beats the provider's default, which is
+            // what makes one provider serve a planner and a builder.
+            ...(context.agent.effort ? { reasoning_effort: context.agent.effort } : {}),
             model: context.agent.model ?? model,
             messages,
             ...(workspaceTools ? { tools: toolSchema(workspaceTools.definitions), tool_choice: "auto" } : {}),
           },
-          reasoningEffortConfigured: extraBody.reasoning_effort !== undefined,
+          reasoningEffortConfigured: extraBody.reasoning_effort !== undefined || Boolean(context.agent.effort),
         }), { ...retry, signal: context.signal });
         payload = attempt.value;
         retried.push(...attempt.tried);
@@ -115,6 +118,7 @@ export function createOpenAICompatibleProvider({
             raw: payload,
             model: responseModel ?? context.agent.model ?? model,
             usage,
+            ...(context.agent.effort ? { effort: context.agent.effort } : {}),
             ...(retried.length > 0 ? { retries: retried } : {}),
             ...(compactions.length > 0 ? { compactions } : {}),
             ...(workspaceTools ? { toolCalls } : {}),
