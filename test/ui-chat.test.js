@@ -179,3 +179,54 @@ test("undo over HTTP takes back the last turn's files, and is refused while a tu
     await review.close();
   }
 });
+
+test("an answer being written is readable while the turn runs, and the plain chat prints it once", async () => {
+  const root = await project();
+  const streaming = {
+    scripted: async () => ({
+      name: "scripted",
+      capabilities: ["chat"],
+      async invoke(context) {
+        context.emitDelta("Hel");
+        context.emitDelta("lo, ");
+        if (context.input === "hold") {
+          await new Promise((resolve, reject) => context.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true }));
+        }
+        context.emitDelta("world");
+        return { text: "Hello, world", model: "m" };
+      },
+    }),
+  };
+  const review = await createReviewServer({ root });
+  const start = review.state.startRun.bind(review.state);
+  review.state.startRun = (options) => start({ ...options, providerFactories: streaming });
+  const address = await review.listen({ port: 0 });
+  const call = (path, options = {}) => fetch(`http://127.0.0.1:${address.port}${path}`, {
+    ...options, headers: { "x-etnpilot-token": review.token, ...(options.body ? { "content-type": "application/json" } : {}) },
+  });
+  try {
+    const { sessionId } = await (await call("/api/chat/send", { method: "POST", body: JSON.stringify({ text: "hold" }) })).json();
+    const mid = await until(async () => (await call(`/api/chat/session?id=${sessionId}`)).json(), (s) => s.running && s.partial === "Hello, ", "the partial answer");
+    assert.equal(mid.turns.length, 0, "not a turn yet, only a preview");
+    await call("/api/chat/stop", { method: "POST", body: JSON.stringify({ sessionId }) });
+    const after = await until(async () => (await call(`/api/chat/session?id=${sessionId}`)).json(), (s) => !s.running, "the stop");
+    assert.equal(after.partial, undefined, "a preview is not kept once the turn is over");
+  } finally {
+    await review.close();
+  }
+
+  // The plain chat writes what streams in and does not print the reply again.
+  const { runChat } = await import("../src/cli/chat.js");
+  const { PassThrough } = await import("node:stream");
+  const input = new PassThrough();
+  const output = new PassThrough();
+  let text = "";
+  output.on("data", (chunk) => { text += chunk.toString(); });
+  const done = runChat({ root: await project(), input, output, interactive: true, providerFactories: streaming });
+  await until(async () => text, (t) => /you> /.test(t), "the prompt");
+  input.write("go\n");
+  await until(async () => text, (t) => /turn 1/.test(t), "the turn");
+  assert.equal(text.split("Hello, world").length, 2, "the answer appears once");
+  input.write("/exit\n");
+  await done;
+});

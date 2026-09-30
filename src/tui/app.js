@@ -817,6 +817,7 @@ export function createTuiApp({
     chat.turns = session.turns ?? [];
     chat.compactions = session.compactions ?? [];
     chat.running = session.running === true;
+    chat.partial = session.partial ?? "";
     if (chat.pending && chat.turns.length > chat.pending.since) chat.pending = undefined;
     // A turn that ended without a record must not hang as though it were being
     // answered: after a few quiet seconds it says so.

@@ -69,9 +69,15 @@ function threadLines(chat, { style, width }) {
     say("you", chat.pending.text, "accent");
     for (const file of chat.pending.attached ?? []) lines.push(`      ${style.dim(`attached ${file.path}`)}`);
     for (const file of chat.pending.refused ?? []) lines.push(`      ${style.warn(`not attached ${file.path}: ${file.reason}`)}`);
-    lines.push(chat.pending.lost
-      ? `${style.tone("agent", "bad")} ${style.bad("This turn left no record. Check the runs view for why it stopped.")}`
-      : `${style.tone("agent", "ok")} ${style.dim("working…")}`);
+    if (chat.pending.lost) {
+      lines.push(`${style.tone("agent", "bad")} ${style.bad("This turn left no record. Check the runs view for why it stopped.")}`);
+    } else if (chat.partial) {
+      // The answer as it forms; the record replaces it when the turn ends.
+      say("agent", chat.partial, "ok");
+      lines.push(`      ${style.dim("writing…")}`);
+    } else {
+      lines.push(`${style.tone("agent", "ok")} ${style.dim("working…")}`);
+    }
   }
   for (const note of chat.notes ?? []) {
     for (const piece of wrap(note, Math.max(10, width - 2))) lines.push(style.muted(piece));

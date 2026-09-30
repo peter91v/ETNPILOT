@@ -72,7 +72,9 @@ function parseJson(text, what) {
 
 // Anthropic: message_start, then content blocks built from deltas, then
 // message_delta with the stop reason and the final output count.
-export async function collectAnthropicStream(response) {
+// 'onDelta' hears each piece of answer text as it arrives; the return value is
+// still the whole message, so nothing downstream depends on it being called.
+export async function collectAnthropicStream(response, { onDelta } = {}) {
   const message = { content: [], usage: {} };
   const blocks = [];
   for await (const { event, data } of readEvents(response)) {
@@ -90,7 +92,10 @@ export async function collectAnthropicStream(response) {
       const block = blocks[payload.index];
       const delta = payload.delta ?? {};
       if (!block) continue;
-      if (delta.type === "text_delta") block.text = (block.text ?? "") + delta.text;
+      if (delta.type === "text_delta") {
+        block.text = (block.text ?? "") + delta.text;
+        onDelta?.(delta.text);
+      }
       else if (delta.type === "input_json_delta") block._json = (block._json ?? "") + delta.partial_json;
       else if (delta.type === "thinking_delta") block.thinking = (block.thinking ?? "") + delta.thinking;
       // A thinking block is sent back unchanged on the next request, and the
@@ -129,7 +134,7 @@ export async function collectAnthropicStream(response) {
 
 // OpenAI-compatible: chat.completion.chunk objects, tool calls arriving in
 // pieces keyed by index, and a final chunk with usage when asked for.
-export async function collectChatStream(response) {
+export async function collectChatStream(response, { onDelta } = {}) {
   const message = { role: "assistant", content: "" };
   const calls = [];
   let finish;
@@ -157,7 +162,10 @@ export async function collectChatStream(response) {
     const choice = chunk.choices?.[0];
     if (!choice) continue;
     const delta = choice.delta ?? {};
-    if (typeof delta.content === "string") message.content += delta.content;
+    if (typeof delta.content === "string") {
+      message.content += delta.content;
+      if (delta.content !== "") onDelta?.(delta.content);
+    }
     for (const piece of delta.tool_calls ?? []) {
       const call = calls[piece.index ?? 0] ??= { id: undefined, type: "function", function: { name: "", arguments: "" } };
       call.id = piece.id ?? call.id;

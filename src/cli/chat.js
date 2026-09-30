@@ -156,6 +156,15 @@ export async function runChat({
     // belongs to this conversation, and the next one must find it.
     sessionId ??= createSessionId();
     turnController = new AbortController();
+    // A streaming provider's answer is written as it arrives; then it is not
+    // printed a second time.
+    let streamed = false;
+    const onEvent = (event) => {
+      if (event.type !== "agent.delta") return;
+      if (!streamed) output.write(`\n${choice.agent}> `);
+      streamed = true;
+      output.write(event.text);
+    };
     try {
       const result = await runChatTurn({
         root: projectRoot,
@@ -169,9 +178,11 @@ export async function runChat({
         approvalHandler,
         signal: turnController.signal,
         agentOverride: overrideOf(choice),
+        onEvent,
       });
       sessionId = result.sessionId;
-      say(`\n${choice.agent}> ${result.reply ?? "(no answer)"}`);
+      if (streamed) say("");
+      else say(`\n${choice.agent}> ${result.reply ?? "(no answer)"}`);
       say(`  turn ${result.turn} · ${result.status}${usageLine(result.outcome)}\n`);
     } catch (error) {
       say(`\n! ${error.message}\n`);

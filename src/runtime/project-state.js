@@ -64,7 +64,8 @@ export async function openProjectState({ root = process.cwd(), env = process.env
       read: async (id) => {
         const session = await readSession(projectRoot, id);
         // Whether a turn is going now is known here and nowhere on disk.
-        return { ...session, running: [...running].some((record) => record.session === id) };
+        const active = [...running].find((record) => record.session === id);
+        return { ...session, running: Boolean(active), ...(active?.partial ? { partial: active.partial } : {}) };
       },
       verify: (id) => verifySession(projectRoot, id, {
         verifyReceipt: (file) => verifyProjectReceipt(runsDirectory, file, { root: projectRoot, config: current }),
@@ -232,6 +233,9 @@ export async function openProjectState({ root = process.cwd(), env = process.env
             record.stepAgent = undefined;
           }
           if (event.type === "run.started") record.stepAgent = event.agent;
+          // What a streaming provider has written so far, for a surface that
+          // shows an answer as it forms. Bounded: it is a preview, not the record.
+          if (event.type === "agent.delta") record.partial = `${record.partial ?? ""}${event.text}`.slice(-20_000);
           if (event.type === "workflow.step.completed") {
             record.done += 1;
             record.step = undefined;

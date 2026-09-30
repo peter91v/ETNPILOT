@@ -1014,7 +1014,7 @@ ohne `pageerror` und ohne horizontales Scrollen schafft.
 **D4 ✅ — Die TUI-Ansicht „Chat".** Dieselben Bausteine im Vollbild-Terminal.
 *Fertig wenn:* ein pty-Test sie bei 40 × 20 und 100 × 30 bedient.
 
-**D5 — Streaming sichtbar, Zusammenfassen, Rückgängig, Bilder.** `run.delta`
+**D5 ◐ — Streaming sichtbar ✅, Zusammenfassen ✅, Rückgängig ✅, Bilder ✗, `--worktree` ✗.** `run.delta`
 in allen drei Oberflächen; `/compact` mit Zusammenfassung im Receipt;
 `/undo` über den Schnappschuss; Bild- und PDF-Anhang für Provider, die es
 können.
@@ -1069,3 +1069,23 @@ Vorschlag, nie angewendet).
   mehr und fällt auf die Kurzform „chat 8/8" zurück (ab etwa 110 Spalten
   sichtbar). Eingefügter Text mit Zeilenumbruch sendet an der ersten Zeile —
   wie beim bestehenden „Run starten"-Dialog.
+
+### Stand D5 (teilweise gebaut)
+
+- `/undo`: Der Arbeitsbaum wird vor und nach jeder Runde als git-Tree festgehalten
+  (in einem Wegwerf-Index, die Staging-Area der Person bleibt unberührt; unter
+  `refs/etnpilot/chat/` festgehalten). Rückgängig gemacht wird eine Datei nur,
+  wenn sie noch genau so ist, wie die Runde sie hinterlassen hat — eine
+  inzwischen geänderte wird stehen gelassen und genannt. Neueste Runde zuerst;
+  das Gespräch erfährt, dass die Änderungen zurückgenommen wurden.
+- `/compact`: Der Agent schreibt selbst eine Zusammenfassung — als eigener Lauf
+  mit Receipt, ohne jedes Werkzeug (durch die Werkzeugliste, nicht durch Bitten).
+  Die Runden bleiben unverändert auf der Platte; das nächste Gespräch bekommt
+  die Zusammenfassung statt der älteren Runden. `verifySession` prüft sie mit.
+- Streaming sichtbar: `stream: true` am Provider; der Text erscheint im Terminal-
+  Chat, in der TUI und auf der Seite, während er entsteht (Ereignis
+  `agent.delta`; mit `run --events jsonl` erscheinen diese Ereignisse auch).
+  Noch nie gegen eine echte API gesehen.
+- **Nicht gebaut:** Bild- und PDF-Anhänge (bräuchten strukturierte Nachrichten je
+  Provider und ein Medientyp-Modell) und `--worktree` je Sitzung (bräuchte einen
+  Worktree, der über Runden lebt).

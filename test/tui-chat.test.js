@@ -56,7 +56,8 @@ async function open({ behaviour = {}, columns, rows } = {}) {
             });
             return { text: decision.kind === "approve-once" ? "I wrote notes.txt." : "Understood, I did not write it.", model: "m" };
           }
-          if (behaviour.hang) await new Promise((resolve, reject) => context.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true }));
+          if (behaviour.stream) context.emitDelta("Hello, wor");
+          if (behaviour.hang || behaviour.stream) await new Promise((resolve, reject) => context.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true }));
           return { text: `heard: ${context.input.split("\n")[0]}`, model: "m" };
         },
       }),
@@ -209,5 +210,22 @@ test("it fits a phone and a wide terminal, and never draws past the edge", async
     } finally {
       close();
     }
+  }
+});
+
+test("an answer being written is drawn as it forms, and the record replaces it", async () => {
+  const { app, close } = await open({ behaviour: { stream: true } });
+  try {
+    await app.handle("t");
+    await type(app, "say hello");
+    await app.handle("\r");
+    await waitFor(async () => { await app.refresh(); return /Hello, wor/.test(screen(app)); }, "the partial answer");
+    assert.match(screen(app), /writing…/);
+    assert.doesNotMatch(screen(app), /working…/);
+    await app.handle("s");
+    await waitFor(async () => { await app.refresh(); return !app.chat.running && app.chat.turns.length === 1; }, "the stop");
+    assert.doesNotMatch(screen(app), /writing…/);
+  } finally {
+    close();
   }
 });

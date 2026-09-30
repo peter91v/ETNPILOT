@@ -10,6 +10,8 @@ export const CLIENT_CHAT = `let chatBuilt = false;
 let chatSession;
 let chatTurns = [];
 let chatCompactions = [];
+// What the model has written of the answer so far, when its provider streams.
+let chatPartial = "";
 let chatRunning = false;
 // The message just sent, shown at once and until the server's record of the
 // turn arrives. { text, attached, refused, since } or undefined.
@@ -105,6 +107,9 @@ function buildChat() {
   host.append(el("div", { class: "chat" }, [panel("Conversation", { meta: head, body: [thread] }), approvals, composer]));
   void loadChatChoices();
   void loadChatSessions();
+  // While a turn runs the answer may be forming: read it once a second rather
+  // than on the page's slower beat.
+  setInterval(() => { if (view === "chat" && chatSession && (chatRunning || chatPending)) void syncChat(); }, 1000);
 }
 
 async function loadChatChoices() {
@@ -246,6 +251,7 @@ async function syncChat() {
     chatTurns = session.turns ?? [];
     chatCompactions = session.compactions ?? [];
     chatRunning = session.running === true;
+    chatPartial = session.partial ?? "";
     if (chatPending && chatTurns.length > chatPending.since) chatPending = undefined;
     // A turn that ended without a record (the run could not even start) must
     // not leave the message hanging as though it were still being answered.
@@ -371,7 +377,7 @@ function renderChat() {
 
   // Redrawn only when it changed: the poll runs every few seconds, and a
   // conversation being read or selected must not be rebuilt under the reader.
-  const signature = JSON.stringify([chatSession, chatTurns.length, chatCompactions.length, chatTurns.at(-1)?.status, Boolean(chatPending), chatPending?.lost, chatRunning]);
+  const signature = JSON.stringify([chatSession, chatTurns.length, chatCompactions.length, chatTurns.at(-1)?.status, Boolean(chatPending), chatPending?.lost, chatRunning, chatPartial.length]);
   if (signature !== chatSignature) {
     chatSignature = signature;
     drawThread(thread);
@@ -417,7 +423,9 @@ function drawThread(thread) {
     thread.append(message("You", chatPending.text, { tone: "you", extra: attachmentChips(chatPending.attached, chatPending.refused) }));
     thread.append(chatPending.lost
       ? message("agent", "This turn left no record. Check Runs for why it stopped.", { tone: "failed" })
-      : message("agent", "Working…", { tone: "agent", meta: "waiting for the agent" }));
+      : chatPartial !== ""
+        ? message("agent", chatPartial, { tone: "agent", meta: "writing…" })
+        : message("agent", "Working…", { tone: "agent", meta: "waiting for the agent" }));
   }
 
   const last = thread.lastElementChild;

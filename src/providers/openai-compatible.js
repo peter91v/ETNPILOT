@@ -241,7 +241,7 @@ async function request({ endpoint, apiKey, fetchImpl, context, body, name, reaso
   }
   if (!stream) return response.json();
   try {
-    return await collectChatStream(response);
+    return await collectChatStream(response, { onDelta: context.emitDelta });
   } catch (error) {
     // Same rule as a failed status: what already ran tools is not replayed blindly.
     if (error instanceof ProviderError && bodyHasToolResults(body)) error.safeToRetry = false;

@@ -149,3 +149,20 @@ test("the OpenAI-compatible adapter with stream on asks for usage and returns th
   assert.deepEqual(bodies[0].stream_options, { include_usage: true });
   assert.equal(result.text, "hello");
 });
+
+test("the pieces of an answer are heard as they arrive, in order, and the whole is unchanged", async () => {
+  const heard = [];
+  const message = await collectAnthropicStream(streamOf(sse(anthropicEvents)), { onDelta: (piece) => heard.push(piece) });
+  assert.deepEqual(heard, ["Reading ", "it."]);
+  assert.equal(message.content[1].text, "Reading it.");
+
+  const said = [];
+  const payload = await collectChatStream(streamOf(sse([
+    [undefined, { choices: [{ index: 0, delta: { content: "hel" } }] }],
+    [undefined, { choices: [{ index: 0, delta: { content: "" } }] }],
+    [undefined, { choices: [{ index: 0, delta: { content: "lo" }, finish_reason: "stop" }] }],
+    [undefined, "[DONE]"],
+  ])), { onDelta: (piece) => said.push(piece) });
+  assert.deepEqual(said, ["hel", "lo"]);
+  assert.equal(payload.choices[0].message.content, "hello");
+});

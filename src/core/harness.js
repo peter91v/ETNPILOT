@@ -252,6 +252,11 @@ export class Harness {
           }
           return { answered: false, reason: decision.reason ?? "Not answered." };
         },
+        // Text as a streaming provider receives it, for whoever is watching. A
+        // watcher that fails or is slow changes nothing about the run.
+        emitDelta: (text) => {
+          void this.events.emit("agent.delta", { runId, agent: agentName, text }).catch(() => {});
+        },
         propose: (proposal) => {
           if (this.proposals.length >= MAX_PROPOSALS_PER_RUN) {
             return { ok: false, error: `At most ${MAX_PROPOSALS_PER_RUN} proposals per run.` };

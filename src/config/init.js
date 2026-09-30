@@ -46,6 +46,9 @@ providers:
     # harness's own tools, so every effect goes through the approval path.
     tools: true
     maxTokens: 8192
+    # Read the answer as it is written, so a chat can show it forming. Not on
+    # by default: it has been tested against stubs, not against the live API.
+    # stream: true
   openai:
     type: openai-compatible
     baseUrl: https://api.openai.com/v1

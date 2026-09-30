@@ -294,7 +294,7 @@ async function request({ endpoint, apiKey, fetchImpl, context, body, stream }) {
   }
   if (!stream) return response.json();
   try {
-    return await collectAnthropicStream(response);
+    return await collectAnthropicStream(response, { onDelta: context.emitDelta });
   } catch (error) {
     // Same rule as a failed status: what already ran tools is not replayed blindly.
     if (error instanceof ProviderError && bodyHasToolResults(body)) error.safeToRetry = false;
