@@ -19,6 +19,7 @@ import { runProject, RUN_BRANCH_PREFIX } from "./project-runner.js";
 import { createSecretResolver } from "../secrets/resolver.js";
 import { resolveConfiguredApiKey } from "../providers/register.js";
 import { knownPriceFor } from "../observability/known-pricing.js";
+import { refreshPricing } from "../observability/pricing-sync.js";
 import { WorkflowQueue } from "../workflow/queue.js";
 
 // These name files this state opened when it started. Changing one is allowed,
@@ -778,6 +779,7 @@ function assertReceiptName(file) {
 export async function withCurrentPricing(receipt, { root, config, runId }) {
   const usage = receipt.outcome?.usage;
   if (!usage || !(usage.unpricedInvocations > 0) || usage.estimatedCost !== undefined) return receipt;
+  await refreshPricing({ root, config }).catch(() => undefined);
   const file = resolve(root, config?.observability?.file ?? ".etnpilot/state/telemetry.jsonl");
   const fresh = await summarizeTelemetryFile(file, { workflowRunId: receipt.terminal?.runId ?? runId }).catch(() => undefined);
   if (!fresh || fresh.estimatedCost === undefined) return receipt;
@@ -915,6 +917,7 @@ export async function readAgents({ root, config }) {
 // surface that never shows this leaves a budget nobody can see.
 let usageCache;
 export async function readUsage({ root, config }) {
+  await refreshPricing({ root, config }).catch(() => undefined);
   const file = resolve(root, config?.observability?.file ?? ".etnpilot/state/telemetry.jsonl");
   const stats = await stat(file).catch(() => undefined);
   if (!stats) {

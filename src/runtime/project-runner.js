@@ -30,6 +30,7 @@ import { WorkflowEngine } from "../workflow/engine.js";
 import { evaluateQuorum, parseVerdict, QUORUM_INSTRUCTION, quorumError } from "../workflow/quorum.js";
 import { createSecretResolver } from "../secrets/resolver.js";
 import { createTelemetry } from "../observability/telemetry.js";
+import { refreshPricing } from "../observability/pricing-sync.js";
 import { buildDevcontainerImage, createSandbox, readDevcontainerImage } from "./sandbox.js";
 import { createFixtureRecorder, fixtureProviderFactories, loadFixtures } from "./fixtures.js";
 import { connectMcpTools } from "../providers/mcp-client.js";
@@ -120,6 +121,9 @@ export async function runProject({
       fallback: { provider: "env", key: "ETNPILOT_GITLAB_TOKEN" },
     });
     if (publish) assertPublishable(useWorktree, bootstrapConfig, gitLabToken);
+    // Prices for models the built-in table does not know, so a run is costed
+    // without anyone typing a rate. Never fails the run.
+    await refreshPricing({ root: repositoryRoot, config: bootstrapConfig, fetchImpl }).catch(() => undefined);
     telemetry = await createTelemetry({
       root: repositoryRoot,
       config: bootstrapConfig,

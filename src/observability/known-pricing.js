@@ -87,5 +87,21 @@ export function knownPriceForModel(modelId) {
     const rate = knownPriceFor(type, modelId);
     if (rate) return rate;
   }
-  return undefined;
+  return learnedPriceFor(modelId);
+}
+
+// Rates the project learned from the public catalog (see pricing-sync.js).
+// They answer only for what the built-in table does not know, so a rate that
+// was checked by hand is never replaced by a fetched one.
+let learned = { rates: {}, asOf: undefined, source: undefined };
+
+export function useLearnedRates(rates, { asOf, source } = {}) {
+  learned = { rates: rates ?? {}, asOf, source };
+}
+
+function learnedPriceFor(modelId) {
+  if (typeof modelId !== "string") return undefined;
+  const key = modelId.toLowerCase().replace(/^[a-z0-9-]+\//, "").replace(/\./g, "-").replace(/-\d{4}-\d{2}-\d{2}$/, "");
+  const rate = learned.rates[key];
+  return rate ? { ...rate, asOf: learned.asOf, source: learned.source } : undefined;
 }

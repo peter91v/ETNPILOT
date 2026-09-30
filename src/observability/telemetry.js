@@ -291,7 +291,8 @@ function normalizeOtlp(config) {
 
 function normalizePricing(config) {
   if (!config || Array.isArray(config) || typeof config !== "object") throw new TypeError("observability.pricing must be an object.");
-  rejectUnknown(config, ["currency", "models"], "observability.pricing");
+  rejectUnknown(config, ["currency", "models", "autoUpdate"], "observability.pricing");
+  if (config.autoUpdate !== undefined && typeof config.autoUpdate !== "boolean") throw new TypeError("observability.pricing.autoUpdate must be true or false.");
   const currency = config.currency ?? "USD";
   if (typeof currency !== "string" || !/^[A-Z]{3}$/.test(currency)) throw new TypeError("Pricing currency must be a three-letter uppercase code.");
   if (config.models !== undefined && (!config.models || Array.isArray(config.models) || typeof config.models !== "object")) {
