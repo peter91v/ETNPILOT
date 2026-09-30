@@ -45,12 +45,9 @@ test("a dated OpenAI snapshot prices the same as the undated name", () => {
   );
 });
 
-test("a pricing-page display name with no confirmed API id is not guessed at", () => {
-  // 'GPT-6 Astra', 'Daybreak Blue', etc. — this table has no entries for
-  // them, on purpose: a marketing name is not the 'model' string the API
-  // returns, and this table only prices ids it can stand behind.
-  for (const guess of ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "daybreak-blue", "daybreak-red"]) {
-    assert.equal(knownPriceFor("openai-compatible", guess), undefined, guess);
+test("an id with no row on the page stays unpriced instead of borrowing a neighbour's rate", () => {
+  for (const id of ["gpt-5", "gpt-6", "gpt-5.6", "gpt-5.3-codex-spark", "daybreak"]) {
+    assert.equal(knownPriceFor("openai-compatible", id), undefined, id);
   }
 });
 
