@@ -1,4 +1,4 @@
-import { createSessionId, listSessions, readSession, runChatTurn, undoLastTurn, verifySession } from "./chat-session.js";
+import { compactSession, compactionCheck, createSessionId, listSessions, readSession, runChatTurn, undoLastTurn, verifySession } from "./chat-session.js";
 import { resolveAttachments, summarizeAttachments } from "./chat-attachments.js";
 import { PolicyEngine } from "../policy/engine.js";
 import { git } from "../git/command.js";
@@ -129,6 +129,26 @@ export async function openProjectState({ root = process.cwd(), env = process.env
         // A failure is reported through runErrors like any run's; nothing here waits.
         started.catch(() => {});
         return { sessionId: id, agent: chosen, attached: summarizeAttachments(attachments), refused };
+      },
+      // Asks the model to summarise the older turns, as a run of its own. The
+      // answer is not awaited; it lands in the session as a 'compact' line.
+      async compact(id, { agent, model, provider, effort, providerFactories } = {}) {
+        const check = await compactionCheck(projectRoot, id);
+        if (!check.ok) return check;
+        if ([...running].some((record) => record.session === id)) {
+          return { ok: false, message: "A turn is running in this conversation; wait for it." };
+        }
+        const chosen = agent ?? current.defaultAgent ?? "orchestrator";
+        const override = model || provider || effort ? { model, provider, effort } : undefined;
+        const started = self.startRun({
+          input: "Summarise the conversation",
+          agent: chosen,
+          providerFactories,
+          session: id,
+          via: ({ input: _task, agent: _agent, ...options }) => compactSession({ ...options, sessionId: id, agent: chosen, agentOverride: override }),
+        });
+        started.catch(() => {});
+        return { ok: true, message: "Asking the model for a summary (one call). It appears in the conversation when it is written." };
       },
       // Takes back the newest turn's file changes. Not while a turn is running:
       // the files are moving.

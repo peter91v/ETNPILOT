@@ -9,6 +9,7 @@
 export const CLIENT_CHAT = `let chatBuilt = false;
 let chatSession;
 let chatTurns = [];
+let chatCompactions = [];
 let chatRunning = false;
 // The message just sent, shown at once and until the server's record of the
 // turn arrives. { text, attached, refused, since } or undefined.
@@ -42,7 +43,12 @@ function buildChat() {
     title: "Put back the files the last turn changed. A file you changed since is left alone.",
     onClick: () => void undoChat(),
   });
-  const head = el("div", { class: "row chat-head" }, [history, fresh, undo, el("span", { class: "muted", attrs: { id: "chat-note" } })]);
+  const compact = button("Compact", {
+    class: "btn small",
+    title: "Carry the older turns as a summary the model writes. Asks the model once; the turns stay on disk.",
+    onClick: () => void compactChat(),
+  });
+  const head = el("div", { class: "row chat-head" }, [history, fresh, undo, compact, el("span", { class: "muted", attrs: { id: "chat-note" } })]);
 
   const agent = el("select", { class: "inline", attrs: { id: "chat-agent", "aria-label": "Agent" } });
   const provider = el("select", { class: "inline", attrs: { id: "chat-provider", "aria-label": "Provider" } });
@@ -156,6 +162,7 @@ async function loadChatModels() {
 function startNewChat() {
   chatSession = undefined;
   chatTurns = [];
+  chatCompactions = [];
   chatPending = undefined;
   chatRunning = false;
   void loadChatSessions();
@@ -205,6 +212,22 @@ async function undoChat() {
   }
 }
 
+async function compactChat() {
+  if (!chatSession) return toast("There is no conversation yet.", "bad");
+  const body = { sessionId: chatSession };
+  for (const [field, id] of [["agent", "chat-agent"], ["provider", "chat-provider"], ["model", "chat-model"], ["effort", "chat-effort"]]) {
+    const value = chatControl(id).value.trim();
+    if (value !== "") body[field] = value;
+  }
+  try {
+    const result = await api("/api/chat/compact", { method: "POST", body: JSON.stringify(body) });
+    toast(result.message, result.ok ? "ok" : "bad");
+    void refresh({ force: true });
+  } catch (error) {
+    toast(error.message, "bad");
+  }
+}
+
 async function stopChat() {
   if (!chatSession) return;
   try {
@@ -221,6 +244,7 @@ async function syncChat() {
   try {
     const session = await api("/api/chat/session?id=" + encodeURIComponent(chatSession));
     chatTurns = session.turns ?? [];
+    chatCompactions = session.compactions ?? [];
     chatRunning = session.running === true;
     if (chatPending && chatTurns.length > chatPending.since) chatPending = undefined;
     // A turn that ended without a record (the run could not even start) must
@@ -347,7 +371,7 @@ function renderChat() {
 
   // Redrawn only when it changed: the poll runs every few seconds, and a
   // conversation being read or selected must not be rebuilt under the reader.
-  const signature = JSON.stringify([chatSession, chatTurns.length, chatTurns.at(-1)?.status, Boolean(chatPending), chatPending?.lost, chatRunning]);
+  const signature = JSON.stringify([chatSession, chatTurns.length, chatCompactions.length, chatTurns.at(-1)?.status, Boolean(chatPending), chatPending?.lost, chatRunning]);
   if (signature !== chatSignature) {
     chatSignature = signature;
     drawThread(thread);
@@ -386,6 +410,8 @@ function drawThread(thread) {
     } else {
       thread.append(message(turn.agent ?? "agent", turn.error ?? "The turn ended " + turn.status + ".", { tone: "failed", meta: "turn " + turn.turn + " · " + turn.status }));
     }
+    const summary = chatCompactions.find((entry) => entry.upToTurn === turn.turn);
+    if (summary) thread.append(el("p", { class: "muted chat-rule", text: "Turns up to " + summary.upToTurn + " are carried as a summary from here on." }));
   }
   if (chatPending) {
     thread.append(message("You", chatPending.text, { tone: "you", extra: attachmentChips(chatPending.attached, chatPending.refused) }));

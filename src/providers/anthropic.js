@@ -146,7 +146,9 @@ export function createAnthropicProvider({
             // rewrites it into blocks for nothing, because a prompt that
             // short is under the minimum a cache entry needs anyway.
             messages: caching && messages.length > 1 ? withConversationBreakpoint(messages) : messages,
-            ...(workspaceTools ? { tools: cacheable(toolSchema(workspaceTools.definitions)) } : {}),
+            // An agent allowed no tool at all is sent none: an empty list is not a
+            // request every API accepts.
+            ...(workspaceTools?.definitions.length > 0 ? { tools: cacheable(toolSchema(workspaceTools.definitions)) } : {}),
           },
         }), { ...retry, signal: context.signal });
         const payload = attempt.value;

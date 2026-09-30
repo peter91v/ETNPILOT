@@ -18,6 +18,7 @@ export const CHAT_HELP = [
   "  /model [id]          use another model; 'provider:id' also picks the provider; 'reset' undoes it",
   "  /effort [level]      low, medium or high; 'reset' undoes it",
   "  /undo                take back the file changes of the last turn",
+  "  /compact             carry the older turns as a summary (asks the model once)",
   "  /files               the files attached in this conversation",
   "  /sessions            conversations in this project",
   "  /clear               start a new conversation (/new does too)",
@@ -37,7 +38,7 @@ export function overrideOf(choice) {
 
 // Returns { lines, action }. 'action' is "exit" or "clear" when the caller has
 // something to do besides print; the choice is changed in place.
-export async function runChatCommand(text, { choice, known, config, policy, root, sessionId, undo }) {
+export async function runChatCommand(text, { choice, known, config, policy, root, sessionId, undo, compact }) {
   const names = known.agents.filter((entry) => !entry.error).map((entry) => entry.name);
   const [name, ...rest] = text.replace(/^\//, "").split(/\s+/);
   const argument = rest.join(" ").trim();
@@ -74,7 +75,13 @@ export async function runChatCommand(text, { choice, known, config, policy, root
     }
     case "undo": {
       if (typeof undo !== "function") return say("Undo is not available here.");
-      const result = await undo();
+      // A failure is a line at the prompt, not the end of the conversation.
+      const result = await undo().catch((error) => ({ message: `! ${error.message}` }));
+      return say(...result.message.split("\n"));
+    }
+    case "compact": {
+      if (typeof compact !== "function") return say("Compacting is not available here.");
+      const result = await compact().catch((error) => ({ message: `! ${error.message}` }));
       return say(...result.message.split("\n"));
     }
     case "files": {

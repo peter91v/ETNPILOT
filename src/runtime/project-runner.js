@@ -62,8 +62,8 @@ export async function runProject({
   metadata = {},
   // Set by a conversation: { id, turn, history }. The run is one turn of it.
   session,
-  // A conversation's choice of model, provider or effort for the agent it talks
-  // to: { model, provider, effort }. Applied to that one agent for this run.
+  // A conversation's choice of model, provider, effort or tools for the agent it
+  // talks to: { model, provider, effort, tools }. Applied to that one agent for this run.
   agentOverride,
   secretResolver,
   onEvent,
@@ -283,7 +283,7 @@ export async function runProject({
             workflowRunId: runId,
             workflowStep: step.id,
             workspace: workspace.path,
-            ...(session ? { sessionId: session.id, turn: session.turn, history: session.history, attachments: session.attachments } : {}),
+            ...(session ? { sessionId: session.id, turn: session.turn, kind: session.kind, history: session.history, attachments: session.attachments } : {}),
           },
           signal: execution.signal,
         });
@@ -458,7 +458,7 @@ export async function runProject({
       ...(rehearsal ? { mergeRehearsal: rehearsal } : {}),
       ...(mergeTrain ? { mergeTrain } : {}),
     },
-    ...(session ? { session: { id: session.id, turn: session.turn, ...(session.attachments?.length ? { attachments: session.attachments } : {}) } } : {}),
+    ...(session ? { session: { id: session.id, turn: session.turn, ...(session.kind ? { kind: session.kind } : {}), ...(session.attachments?.length ? { attachments: session.attachments } : {}) } } : {}),
     ...(fixtureEvidence ? { fixtures: fixtureEvidence } : {}),
     ...(proposals.length > 0 ? { proposals: proposals.map(summarizeProposal) } : {}),
     codegraph: codegraphEvidence,
@@ -810,6 +810,8 @@ function applyAgentOverride(harness, name, override) {
   const current = harness.agents.get(name);
   const next = { ...current };
   if (override.model) next.model = override.model;
+  // A list, possibly empty: an agent that may use nothing, mechanically.
+  if (Array.isArray(override.tools)) next.tools = override.tools;
   if (override.effort) {
     if (!["low", "medium", "high"].includes(override.effort)) throw new TypeError("effort must be low, medium or high.");
     next.effort = override.effort;

@@ -5,7 +5,7 @@ import { PolicyEngine } from "../policy/engine.js";
 import { describeRequest, display } from "../core/terminal-approval.js";
 import { git } from "../git/command.js";
 import { openProjectState } from "../runtime/project-state.js";
-import { createSessionId, listSessions, readSession, runChatTurn, undoLastTurn } from "../runtime/chat-session.js";
+import { createSessionId, listSessions, readSession, runChatTurn, undoLastTurn, compactSession, compactionCheck } from "../runtime/chat-session.js";
 import { resolveAttachments } from "../runtime/chat-attachments.js";
 import { createChoice, overrideOf, runChatCommand } from "../runtime/chat-commands.js";
 
@@ -185,6 +185,13 @@ export async function runChat({
     const result = await runChatCommand(text, {
       choice, known, config, policy, root: projectRoot, sessionId,
       undo: () => undoLastTurn({ root: projectRoot, sessionId }),
+      compact: async () => {
+        if ((await compactionCheck(projectRoot, sessionId)).ok) say("Asking the model for a summary (one call)…");
+        return compactSession({
+          root: projectRoot, sessionId, agent: choice.agent, runner, providerFactories, env,
+          approvalHandler, signal: turnController?.signal, agentOverride: overrideOf(choice),
+        });
+      },
     });
     for (const line of result.lines) say(line);
     if (result.action === "clear") sessionId = undefined;

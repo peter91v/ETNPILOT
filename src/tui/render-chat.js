@@ -60,6 +60,10 @@ function threadLines(chat, { style, width }) {
       say("agent", turn.error ?? `The turn ended ${turn.status}.`, "bad");
     }
     lines.push("");
+    const summary = (chat.compactions ?? []).find((entry) => entry.upToTurn === turn.turn);
+    if (summary) {
+      lines.push(style.dim(`── turns up to ${summary.upToTurn} are carried as a summary from here on ──`), "");
+    }
   }
   if (chat.pending) {
     say("you", chat.pending.text, "accent");

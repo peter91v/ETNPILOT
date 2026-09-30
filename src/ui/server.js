@@ -182,6 +182,14 @@ export async function createReviewServer({
           throw badRequest(error.message);
         }
       }
+      if (request.method === "POST" && url.pathname === "/api/chat/compact") {
+        const body = await readJsonBody(request);
+        const id = String(body.sessionId ?? "");
+        if (!/^[a-z0-9][a-z0-9-]{2,63}$/.test(id)) throw badRequest("That is not a conversation id.");
+        const pick = (value) => (typeof value === "string" && value.trim() !== "" ? value.trim() : undefined);
+        const result = await state.chat.compact(id, { agent: pick(body.agent), model: pick(body.model), provider: pick(body.provider), effort: pick(body.effort) });
+        return send(response, result.ok ? 202 : 200, result);
+      }
       if (request.method === "POST" && url.pathname === "/api/chat/undo") {
         const body = await readJsonBody(request);
         const id = String(body.sessionId ?? "");

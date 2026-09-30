@@ -51,7 +51,7 @@ export function createTuiApp({
   let merges;
   // The conversation, as this window sees it: what the server keeps about it
   // plus the choices made for the next turn. 'compose' is the line being typed.
-  let chat = { sessionId: undefined, turns: [], running: false, pending: undefined, choice: createChoice(undefined), scroll: 0, notes: [], known: undefined };
+  let chat = { sessionId: undefined, turns: [], compactions: [], running: false, pending: undefined, choice: createChoice(undefined), scroll: 0, notes: [], known: undefined };
   let compose;
   // The checks are listed from the registry once; what each one found is kept
   // per check, so a result stays on screen until it is run again. Nothing here
@@ -774,6 +774,7 @@ export function createTuiApp({
         root: state.root,
         sessionId: chat.sessionId,
         undo: () => state.chat.undo(chat.sessionId),
+        compact: () => state.chat.compact(chat.sessionId, chat.choice),
       });
       chat.notes = result.lines.flatMap((line) => String(line).split("\n"));
       if (result.action === "clear") resetChat();
@@ -805,6 +806,7 @@ export function createTuiApp({
   function resetChat() {
     chat.sessionId = undefined;
     chat.turns = [];
+    chat.compactions = [];
     chat.pending = undefined;
     chat.running = false;
     chat.scroll = 0;
@@ -813,6 +815,7 @@ export function createTuiApp({
   async function syncChat() {
     const session = await state.chat.read(chat.sessionId);
     chat.turns = session.turns ?? [];
+    chat.compactions = session.compactions ?? [];
     chat.running = session.running === true;
     if (chat.pending && chat.turns.length > chat.pending.since) chat.pending = undefined;
     // A turn that ended without a record must not hang as though it were being

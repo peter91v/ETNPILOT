@@ -50,13 +50,18 @@ export async function readSession(root, sessionId) {
   try {
     text = await readFile(join(sessionsDirectory(root), `${sessionId}.jsonl`), "utf8");
   } catch (error) {
-    if (error.code === "ENOENT") return { id: sessionId, exists: false, turns: [] };
+    if (error.code === "ENOENT") return { id: sessionId, exists: false, turns: [], compactions: [] };
     throw error;
   }
   const turns = [];
+  const compactions = [];
   for (const [index, line] of text.split("\n").filter(Boolean).entries()) {
     try {
       const entry = JSON.parse(line);
+      if (entry.type === "compact") {
+        compactions.push(entry);
+        continue;
+      }
       // An undo is a note about a turn, not a turn: it marks the turn it took back.
       if (entry.type === "undo") {
         const undone = turns.find((turn) => turn.turn === entry.turn);
@@ -70,7 +75,7 @@ export async function readSession(root, sessionId) {
       throw new Error(`Session ${sessionId}, line ${index + 1}, is not valid JSON.`);
     }
   }
-  return { id: sessionId, exists: true, turns };
+  return { id: sessionId, exists: true, turns, compactions };
 }
 
 export async function listSessions(root) {
@@ -102,9 +107,19 @@ export async function listSessions(root) {
 // What the next turn is told about the past: what the person said and what
 // the agent answered. A turn that failed produced no answer, so it has no
 // place in the memory — it stays in the log, where it can be read.
-export function historyFrom(turns) {
+export function historyFrom(turns, compactions = []) {
   const messages = [];
+  // Once the past has been summarised, the model is given the summary in place
+  // of the turns it covers. The turns themselves stay on disk, unchanged.
+  const summary = compactions.at(-1);
+  if (summary) {
+    messages.push(
+      { role: "user", content: `[Summary of this conversation up to turn ${summary.upToTurn}, written earlier at the user's request]\n\n${summary.summary}` },
+      { role: "assistant", content: "Understood. I will continue from that summary." },
+    );
+  }
   for (const turn of turns) {
+    if (summary && turn.turn <= summary.upToTurn) continue;
     if (turn.status !== "succeeded" || typeof turn.reply !== "string") continue;
     // The files themselves are not carried: the model is told there were some,
     // and by digest which, and can read them again if it needs them.
@@ -145,7 +160,7 @@ export async function runChatTurn({
   assertId(id);
   const prior = await readSession(root, id);
   const number = prior.turns.length + 1;
-  const bounded = boundHistory(historyFrom(prior.turns));
+  const bounded = boundHistory(historyFrom(prior.turns, prior.compactions));
   const run = runner ?? (await import("./project-runner.js")).runProject;
   const at = now().toISOString();
 
@@ -214,7 +229,7 @@ export async function verifySession(root, sessionId, { verifyReceipt, readEntrie
     const file = `${turn.runId}.jsonl`;
     const report = await verifyReceipt(file);
     const entries = report.valid ? await readEntries(file) : [];
-    const belongs = entries.some((entry) => entry.session?.id === sessionId && entry.session?.turn === turn.turn);
+    const belongs = entries.some((entry) => entry.session?.id === sessionId && entry.session?.turn === turn.turn && !entry.session?.kind);
     results.push({
       turn: turn.turn,
       runId: turn.runId,
@@ -222,6 +237,19 @@ export async function verifySession(root, sessionId, { verifyReceipt, readEntrie
       note: !report.valid
         ? report.text ?? "the receipt does not verify"
         : belongs ? "receipt verifies and names this turn" : "receipt verifies but does not name this turn of this session",
+    });
+  }
+  // A summary is a run too, and its receipt must say it belongs here.
+  for (const compaction of (await readSession(root, sessionId)).compactions) {
+    const file = `${compaction.runId}.jsonl`;
+    const report = await verifyReceipt(file);
+    const entries = report.valid ? await readEntries(file) : [];
+    const belongs = entries.some((entry) => entry.session?.id === sessionId && entry.session?.kind === "compact");
+    results.push({
+      turn: `summary to ${compaction.upToTurn}`,
+      runId: compaction.runId,
+      ok: report.valid === true && belongs,
+      note: !report.valid ? report.text ?? "the receipt does not verify" : belongs ? "receipt verifies and names this summary" : "receipt verifies but does not name a summary of this session",
     });
   }
   return { sessionId, turns: results, valid: results.every((result) => result.ok) };
@@ -244,4 +272,52 @@ export async function undoLastTurn({ root, sessionId, now = () => new Date() }) 
   else lines.push(`Turn ${turn.turn}: ${result.reverted.length} file${result.reverted.length === 1 ? "" : "s"} put back${result.reverted.length ? ` (${result.reverted.join(", ")})` : ""}.`);
   for (const file of result.skipped) lines.push(`  left ${file.path}: ${file.reason}`);
   return { ok: true, turn: turn.turn, ...result, message: lines.join("\n") };
+}
+
+const SUMMARY_REQUEST = [
+  "Summarise this conversation so far so that you can carry on from the summary alone.",
+  "Say what the user wants, what has been decided, which files were read or changed and why,",
+  "what is still open, and anything they asked you to remember. Plain prose, under 300 words.",
+  "Do not use any tool and do not start new work; answer with the summary only.",
+].join(" ");
+
+// Replaces the model's memory of the older turns with a summary it wrote. The
+// turns stay in the session file; what changes is what the next turn is told.
+// The summary is itself a run - a receipt, a cost, an agent that may use no
+// tool - and the session line names it, so a compacted conversation is one
+// that says it was compacted and can be checked.
+// Whether there is anything worth summarising, decided before a model is asked.
+export async function compactionCheck(root, sessionId) {
+  if (!sessionId) return { ok: false, message: "There is no conversation yet, so nothing to compact." };
+  const prior = await readSession(root, sessionId);
+  const covered = prior.compactions.at(-1)?.upToTurn ?? 0;
+  const fresh = prior.turns.filter((turn) => turn.status === "succeeded" && turn.turn > covered);
+  if (fresh.length < 2) {
+    return { ok: false, message: "There are fewer than two new turns since the last summary; nothing worth compacting yet." };
+  }
+  return { ok: true, prior, covered, fresh };
+}
+
+export async function compactSession({ root, sessionId, agent, runner, now = () => new Date(), ...runOptions } = {}) {
+  const check = await compactionCheck(root, sessionId);
+  if (!check.ok) return check;
+  const { prior, covered, fresh } = check;
+  const upToTurn = prior.turns.at(-1).turn;
+  const run = runner ?? (await import("./project-runner.js")).runProject;
+  const outcome = await run({
+    root,
+    input: SUMMARY_REQUEST,
+    agent,
+    worktree: false,
+    ...runOptions,
+    // May use no tool at all, by the harness and not by asking.
+    agentOverride: { ...(runOptions.agentOverride ?? {}), tools: [] },
+    session: { id: sessionId, turn: upToTurn, kind: "compact", history: boundHistory(historyFrom(prior.turns, prior.compactions)).history },
+  });
+  const summary = replyOf(outcome);
+  if (outcome.status !== "succeeded" || typeof summary !== "string" || summary.trim() === "") {
+    return { ok: false, message: `The summary was not written (the run ended ${outcome.status ?? "without an answer"}); the conversation is unchanged.` };
+  }
+  await appendTurn(root, sessionId, { type: "compact", at: now().toISOString(), upToTurn, turns: fresh.length, runId: outcome.runId, summary: summary.trim() });
+  return { ok: true, upToTurn, summary: summary.trim(), runId: outcome.runId, message: `Turns ${covered + 1}–${upToTurn} are now carried as a summary (${summary.trim().length} characters). The turns themselves are unchanged on disk.` };
 }

@@ -109,7 +109,7 @@ export function createOpenAICompatibleProvider({
             messages,
             // Usage arrives in a last chunk only when asked for.
             ...(stream ? { stream: true, stream_options: { include_usage: true } } : {}),
-            ...(workspaceTools ? { tools: toolSchema(workspaceTools.definitions), tool_choice: "auto" } : {}),
+            ...(workspaceTools?.definitions.length > 0 ? { tools: toolSchema(workspaceTools.definitions), tool_choice: "auto" } : {}),
           },
           reasoningEffortConfigured: extraBody.reasoning_effort !== undefined || Boolean(context.agent.effort),
           stream,

@@ -310,7 +310,7 @@ export class Harness {
         // its parent instead. This is what lets a run's agents be read back
         // as the tree they actually ran in, rather than a flat list of lines.
         ...(metadata.workflowStep ? { workflowStep: metadata.workflowStep } : {}),
-        ...(metadata.sessionId ? { session: { id: metadata.sessionId, turn: metadata.turn, ...(metadata.attachments?.length ? { attachments: metadata.attachments } : {}) } } : {}),
+        ...(metadata.sessionId ? { session: { id: metadata.sessionId, turn: metadata.turn, ...(metadata.kind ? { kind: metadata.kind } : {}), ...(metadata.attachments?.length ? { attachments: metadata.attachments } : {}) } } : {}),
         provider: routed.provider,
         providerAttempts: routed.attempts,
         status: "succeeded",
@@ -336,7 +336,7 @@ export class Harness {
         parentRunId,
         agent: agentName,
         ...(metadata.workflowStep ? { workflowStep: metadata.workflowStep } : {}),
-        ...(metadata.sessionId ? { session: { id: metadata.sessionId, turn: metadata.turn, ...(metadata.attachments?.length ? { attachments: metadata.attachments } : {}) } } : {}),
+        ...(metadata.sessionId ? { session: { id: metadata.sessionId, turn: metadata.turn, ...(metadata.kind ? { kind: metadata.kind } : {}), ...(metadata.attachments?.length ? { attachments: metadata.attachments } : {}) } } : {}),
         provider: error.provider ?? agent.provider,
         providerAttempts: error.providerAttempts ?? [],
         status: "failed",

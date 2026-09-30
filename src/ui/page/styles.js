@@ -568,6 +568,7 @@ export const STYLES = `  /* Material Design 3, implemented rather than approxima
   .msg.agent .said { background: var(--md-surface-container-high); color: var(--md-on-surface); border-bottom-left-radius: var(--md-shape-xs); }
   .msg.failed .said { background: var(--md-error-container); color: var(--md-on-error-container); }
   .msg .meta { color: var(--md-on-surface-variant); font: var(--md-label-small); letter-spacing: .5px; }
+  .chat-rule { margin: 0; text-align: center; font: var(--md-label-medium); }
   .attach-row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
   .chat-approvals { display: grid; gap: 16px; }
   .composer {
