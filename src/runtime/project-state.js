@@ -384,7 +384,10 @@ export async function collectState(
     // terminal record yet. Reading that as a run that stopped is how a row
     // said 'incomplete' one minute and 'succeeded' the next, with nobody
     // touching anything.
-    runs: markRunning(await readRuns(runsDirectory, { limit: runLimit }), running),
+    runs: markRunning(await readRuns(runsDirectory, { limit: Math.min(Math.max(1, Math.trunc(runLimit) || 20), 500) }), running),
+    // The list above is a window; this is how many receipts there are, so a
+    // surface never presents the window's size as the count.
+    runsTotal: await countRuns(runsDirectory),
   };
 }
 
@@ -428,6 +431,11 @@ function settingsUnreadable(error) {
 // the answer to differ: its size and its modification time. A receipt that is
 // still being written fails that key on the next poll and is read again.
 const receiptCache = new Map();
+
+export async function countRuns(directory) {
+  const entries = await readdir(directory).catch(() => []);
+  return entries.filter((name) => name.endsWith(".jsonl")).length;
+}
 
 export async function readRuns(directory, { limit = 20, cache = receiptCache } = {}) {
   const entries = await readdir(directory).catch((error) => {

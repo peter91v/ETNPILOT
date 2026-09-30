@@ -20,9 +20,9 @@ test("a dated snapshot prices the same as the undated name", () => {
   assert.deepEqual(dated, undated);
 });
 
-test("openai has no entries — a guess is worse than none, so none is shipped", () => {
-  assert.equal(knownPriceFor("openai-compatible", "gpt-5"), undefined);
-  assert.equal(knownPriceFor("openai-compatible", "gpt-5-mini"), undefined);
+test("the GPT-5 family is priced, dated snapshots included", () => {
+  assert.equal(knownPriceFor("openai-compatible", "gpt-5-mini-2025-08-07").inputPerMillion, 0.25);
+  assert.equal(knownPriceFor("openai-compatible", "gpt-5").outputPerMillion, 10);
 });
 
 test("a model this table was never updated for returns nothing, not a zero", () => {
@@ -46,7 +46,7 @@ test("a dated OpenAI snapshot prices the same as the undated name", () => {
 });
 
 test("an id with no row on the page stays unpriced instead of borrowing a neighbour's rate", () => {
-  for (const id of ["gpt-5", "gpt-6", "gpt-5.6", "gpt-5.3-codex-spark", "daybreak"]) {
+  for (const id of ["gpt-4", "gpt-6", "gpt-5.6", "gpt-5.3-codex-spark", "daybreak"]) {
     assert.equal(knownPriceFor("openai-compatible", id), undefined, id);
   }
 });

@@ -168,7 +168,7 @@ async function refresh({ force = false } = {}) {
   }
   holding = false;
   try {
-    state = await api("/api/state");
+    state = await api("/api/state?runs=" + runLimit);
     const root = state.root ?? "";
     const title = $("context-title");
     title.textContent = root.split("/").filter(Boolean).at(-1) ?? "this project";
@@ -180,7 +180,7 @@ async function refresh({ force = false } = {}) {
     if (view === "chat" && chatSession) void syncChat();
     // Usage is the whole telemetry file, so it is read when it can have
     // changed: at the start, and whenever a run has finished since last time.
-    const finished = state.runs.length + "/" + (state.active ?? []).length;
+    const finished = (state.runsTotal ?? state.runs.length) + "/" + (state.active ?? []).length;
     if (usageSignature !== finished) {
       usageSignature = finished;
       void loadUsage();
@@ -191,6 +191,8 @@ async function refresh({ force = false } = {}) {
 }
 
 let usageSignature;
+// How many receipts the list asks for; 'Show more' raises it.
+let runLimit = 20;
 
 // The app: the page is installed as it stands, which is the only way there is
 // one surface rather than two. The worker caches the shell and never the

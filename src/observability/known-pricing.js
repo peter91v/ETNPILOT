@@ -30,6 +30,11 @@ const ANTHROPIC_RATES = Object.freeze({
 // are what the user read off that page themselves and pasted back, on
 // 2026-09-24. Rows whose API id is not confirmed are marked inside.
 const OPENAI_RATES = Object.freeze({
+  // OpenAI's published launch rates for the GPT-5 family (August 2025). Dated
+  // snapshots ('gpt-5-mini-2025-08-07') price as the undated name.
+  "gpt-5": { inputPerMillion: 1.25, cacheReadPerMillion: 0.125, outputPerMillion: 10 },
+  "gpt-5-mini": { inputPerMillion: 0.25, cacheReadPerMillion: 0.025, outputPerMillion: 2 },
+  "gpt-5-nano": { inputPerMillion: 0.05, cacheReadPerMillion: 0.005, outputPerMillion: 0.4 },
   "gpt-5.5": { inputPerMillion: 5, cacheReadPerMillion: 0.5, outputPerMillion: 30 },
   "gpt-5.4": { inputPerMillion: 2.5, cacheReadPerMillion: 0.25, outputPerMillion: 15 },
   "gpt-5.4-mini": { inputPerMillion: 0.75, cacheReadPerMillion: 0.075, outputPerMillion: 4.5 },

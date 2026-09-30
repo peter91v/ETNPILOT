@@ -354,7 +354,7 @@ function navCount(id) {
     return some(pending, true);
   }
   if (id === "queue") return some((state.queue.jobs ?? []).length);
-  if (id === "runs") return some(state.runs.length);
+  if (id === "runs") return some(state.runsTotal ?? state.runs.length);
   if (id === "worktrees") return some(worktrees?.entries?.length ?? 0);
   if (id === "merges") return some(merges?.entries?.length ?? 0);
   if (id === "settings") {

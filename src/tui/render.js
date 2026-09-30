@@ -255,7 +255,11 @@ function renderRuns(state, { style, width, height, cursor, now }) {
     { label: "APPR", width: 5, value: (run) => String(run.approvals ?? 0) },
     { label: "TOOK", width: 9, value: (run) => duration(run.durationMs) },
   ];
-  return table(runs, columns, { style, width, height, cursor, now });
+  const hidden = (state.runsTotal ?? runs.length) - runs.length;
+  if (hidden <= 0) return table(runs, columns, { style, width, height, cursor, now });
+  // The list is the newest of more receipts than it shows; say so, since 20 rows
+  // read as the whole history.
+  return [...table(runs, columns, { style, width, height: height - 1, cursor, now }), style.dim(`newest ${runs.length} of ${state.runsTotal} — older receipts are in .etnpilot/state/runs`)];
 }
 
 function renderQueue(state, { style, width, height, cursor, now }) {

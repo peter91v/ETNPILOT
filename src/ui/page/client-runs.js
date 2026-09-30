@@ -126,7 +126,7 @@ function renderOverview() {
       accent: "blue",
       hint: Object.entries(counts).filter(([, total]) => total > 0).map(([status, total]) => total + " " + status).join(", ") || "empty",
     }),
-    summaryCard("Runs", state.runs.length, { accent: "accent", hint: signed + (signed === 1 ? " signed receipt" : " signed receipts") }),
+    summaryCard("Runs", state.runsTotal ?? state.runs.length, { accent: "accent", hint: signed + (signed === 1 ? " signed receipt" : " signed receipts") }),
     summaryCard("Working now", (state.active ?? []).length, {
       accent: "amber",
       hint: (state.active ?? [])[0]?.task ?? "nothing started here",
@@ -152,7 +152,7 @@ function renderOverview() {
   });
 
   const runs = panel("Recent runs", {
-    meta: state.runs.length + " on disk",
+    meta: runsMeta(),
     body: [table([
       { label: "Run", value: (run) => run.runId, mono: true },
       { label: "Status", value: (run) => ({ text: run.status, class: run.status === "succeeded" ? "ok" : "bad" }) },
@@ -359,11 +359,20 @@ function queueTone(status) {
   return "";
 }
 
+function runsHidden() {
+  return Math.max(0, (state.runsTotal ?? state.runs.length) - state.runs.length);
+}
+
+function runsMeta() {
+  const total = state.runsTotal ?? state.runs.length;
+  return runsHidden() > 0 ? "newest " + state.runs.length + " of " + total + " on disk" : total + " on disk";
+}
+
 function renderRuns() {
   const host = $("view-runs");
   host.replaceChildren();
   host.append(panel("All runs", {
-    meta: state.runs.length + " on disk",
+    meta: runsMeta(),
     body: [table([
       { label: "Run", value: (run) => openReceipt(run), mono: true },
       { label: "Status", value: (run) => pill(run.status, run.status === "succeeded" ? "ok" : "bad") },
@@ -373,7 +382,8 @@ function renderRuns() {
       { label: "Approvals", value: (run) => String(run.approvals) },
       { label: "Took", value: (run) => run.durationMs === undefined ? "—" : (run.durationMs / 1000).toFixed(1) + "s" },
       { label: "Receipt", value: (run) => (run.hash ?? "—").slice(0, 12), mono: true },
-    ], state.runs, "No runs have been recorded yet.", { selected: (run) => run.receiptFile === openRun?.file })],
+    ], state.runs, "No runs have been recorded yet.", { selected: (run) => run.receiptFile === openRun?.file }),
+      ...(runsHidden() > 0 ? [button("Show " + Math.min(50, runsHidden()) + " more", { class: "btn tonal", onClick: () => { runLimit += 50; refresh({ force: true }); } })] : [])],
   }));
   if (openRun) host.append(renderRunDetail());
 }
