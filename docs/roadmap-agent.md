@@ -989,7 +989,7 @@ dem alle Oberflächen stehen.
 ersten kennt, beide Receipts eine gemeinsame `sessionId` tragen und eine
 Sitzung nach einem Neustart weitergeführt werden kann.
 
-**D1 — `etnpilot chat` im Terminal.** Eine Zeile Eingabe, Ausgabe beim
+**D1 ✅ — `etnpilot chat` im Terminal.** Eine Zeile Eingabe, Ausgabe beim
 Entstehen, die Freigabe im Verlauf (`y` / `n` / `a` für „für diesen Lauf").
 Kommandos: `/model`, `/agent`, `/effort`, `/files`, `/clear`, `/help`, `/exit`.
 Zuerst das Terminal, weil es auf Android/Termux ohne Browser läuft und die
@@ -998,7 +998,7 @@ kleinste Fläche hat.
 führt, eine Schreibfreigabe mit sichtbarem Diff beantwortet, und `/model` einen
 nicht erlaubten Provider abweist.
 
-**D2 — Dateien.** `@pfad` mit Vervollständigung, Grenze je Datei und je
+**D2 ✅ — Dateien.** `@pfad` mit Vervollständigung, Grenze je Datei und je
 Runde, Digest im Receipt; Verzeichnisse als Liste; ein Pfad außerhalb des
 Arbeitsverzeichnisses wird abgelehnt.
 *Fertig wenn:* ein angehängter Dateiinhalt in der Anfrage steht, in der Hülle,
@@ -1023,11 +1023,33 @@ können.
 arbeitet **im Arbeitsverzeichnis**, nicht in einem Worktree (wie Claude Code
 und Codex). Begründung: jede Schreib- und Kommandofreigabe ist ohnehin
 menschlich, und ein Worktree je Sitzung nimmt dem Gespräch die Unmittelbarkeit.
-Dagegen sichert `/undo`, und `etnpilot chat --worktree` gibt die Isolation des
-Workflows zurück. Ein Chat startet nicht in einem Verzeichnis mit
+Dagegen sichert `/undo` (D5, noch nicht gebaut). `--worktree` ist **nicht**
+gebaut: ein Worktree je Runde würde die Änderungen der vorigen Runde verlieren,
+es bräuchte einen Worktree je Sitzung. Ein Chat startet nicht in einem Verzeichnis mit
 uncommitteten Änderungen, ohne es zu sagen.
 
 **Was ich bewusst nicht baue:** eine zweite Freigabelogik für den Chat, einen
 „alles erlauben"-Schalter (`--dangerously-skip-permissions` u. ä.), und
 Gedächtnis, das der Agent selbst in Instruktionen schreibt (siehe P4.4:
 Vorschlag, nie angewendet).
+
+### Stand D1/D2 (gebaut)
+
+- `etnpilot chat [--agent] [--resume <id>|last | -c]`: Zeile für Zeile, Freigaben
+  im Verlauf mit Diff (`y` / `n` / `a` = ja für den Rest dieser **Runde** — eine
+  Runde ist ein Lauf, und ein Grant endet mit seinem Lauf; ein Grant über die
+  ganze Sitzung wäre eine eigene Entscheidung). Was während einer Runde vorab
+  getippt wurde, gilt nie als Antwort auf eine Freigabe.
+- Kommandos: `/agent`, `/model [provider:]id`, `/effort`, `/files`, `/sessions`,
+  `/clear`, `/help`, `/exit`. `/model` prüft `policy.providers` sofort, der
+  Router danach noch einmal; `agent.model`, `agent.provider` und `agent.effort`
+  werden nur für diesen einen Agenten und Lauf überschrieben.
+- `@pfad`: nur Dateien und Verzeichnisse **im Arbeitsverzeichnis**; die
+  Read-Policy entscheidet (`.env` wird auch auf Zuruf abgelehnt); Binärdateien
+  werden abgelehnt; 64 KiB je Datei, 192 KiB je Runde, Digest der ganzen Datei
+  im Receipt (`session.attachments`). Der Inhalt steht in einem Umschlag mit
+  Nonce, der Inhalt einer Datei kann ihn nicht beenden. In späteren Runden
+  steht nur „[attached: …]" mit Digest.
+- Abweichung vom Plan: kein Taint durch Anhänge — Pfade außerhalb des Projekts
+  werden abgelehnt statt gelesen, es gibt also keinen Fremdtext von außen.
+- Offen: die Node-Warnung zu `node:sqlite` erscheint mitten im Gespräch.

@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { appendFile, mkdir, readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { boundHistory } from "../core/history.js";
+import { composeTurnInput, summarizeAttachments } from "./chat-attachments.js";
 
 // A conversation, kept as the receipts of its turns.
 //
@@ -97,7 +98,12 @@ export function historyFrom(turns) {
   const messages = [];
   for (const turn of turns) {
     if (turn.status !== "succeeded" || typeof turn.reply !== "string") continue;
-    messages.push({ role: "user", content: turn.input }, { role: "assistant", content: turn.reply });
+    // The files themselves are not carried: the model is told there were some,
+    // and by digest which, and can read them again if it needs them.
+    const attached = (turn.attachments ?? []).length > 0
+      ? `\n\n[attached: ${turn.attachments.map((file) => `${file.path} (sha256 ${file.digest.slice(0, 12)})`).join(", ")}]`
+      : "";
+    messages.push({ role: "user", content: `${turn.input}${attached}` }, { role: "assistant", content: turn.reply });
   }
   return messages;
 }
@@ -117,6 +123,9 @@ export async function runChatTurn({
   text,
   agent,
   runner,
+  // Files the person attached, already resolved and authorised
+  // (chat-attachments.js), so the caller has shown them what was and was not sent.
+  attachments = [],
   now = () => new Date(),
   ...runOptions
 } = {}) {
@@ -133,13 +142,13 @@ export async function runChatTurn({
   try {
     outcome = await run({
       root,
-      input: text,
+      input: composeTurnInput(text, attachments),
       agent,
       // A conversation works where the person is. The approvals are the
       // boundary; a worktree per sitting would take the immediacy out of it.
       worktree: false,
       ...runOptions,
-      session: { id, turn: number, history: bounded.history },
+      session: { id, turn: number, history: bounded.history, attachments: summarizeAttachments(attachments) },
     });
   } catch (error) {
     await appendTurn(root, id, {
@@ -147,6 +156,7 @@ export async function runChatTurn({
       at,
       agent,
       input: text,
+      ...(attachments.length > 0 ? { attachments: summarizeAttachments(attachments) } : {}),
       status: "failed",
       error: error.message,
       ...(error.run?.runId ? { runId: error.run.runId } : {}),
@@ -160,6 +170,7 @@ export async function runChatTurn({
     at,
     agent,
     input: text,
+    ...(attachments.length > 0 ? { attachments: summarizeAttachments(attachments) } : {}),
     runId: outcome.runId,
     status,
     ...(reply !== undefined ? { reply } : {}),
