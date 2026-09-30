@@ -1,4 +1,7 @@
-import { listSessions, readSession, verifySession } from "./chat-session.js";
+import { createSessionId, listSessions, readSession, runChatTurn, verifySession } from "./chat-session.js";
+import { resolveAttachments, summarizeAttachments } from "./chat-attachments.js";
+import { PolicyEngine } from "../policy/engine.js";
+import { git } from "../git/command.js";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import YAML from "yaml";
@@ -44,7 +47,7 @@ export async function openProjectState({ root = process.cwd(), env = process.env
   // one must stop what it started rather than stranding it.
   const running = new Set();
   const runErrors = [];
-  return {
+  const self = {
     root: projectRoot,
     get config() { return current; },
     inbox,
@@ -58,7 +61,11 @@ export async function openProjectState({ root = process.cwd(), env = process.env
     // turn is not here: that starts a run, and starting runs is the caller's.
     chat: {
       list: () => listSessions(projectRoot),
-      read: (id) => readSession(projectRoot, id),
+      read: async (id) => {
+        const session = await readSession(projectRoot, id);
+        // Whether a turn is going now is known here and nowhere on disk.
+        return { ...session, running: [...running].some((record) => record.session === id) };
+      },
       verify: (id) => verifySession(projectRoot, id, {
         verifyReceipt: (file) => verifyProjectReceipt(runsDirectory, file, { root: projectRoot, config: current }),
         readEntries: async (file) => {
@@ -66,6 +73,68 @@ export async function openProjectState({ root = process.cwd(), env = process.env
           return text.split("\n").filter(Boolean).map((line) => JSON.parse(line));
         },
       }),
+      // Files a person can name with '@': what git tracks, minus what the read
+      // policy refuses them. The same set search_files searches.
+      async files(query = "", { limit = 50 } = {}) {
+        const listed = await git(["ls-files", "-z"], { cwd: projectRoot, trim: false }).catch(() => ({ stdout: "" }));
+        const policy = new PolicyEngine(current.policy);
+        const needle = String(query).toLowerCase();
+        const found = [];
+        for (const path of listed.stdout.split("\0").filter(Boolean)) {
+          if (needle && !path.toLowerCase().includes(needle)) continue;
+          const verdict = policy.evaluateOperation({ kind: "read", path }, { workspace: projectRoot });
+          if (verdict?.kind === "reject") continue;
+          found.push(path);
+          if (found.length >= limit) break;
+        }
+        return found;
+      },
+      // One turn of a conversation, started the way any run from a surface is:
+      // its approvals land in the inbox this page already shows. Not awaited.
+      async send({ sessionId, text, agent, model, provider, effort, providerFactories } = {}) {
+        if (typeof text !== "string" || text.trim() === "") throw new TypeError("A message is required.");
+        const id = sessionId ?? createSessionId();
+        if ([...running].some((record) => record.session === id)) {
+          throw new Error("A turn is already running in this conversation. Wait for it, or stop it.");
+        }
+        const names = (await readAgents({ root: projectRoot, config: current })).agents.filter((entry) => !entry.error).map((entry) => entry.name);
+        const chosen = agent ?? current.defaultAgent ?? "orchestrator";
+        if (!names.includes(chosen)) throw new TypeError(`Unknown agent '${chosen}'. This project has: ${names.join(", ")}.`);
+        if (provider) {
+          const verdict = new PolicyEngine(current.policy).evaluateProvider(provider, { agent: chosen });
+          if (verdict.allowed === false) throw new Error(verdict.reason ?? `The policy does not allow provider '${provider}'.`);
+          if (!current.providers?.[provider]) throw new TypeError(`No provider '${provider}' is configured.`);
+        }
+        const policy = new PolicyEngine(current.policy);
+        const { attachments, refused } = await resolveAttachments(text, {
+          root: projectRoot,
+          authorize: (path) => policy.evaluateOperation({ kind: "read", path }, { agent: chosen, workspace: projectRoot }),
+        });
+        const override = model || provider || effort ? { model, provider, effort } : undefined;
+        const started = self.startRun({
+          input: text.trim(),
+          agent: chosen,
+          providerFactories,
+          session: id,
+          // 'input' is dropped: the turn composes its own, with the attachments.
+          via: ({ input: _task, agent: _agent, ...options }) => runChatTurn({
+            ...options,
+            sessionId: id,
+            text: text.trim(),
+            agent: chosen,
+            attachments,
+            agentOverride: override,
+          }),
+        });
+        // A failure is reported through runErrors like any run's; nothing here waits.
+        started.catch(() => {});
+        return { sessionId: id, agent: chosen, attached: summarizeAttachments(attachments), refused };
+      },
+      stop: (id) => {
+        const mine = [...running].filter((record) => record.session === id);
+        for (const record of mine) record.controller.abort();
+        return mine.length;
+      },
     },
     settings: () => describeSettings({ root: projectRoot, env }),
     // The models a configured provider can currently reach, read live — never
@@ -101,7 +170,7 @@ export async function openProjectState({ root = process.cwd(), env = process.env
     // A run started from a live surface asks that surface for its approvals:
     // the requests land in the same inbox the screen is already showing, so
     // nobody has to open a second window to answer their own run.
-    startRun({ input, agent, signal, dryRun, providerFactories } = {}) {
+    startRun({ input, agent, signal, dryRun, providerFactories, via, session } = {}) {
       if (!input || !String(input).trim()) throw new TypeError("A task is required to start a run.");
       const inboxConfig = current.approval?.inbox ?? {};
       if (inboxConfig.enabled === false) {
@@ -115,8 +184,9 @@ export async function openProjectState({ root = process.cwd(), env = process.env
         if (signal.aborted) controller.abort();
         else signal.addEventListener("abort", () => controller.abort(), { once: true });
       }
-      const record = { task, agent, startedAt: new Date().toISOString(), controller, done: 0 };
-      const started = runProject({
+      const record = { task, agent, startedAt: new Date().toISOString(), controller, done: 0, ...(session ? { session } : {}) };
+      const execute = via ?? runProject;
+      const started = execute({
         root: projectRoot,
         env,
         input: task,
@@ -256,6 +326,7 @@ export async function openProjectState({ root = process.cwd(), env = process.env
       queue.close();
     },
   };
+  return self;
 }
 
 export async function collectState(
@@ -296,6 +367,7 @@ function presentRun(record) {
     task: record.task,
     agent: record.agent,
     startedAt: record.startedAt,
+    ...(record.session ? { session: record.session } : {}),
     ...(record.steps ? { steps: record.steps, done: record.done } : {}),
     ...(record.step ? { step: record.step, stepSince: record.stepSince } : {}),
     ...(record.stepAgent ? { stepAgent: record.stepAgent } : {}),
@@ -771,6 +843,8 @@ export async function readAgents({ root, config }) {
   }
   return {
     agents,
+    // The providers a conversation may name for one turn.
+    providers: Object.keys(config?.providers ?? {}),
     // What an empty choice means, so the surface does not have to guess.
     defaultAgent: config?.defaultAgent,
     steps: (config?.workflow?.steps ?? []).map((step) => step.id ?? step.agent).filter(Boolean),

@@ -175,6 +175,9 @@ async function refresh({ force = false } = {}) {
     title.title = root;
     render();
     clearError();
+    // The conversation lives on the server; while this view is open it is read
+    // on the same beat as everything else.
+    if (view === "chat" && chatSession) void syncChat();
     // Usage is the whole telemetry file, so it is read when it can have
     // changed: at the start, and whenever a run has finished since last time.
     const finished = state.runs.length + "/" + (state.active ?? []).length;

@@ -228,79 +228,84 @@ function renderApprovals() {
     host.append(panel("Nothing is waiting", { body: [el("p", { class: "empty", text: "Runs continue until one of them needs a decision." })] }));
     return;
   }
-  for (const approval of list) {
-    const details = approval.details ?? {};
-    const actor = el("input", {
-      class: "inline",
-      attrs: { placeholder: "your name", "aria-label": "reviewer", title: "Recorded in the receipt as you typed it: this page never checked who you are." },
-    });
-    // Remembered per device, because typing your name into a phone for every
-    // decision is how people stop typing it at all. It is still self-asserted;
-    // nothing here authenticates anybody.
-    actor.value = reviewerName();
-    actor.addEventListener("change", () => rememberReviewer(actor.value));
-    const reason = el("input", { class: "grow", attrs: { placeholder: "reason (optional)", "aria-label": "reason" } });
-    const decide = (decision) => act(
-      () => api("/api/approvals/decide", {
-        method: "POST",
-        body: JSON.stringify({ id: approval.id, decision, actor: actor.value, reason: reason.value }),
-      }),
-      approval.operationKind + " " + (decision === "approve" ? "approved" : "rejected") + " — recorded in the receipt.",
-    );
-    const body = [];
-    if (details.command) body.push(detailBlock("Command", details.command));
-    if (details.file) body.push(detailBlock("File", details.file));
-    if (details.url) body.push(detailBlock("URL", details.url));
-    if (details.tool) body.push(detailBlock("Tool", details.tool));
-    if (details.arguments) body.push(detailBlock("Arguments", details.arguments));
-    // What the change is, not how big it is. Rendered with the same reader the
-    // worktree view uses, so a diff looks like a diff wherever it appears.
-    if (details.diff) {
-      body.push(el("p", { class: "muted", text: "Changes" }));
-      body.push(unifiedDiffView(details.diff));
-    }
-    if (details.truncated) {
-      body.push(el("p", { class: "muted", text: "Truncated for display; see 'etnpilot approval show " + approval.id + "'." }));
-    }
-    if (details.redacted) {
-      body.push(el("p", { class: "muted", text: "Credential-looking text was masked by approval.inbox.redactSecrets." }));
-    }
-    // Why the run is asking at all: the rule that stopped the operation,
-    // recorded with the approval and shown wherever it is answered.
-    if (approval.policy) {
-      const effect = approval.policy.effect ?? "human";
-      body.push(el("p", { class: "row" }, [
-        pill(effect, effect === "deny" ? "bad" : effect === "allow" ? "ok" : "warn"),
-        el("span", { class: "muted", text: "← " + (approval.policy.rule ? "rule '" + approval.policy.rule + "'" : "the section default") }),
-      ]));
-    }
-    const approve = button("Approve once", { class: "btn primary", onClick: () => decide("approve") });
-    // The same yes, with a reach: this operation and others like it until the
-    // run ends. Offered only where a scope means something — twelve writes
-    // under one directory were twelve identical questions, and a tool that
-    // asks twelve times is one people switch off.
-    const forRun = ["write", "shell"].includes(approval.operationKind)
-      ? [button("Approve for this run", {
-        class: "btn tonal",
-        title: "Covers operations like this one until the run ends. A page fetched from outside cancels it.",
-        onClick: () => decide("approve-for-run"),
-      })]
-      : [];
-    const reject = button("Reject", { class: "btn danger", onClick: () => decide("reject") });
-    body.push(el("div", { class: "row" }, [actor, reason, approve, ...forRun, reject]));
-    const fingerprint = details.fingerprint ?? "";
-    body.push(el("p", {
-      class: "muted mono",
-      text: "fingerprint " + (fingerprint ? fingerprint.slice(0, 16) + "…" : "—"),
-      attrs: { title: fingerprint },
-    }));
-    const meta = el("span", { class: "panel-meta" }, [
-      el("span", { text: "agent " + (approval.agent ?? "unknown") + " · run " + (approval.runId ?? "—") + " · " }),
-      el("span", { text: when(approval.expiresAt).text, attrs: { title: when(approval.expiresAt).title } }),
-    ]);
-    const card = panel(approval.operationKind.toUpperCase(), { meta, body });
-    host.append(card);
+  for (const approval of list) host.append(approvalCard(approval));
+}
+
+// One pending decision, whole: what is being asked, the rule behind it, and the
+// controls. Shared with the chat view, so a question asked mid-conversation is
+// answered with exactly what the approvals view shows.
+function approvalCard(approval) {
+  const details = approval.details ?? {};
+  const actor = el("input", {
+    class: "inline",
+    attrs: { placeholder: "your name", "aria-label": "reviewer", title: "Recorded in the receipt as you typed it: this page never checked who you are." },
+  });
+  // Remembered per device, because typing your name into a phone for every
+  // decision is how people stop typing it at all. It is still self-asserted;
+  // nothing here authenticates anybody.
+  actor.value = reviewerName();
+  actor.addEventListener("change", () => rememberReviewer(actor.value));
+  const reason = el("input", { class: "grow", attrs: { placeholder: "reason (optional)", "aria-label": "reason" } });
+  const decide = (decision) => act(
+    () => api("/api/approvals/decide", {
+      method: "POST",
+      body: JSON.stringify({ id: approval.id, decision, actor: actor.value, reason: reason.value }),
+    }),
+    approval.operationKind + " " + (decision === "approve" ? "approved" : "rejected") + " — recorded in the receipt.",
+  );
+  const body = [];
+  if (details.command) body.push(detailBlock("Command", details.command));
+  if (details.file) body.push(detailBlock("File", details.file));
+  if (details.url) body.push(detailBlock("URL", details.url));
+  if (details.tool) body.push(detailBlock("Tool", details.tool));
+  if (details.arguments) body.push(detailBlock("Arguments", details.arguments));
+  // What the change is, not how big it is. Rendered with the same reader the
+  // worktree view uses, so a diff looks like a diff wherever it appears.
+  if (details.diff) {
+    body.push(el("p", { class: "muted", text: "Changes" }));
+    body.push(unifiedDiffView(details.diff));
   }
+  if (details.truncated) {
+    body.push(el("p", { class: "muted", text: "Truncated for display; see 'etnpilot approval show " + approval.id + "'." }));
+  }
+  if (details.redacted) {
+    body.push(el("p", { class: "muted", text: "Credential-looking text was masked by approval.inbox.redactSecrets." }));
+  }
+  // Why the run is asking at all: the rule that stopped the operation,
+  // recorded with the approval and shown wherever it is answered.
+  if (approval.policy) {
+    const effect = approval.policy.effect ?? "human";
+    body.push(el("p", { class: "row" }, [
+      pill(effect, effect === "deny" ? "bad" : effect === "allow" ? "ok" : "warn"),
+      el("span", { class: "muted", text: "← " + (approval.policy.rule ? "rule '" + approval.policy.rule + "'" : "the section default") }),
+    ]));
+  }
+  const approve = button("Approve once", { class: "btn primary", onClick: () => decide("approve") });
+  // The same yes, with a reach: this operation and others like it until the
+  // run ends. Offered only where a scope means something — twelve writes
+  // under one directory were twelve identical questions, and a tool that
+  // asks twelve times is one people switch off.
+  const forRun = ["write", "shell"].includes(approval.operationKind)
+    ? [button("Approve for this run", {
+      class: "btn tonal",
+      title: "Covers operations like this one until the run ends. A page fetched from outside cancels it.",
+      onClick: () => decide("approve-for-run"),
+    })]
+    : [];
+  const reject = button("Reject", { class: "btn danger", onClick: () => decide("reject") });
+  body.push(el("div", { class: "row" }, [actor, reason, approve, ...forRun, reject]));
+  const fingerprint = details.fingerprint ?? "";
+  body.push(el("p", {
+    class: "muted mono",
+    text: "fingerprint " + (fingerprint ? fingerprint.slice(0, 16) + "…" : "—"),
+    attrs: { title: fingerprint },
+  }));
+  const meta = el("span", { class: "panel-meta" }, [
+    el("span", { text: "agent " + (approval.agent ?? "unknown") + " · run " + (approval.runId ?? "—") + " · " }),
+    el("span", { text: when(approval.expiresAt).text, attrs: { title: when(approval.expiresAt).title } }),
+  ]);
+  const card = panel(approval.operationKind.toUpperCase(), { meta, body });
+  return card;
 }
 
 const RESUMABLE = ["failed", "canceled", "orphaned"];

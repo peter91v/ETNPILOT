@@ -550,6 +550,67 @@ export const STYLES = `  /* Material Design 3, implemented rather than approxima
     .modal { max-height: calc(100vh - 24px); overflow-y: auto; }
     .palette { margin-top: 32px; }
   }
+  /* Chat ----------------------------------------------------------------
+     A conversation reads top to bottom; the composer stays within reach. Only
+     tokens, like everything else here. */
+  .chat { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-content: start; }
+  .chat-head { margin-left: auto; justify-content: flex-end; }
+  .chat-thread { display: grid; gap: 16px; align-content: start; min-height: 120px; }
+  .msg { display: grid; gap: 4px; max-width: min(760px, 100%); min-width: 0; }
+  .msg.you { justify-self: end; }
+  .msg .who { color: var(--md-on-surface-variant); font: var(--md-label-medium); letter-spacing: .5px; }
+  .msg.you .who { justify-self: end; }
+  .msg .said {
+    margin: 0; padding: 12px 16px; border-radius: var(--md-shape-lg); white-space: pre-wrap;
+    overflow-wrap: anywhere; font: var(--md-body-large); letter-spacing: .5px;
+  }
+  .msg.you .said { background: var(--md-primary-container); color: var(--md-on-primary-container); border-bottom-right-radius: var(--md-shape-xs); }
+  .msg.agent .said { background: var(--md-surface-container-high); color: var(--md-on-surface); border-bottom-left-radius: var(--md-shape-xs); }
+  .msg.failed .said { background: var(--md-error-container); color: var(--md-on-error-container); }
+  .msg .meta { color: var(--md-on-surface-variant); font: var(--md-label-small); letter-spacing: .5px; }
+  .attach-row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+  .chat-approvals { display: grid; gap: 16px; }
+  .composer {
+    position: sticky; bottom: 0; z-index: 4; display: grid; gap: 12px; padding: 16px;
+    background: var(--md-surface-container-low); border: 1px solid var(--md-outline-variant);
+    border-radius: var(--md-shape-lg); box-shadow: var(--md-elevation-1);
+  }
+  /* While a turn is running the box cannot send, and a decision may be waiting
+     above it: it must not float over the buttons that answer it. */
+  .composer.waiting { position: static; }
+  .view-chat .fab { display: none; }
+  .composer textarea {
+    width: 100%; min-height: 72px; max-height: 240px; resize: vertical; padding: 12px 16px;
+    border: 1px solid var(--md-outline); border-radius: var(--md-shape-xs); background: transparent;
+    color: var(--md-on-surface); font: var(--md-body-large); letter-spacing: .5px;
+  }
+  .composer textarea:focus { border-color: var(--md-primary); box-shadow: 0 0 0 1px var(--md-primary); outline: 0; }
+  .composer textarea::placeholder { color: var(--md-on-surface-variant); }
+  .composer-options summary {
+    min-height: 40px; display: flex; align-items: center; cursor: pointer;
+    color: var(--md-on-surface-variant); font: var(--md-label-large); letter-spacing: .1px;
+  }
+  .composer-options[open] summary { margin-bottom: 8px; }
+  .composer-controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .composer-controls .grow { flex: 1 1 auto; }
+  .composer-controls select.inline, .composer-controls input.inline { flex: 1 1 160px; max-width: 260px; }
+  .btn[hidden] { display: none; }
+  @media (max-width: 600px) {
+    /* Above the bottom navigation bar, which is 80px tall. */
+    .composer { bottom: 88px; }
+    .composer-controls select.inline, .composer-controls input.inline { flex: 1 1 100%; max-width: none; }
+  }
+  .mention-list {
+    position: absolute; left: 16px; right: 16px; bottom: calc(100% + 4px); max-height: 240px; overflow-y: auto;
+    background: var(--md-surface-container-high); border-radius: var(--md-shape-md); box-shadow: var(--md-elevation-3);
+    padding: 8px 0; z-index: 6;
+  }
+  .mention-list[hidden] { display: none; }
+  .mention-item {
+    display: block; width: 100%; padding: 10px 16px; border: 0; text-align: left; background: transparent;
+    color: var(--md-on-surface); font: var(--md-body-medium); letter-spacing: .25px; overflow-wrap: anywhere;
+  }
+  .mention-item[aria-selected="true"] { background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
   /* A finger is not a pointer: Material asks for 48dp of target, whatever
      the control looks like. */
   @media (pointer: coarse) {

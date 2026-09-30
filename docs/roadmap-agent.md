@@ -1005,7 +1005,7 @@ Arbeitsverzeichnisses wird abgelehnt.
 mit Digest im Receipt — und ein Anhang, der „ignoriere deine Anweisungen"
 enthält, nichts an den Freigaben ändert.
 
-**D3 — Die Web-Ansicht „Chat".** Verlauf, Composer, Auswahlfelder für Modell
+**D3 ✅ — Die Web-Ansicht „Chat".** Verlauf, Composer, Auswahlfelder für Modell
 und Agent, Anhängen-Knopf, Freigaben inline. Gleiche Material-Tokens, gleiche
 Regel: gerendert und angesehen bei 412 und 1180 px in beiden Farbschemata.
 *Fertig wenn:* der Playwright-Durchlauf die Runde vom Tippen bis zur Freigabe

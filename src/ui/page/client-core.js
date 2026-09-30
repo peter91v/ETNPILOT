@@ -47,6 +47,13 @@ const VIEWS = [
     icon: "M4 13h6V4H4zM14 20h6v-9h-6zM4 20h6v-4H4zM14 8h6V4h-6z",
   },
   {
+    id: "chat",
+    label: "Chat",
+    title: "Chat",
+    description: "Talk to an agent in this project. Every write and command still asks you first, here, with what it would change.",
+    icon: "M4 5h16v11H8l-4 4z",
+  },
+  {
     id: "approvals",
     label: "Approvals",
     title: "Pending approvals",
@@ -337,7 +344,7 @@ function renderNav() {
 
 // The destinations that fit across the bottom of a phone. The rest stay one
 // tap away, in the drawer, and the drawer always lists every one of them.
-const BAR_VIEWS = ["overview", "approvals", "queue", "runs"];
+const BAR_VIEWS = ["overview", "chat", "approvals", "runs"];
 
 function navCount(id) {
   if (!state) return undefined;
@@ -361,6 +368,7 @@ function navCount(id) {
 function show(next) {
   const entry = VIEWS.find((candidate) => candidate.id === next) ?? VIEWS[0];
   view = entry.id;
+  document.body.classList.toggle("view-chat", view === "chat");
   if (location.hash !== "#" + view) history.replaceState(null, "", "#" + view);
   $("page-title").textContent = entry.title;
   $("page-description").textContent = entry.description;
@@ -371,6 +379,7 @@ function show(next) {
   render();
   // These two are read on demand: one runs 'git status' per worktree, the
   // other crosses the network, so neither belongs in the poll.
+  if (view === "chat") void syncChat();
   if (view === "worktrees" && worktrees === undefined) void loadWorktrees();
   if (view === "merges" && merges === undefined) void loadMerges();
 }
@@ -445,6 +454,7 @@ function render() {
   renderNav();
   renderRuntime();
   if (view === "overview") renderOverview();
+  if (view === "chat") renderChat();
   if (view === "approvals") renderApprovals();
   if (view === "queue") renderQueue();
   if (view === "runs") renderRuns();
