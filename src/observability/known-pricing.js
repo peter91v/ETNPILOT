@@ -28,14 +28,7 @@ const ANTHROPIC_RATES = Object.freeze({
 // https://platform.openai.com/docs/pricing — this environment cannot reach
 // openai.com (network policy), so these are not independently fetched: they
 // are what the user read off that page themselves and pasted back, on
-// 2026-09-24. Kept only for the rows whose API 'model' id could be inferred
-// with confidence from OpenAI's own established naming (the numbered
-// releases). The page's other rows — 'GPT-6 Astra', 'GPT-5.6 Sol/Terra/
-// Luna', 'Daybreak Blue/Red', 'GPT-Rosalind-Research', 'GPT-5.3-Codex-Spark',
-// 'GPT-6 Astra Law' — are the pricing table's display names; nothing here
-// says what 'model' string the API actually returns for them, and guessing
-// one would defeat the point of this table. Ask for those ids explicitly
-// before adding them.
+// 2026-09-24. Rows whose API id is not confirmed are marked inside.
 const OPENAI_RATES = Object.freeze({
   "gpt-5.5": { inputPerMillion: 5, cacheReadPerMillion: 0.5, outputPerMillion: 30 },
   "gpt-5.4": { inputPerMillion: 2.5, cacheReadPerMillion: 0.25, outputPerMillion: 15 },
@@ -47,6 +40,23 @@ const OPENAI_RATES = Object.freeze({
   // the API answered 'gpt-6-luna'. That mismatch is exactly why the other
   // display names stay out until their ids are seen the same way.
   "gpt-6-luna": { inputPerMillion: 0.2, cacheReadPerMillion: 0.02, outputPerMillion: 1.2 },
+  // The rest of the page, keyed by the id its display name most plausibly
+  // has. None of these ids has been seen in a real response yet (Luna's
+  // page name and API id already differ), so the 5.6 family is listed under
+  // the page-name id and under the 'gpt-6-' form Luna actually answered
+  // with. A wrong id costs nothing: the row is never matched and the model
+  // reads 'not priced'. Correct the keys as real runs show the ids.
+  "gpt-6-astra": { inputPerMillion: 10, cacheReadPerMillion: 1, outputPerMillion: 50 },
+  "gpt-6-astra-law": { inputPerMillion: 12.5, cacheReadPerMillion: 1.25, outputPerMillion: 62.5 },
+  "gpt-5.6-sol": { inputPerMillion: 4, cacheReadPerMillion: 0.4, outputPerMillion: 20 },
+  "gpt-6-sol": { inputPerMillion: 4, cacheReadPerMillion: 0.4, outputPerMillion: 20 },
+  "gpt-5.6-terra": { inputPerMillion: 2, cacheReadPerMillion: 0.2, outputPerMillion: 12 },
+  "gpt-6-terra": { inputPerMillion: 2, cacheReadPerMillion: 0.2, outputPerMillion: 12 },
+  "gpt-5.6-luna": { inputPerMillion: 0.2, cacheReadPerMillion: 0.02, outputPerMillion: 1.2 },
+  "gpt-rosalind-research": { inputPerMillion: 5, cacheReadPerMillion: 0.5, outputPerMillion: 25 },
+  "daybreak-blue": { inputPerMillion: 4, cacheReadPerMillion: 0.4, outputPerMillion: 20 },
+  "daybreak-red": { inputPerMillion: 12.5, cacheReadPerMillion: 1.25, outputPerMillion: 75 },
+  // 'GPT-5.3-Codex-Spark' is a research preview without published rates: left out.
 });
 
 const RATE_TABLES = Object.freeze({

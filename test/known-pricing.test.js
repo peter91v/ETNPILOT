@@ -60,3 +60,14 @@ test("the model a real run used is priced, from the row the page lists as Luna",
   assert.equal(rate.cacheReadPerMillion, 0.02);
   assert.equal(rate.outputPerMillion, 1.2);
 });
+
+test("every priced row of the pasted page is there, Spark (no rates) is not", () => {
+  const price = (id) => knownPriceFor("openai-compatible", id);
+  assert.equal(price("gpt-6-astra").outputPerMillion, 50);
+  assert.equal(price("gpt-5.6-sol").inputPerMillion, 4);
+  assert.equal(price("gpt-6-terra").outputPerMillion, 12);
+  assert.equal(price("daybreak-red").outputPerMillion, 75);
+  assert.equal(price("gpt-rosalind-research").cacheReadPerMillion, 0.5);
+  assert.equal(price("gpt-6-astra-law").inputPerMillion, 12.5);
+  assert.equal(price("gpt-5.3-codex-spark"), undefined);
+});
