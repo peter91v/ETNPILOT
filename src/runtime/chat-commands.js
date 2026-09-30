@@ -17,6 +17,7 @@ export const CHAT_HELP = [
   "  /agent [name]        show the agents, or talk to another one",
   "  /model [id]          use another model; 'provider:id' also picks the provider; 'reset' undoes it",
   "  /effort [level]      low, medium or high; 'reset' undoes it",
+  "  /undo                take back the file changes of the last turn",
   "  /files               the files attached in this conversation",
   "  /sessions            conversations in this project",
   "  /clear               start a new conversation (/new does too)",
@@ -36,7 +37,7 @@ export function overrideOf(choice) {
 
 // Returns { lines, action }. 'action' is "exit" or "clear" when the caller has
 // something to do besides print; the choice is changed in place.
-export async function runChatCommand(text, { choice, known, config, policy, root, sessionId }) {
+export async function runChatCommand(text, { choice, known, config, policy, root, sessionId, undo }) {
   const names = known.agents.filter((entry) => !entry.error).map((entry) => entry.name);
   const [name, ...rest] = text.replace(/^\//, "").split(/\s+/);
   const argument = rest.join(" ").trim();
@@ -70,6 +71,11 @@ export async function runChatCommand(text, { choice, known, config, policy, root
         return say(`effort: ${argument}`);
       }
       return say("effort is low, medium or high (or reset).");
+    }
+    case "undo": {
+      if (typeof undo !== "function") return say("Undo is not available here.");
+      const result = await undo();
+      return say(...result.message.split("\n"));
     }
     case "files": {
       const session = sessionId ? await readSession(root, sessionId) : { turns: [] };

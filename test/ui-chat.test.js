@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -33,6 +33,7 @@ function provider(seen, behaviour = {}) {
           const decision = await context.approve({ kind: "shell", fullCommandText: "npm run build" });
           if (decision.kind !== "approve-once") throw new Error("refused");
         }
+        if (behaviour.make) await writeFile(behaviour.make, "x");
         if (behaviour.hang) await new Promise((resolve, reject) => context.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true }));
         return { text: `answer ${seen.length}`, model: "m" };
       },
@@ -155,6 +156,25 @@ test("the agents listing names the providers a turn may choose", async () => {
   try {
     const listing = await (await call("/api/agents")).json();
     assert.ok(listing.providers.includes("scripted"));
+  } finally {
+    await review.close();
+  }
+});
+
+test("undo over HTTP takes back the last turn's files, and is refused while a turn runs", async () => {
+  const root = await project();
+  const made = join(root, "made.txt");
+  const { review, call, post } = await serve(root, [], { make: made });
+  try {
+    const { sessionId } = await (await post("/api/chat/send", { text: "make a file" })).json();
+    await until(async () => (await call(`/api/chat/session?id=${sessionId}`)).json(), (s) => s.turns.length === 1 && !s.running, "the turn");
+    const { access } = await import("node:fs/promises");
+    await access(made);
+    const undone = await (await post("/api/chat/undo", { sessionId })).json();
+    assert.equal(undone.ok, true, JSON.stringify(undone));
+    assert.deepEqual(undone.reverted, ["made.txt"]);
+    await assert.rejects(access(made));
+    assert.equal((await post("/api/chat/undo", { sessionId: "../x" })).status, 400);
   } finally {
     await review.close();
   }

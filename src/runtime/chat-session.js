@@ -3,6 +3,7 @@ import { appendFile, mkdir, readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { boundHistory } from "../core/history.js";
 import { composeTurnInput, summarizeAttachments } from "./chat-attachments.js";
+import { pinSnapshot, snapshotTree, undoBetween } from "./chat-snapshots.js";
 
 // A conversation, kept as the receipts of its turns.
 //
@@ -55,7 +56,14 @@ export async function readSession(root, sessionId) {
   const turns = [];
   for (const [index, line] of text.split("\n").filter(Boolean).entries()) {
     try {
-      turns.push(JSON.parse(line));
+      const entry = JSON.parse(line);
+      // An undo is a note about a turn, not a turn: it marks the turn it took back.
+      if (entry.type === "undo") {
+        const undone = turns.find((turn) => turn.turn === entry.turn);
+        if (undone) undone.undone = { at: entry.at, reverted: entry.reverted, skipped: entry.skipped };
+        continue;
+      }
+      turns.push(entry);
     } catch {
       // A line that does not parse is reported, not skipped: a session that
       // quietly lost a turn would give the next one the wrong past.
@@ -103,7 +111,10 @@ export function historyFrom(turns) {
     const attached = (turn.attachments ?? []).length > 0
       ? `\n\n[attached: ${turn.attachments.map((file) => `${file.path} (sha256 ${file.digest.slice(0, 12)})`).join(", ")}]`
       : "";
-    messages.push({ role: "user", content: `${turn.input}${attached}` }, { role: "assistant", content: turn.reply });
+    const undone = turn.undone
+      ? "\n\n[The user undid this turn's changes to the files; they are not in the workspace any more.]"
+      : "";
+    messages.push({ role: "user", content: `${turn.input}${attached}` }, { role: "assistant", content: `${turn.reply}${undone}` });
   }
   return messages;
 }
@@ -138,6 +149,12 @@ export async function runChatTurn({
   const run = runner ?? (await import("./project-runner.js")).runProject;
   const at = now().toISOString();
 
+  // The files before the turn, so it can be taken back. Outside a repository
+  // there is nothing to record, and the turn says that rather than nothing.
+  const dryRun = runOptions.dryRun === true;
+  const before = dryRun ? undefined : await snapshotTree(root).catch(() => undefined);
+  if (before) await pinSnapshot(root, before, `${id}/${number}-before`).catch(() => {});
+
   let outcome;
   try {
     outcome = await run({
@@ -163,6 +180,8 @@ export async function runChatTurn({
     });
     throw error;
   }
+  const after = before ? await snapshotTree(root).catch(() => undefined) : undefined;
+  if (after) await pinSnapshot(root, after, `${id}/${number}-after`).catch(() => {});
   const reply = replyOf(outcome);
   const status = outcome.status === "succeeded" && reply !== undefined ? "succeeded" : outcome.status ?? "failed";
   const turn = await appendTurn(root, id, {
@@ -173,6 +192,7 @@ export async function runChatTurn({
     ...(attachments.length > 0 ? { attachments: summarizeAttachments(attachments) } : {}),
     runId: outcome.runId,
     status,
+    snapshots: before && after ? { before, after } : { unavailable: dryRun ? "a dry run" : "not a git repository" },
     ...(reply !== undefined ? { reply } : {}),
     ...(bounded.omitted > 0 ? { historyOmitted: bounded.omitted } : {}),
   });
@@ -205,4 +225,23 @@ export async function verifySession(root, sessionId, { verifyReceipt, readEntrie
     });
   }
   return { sessionId, turns: results, valid: results.every((result) => result.ok) };
+}
+
+// Takes back the file changes of the newest turn that has not been taken back.
+// Reports what it reverted and what it left, and why.
+export async function undoLastTurn({ root, sessionId, now = () => new Date() }) {
+  if (!sessionId) return { ok: false, message: "There is no conversation yet, so nothing to undo." };
+  const { turns } = await readSession(root, sessionId);
+  const turn = [...turns].reverse().find((entry) => entry.status === "succeeded" && !entry.undone);
+  if (!turn) return { ok: false, message: "No turn is left to undo." };
+  if (!turn.snapshots?.before) {
+    return { ok: false, message: `Turn ${turn.turn} cannot be undone: no snapshot was taken (${turn.snapshots?.unavailable ?? "an older turn"}).` };
+  }
+  const result = await undoBetween(root, turn.snapshots.before, turn.snapshots.after);
+  await appendTurn(root, sessionId, { type: "undo", turn: turn.turn, at: now().toISOString(), ...result });
+  const lines = [];
+  if (turn.snapshots.before === turn.snapshots.after) lines.push(`Turn ${turn.turn} changed no files, so there was nothing to take back.`);
+  else lines.push(`Turn ${turn.turn}: ${result.reverted.length} file${result.reverted.length === 1 ? "" : "s"} put back${result.reverted.length ? ` (${result.reverted.join(", ")})` : ""}.`);
+  for (const file of result.skipped) lines.push(`  left ${file.path}: ${file.reason}`);
+  return { ok: true, turn: turn.turn, ...result, message: lines.join("\n") };
 }

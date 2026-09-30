@@ -773,6 +773,7 @@ export function createTuiApp({
         policy: new PolicyEngine(state.config.policy),
         root: state.root,
         sessionId: chat.sessionId,
+        undo: () => state.chat.undo(chat.sessionId),
       });
       chat.notes = result.lines.flatMap((line) => String(line).split("\n"));
       if (result.action === "clear") resetChat();

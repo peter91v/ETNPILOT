@@ -5,7 +5,7 @@ import { PolicyEngine } from "../policy/engine.js";
 import { describeRequest, display } from "../core/terminal-approval.js";
 import { git } from "../git/command.js";
 import { openProjectState } from "../runtime/project-state.js";
-import { createSessionId, listSessions, readSession, runChatTurn } from "../runtime/chat-session.js";
+import { createSessionId, listSessions, readSession, runChatTurn, undoLastTurn } from "../runtime/chat-session.js";
 import { resolveAttachments } from "../runtime/chat-attachments.js";
 import { createChoice, overrideOf, runChatCommand } from "../runtime/chat-commands.js";
 
@@ -182,7 +182,10 @@ export async function runChat({
 
   // True when the conversation should end.
   async function command(text) {
-    const result = await runChatCommand(text, { choice, known, config, policy, root: projectRoot, sessionId });
+    const result = await runChatCommand(text, {
+      choice, known, config, policy, root: projectRoot, sessionId,
+      undo: () => undoLastTurn({ root: projectRoot, sessionId }),
+    });
     for (const line of result.lines) say(line);
     if (result.action === "clear") sessionId = undefined;
     return result.action === "exit";

@@ -1,4 +1,4 @@
-import { createSessionId, listSessions, readSession, runChatTurn, verifySession } from "./chat-session.js";
+import { createSessionId, listSessions, readSession, runChatTurn, undoLastTurn, verifySession } from "./chat-session.js";
 import { resolveAttachments, summarizeAttachments } from "./chat-attachments.js";
 import { PolicyEngine } from "../policy/engine.js";
 import { git } from "../git/command.js";
@@ -129,6 +129,14 @@ export async function openProjectState({ root = process.cwd(), env = process.env
         // A failure is reported through runErrors like any run's; nothing here waits.
         started.catch(() => {});
         return { sessionId: id, agent: chosen, attached: summarizeAttachments(attachments), refused };
+      },
+      // Takes back the newest turn's file changes. Not while a turn is running:
+      // the files are moving.
+      undo: async (id) => {
+        if ([...running].some((record) => record.session === id)) {
+          return { ok: false, message: "A turn is running in this conversation; stop it first." };
+        }
+        return undoLastTurn({ root: projectRoot, sessionId: id });
       },
       stop: (id) => {
         const mine = [...running].filter((record) => record.session === id);

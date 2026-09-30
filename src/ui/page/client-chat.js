@@ -37,7 +37,12 @@ function buildChat() {
     void syncChat();
   });
   const fresh = button("New conversation", { class: "btn tonal", onClick: startNewChat });
-  const head = el("div", { class: "row chat-head" }, [history, fresh, el("span", { class: "muted", attrs: { id: "chat-note" } })]);
+  const undo = button("Undo last turn", {
+    class: "btn small",
+    title: "Put back the files the last turn changed. A file you changed since is left alone.",
+    onClick: () => void undoChat(),
+  });
+  const head = el("div", { class: "row chat-head" }, [history, fresh, undo, el("span", { class: "muted", attrs: { id: "chat-note" } })]);
 
   const agent = el("select", { class: "inline", attrs: { id: "chat-agent", "aria-label": "Agent" } });
   const provider = el("select", { class: "inline", attrs: { id: "chat-provider", "aria-label": "Provider" } });
@@ -186,6 +191,17 @@ async function sendChat() {
     toast(error.message, "bad");
   } finally {
     chatControl("chat-send").disabled = false;
+  }
+}
+
+async function undoChat() {
+  if (!chatSession) return toast("There is no conversation yet.", "bad");
+  try {
+    const result = await api("/api/chat/undo", { method: "POST", body: JSON.stringify({ sessionId: chatSession }) });
+    toast(result.message, result.ok ? "ok" : "bad");
+    await syncChat();
+  } catch (error) {
+    toast(error.message, "bad");
   }
 }
 
@@ -365,7 +381,7 @@ function drawThread(thread) {
     if (turn.status === "succeeded") {
       thread.append(message(turn.agent ?? "agent", turn.reply ?? "", {
         tone: "agent",
-        meta: "turn " + turn.turn + (turn.runId ? " · run " + turn.runId.slice(0, 8) : "") + (turn.historyOmitted ? " · " + turn.historyOmitted + " earlier exchange(s) left out" : ""),
+        meta: (turn.undone ? "undone · " : "") + "turn " + turn.turn + (turn.runId ? " · run " + turn.runId.slice(0, 8) : "") + (turn.historyOmitted ? " · " + turn.historyOmitted + " earlier exchange(s) left out" : ""),
       }));
     } else {
       thread.append(message(turn.agent ?? "agent", turn.error ?? "The turn ended " + turn.status + ".", { tone: "failed", meta: "turn " + turn.turn + " · " + turn.status }));
