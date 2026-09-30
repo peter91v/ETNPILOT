@@ -61,6 +61,8 @@ export class Harness {
     this.#tainted = new Map();
     this.prompts = new Registry("prompt");
     this.instructions = [];
+    // Instructions that apply only where a run works: [{scope, path, content}].
+    this.scopedInstructions = [];
     this.approvalPolicy = approvalPolicy;
     this.approvalHandler = approvalHandler;
     this.receiptStore = receiptStore;
@@ -186,6 +188,7 @@ export class Harness {
         trace: runSpan ? { traceId: runSpan.traceId, parentSpanId: runSpan.spanId } : undefined,
         signal,
         instructions: [...this.instructions],
+        scopedInstructions: [...this.scopedInstructions],
         skills: agent.skills.map((name) => this.skills.get(name)),
         spawn: (subagent, subInput) => {
           if (!agent.subagents.includes(subagent)) {

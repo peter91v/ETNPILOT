@@ -88,6 +88,7 @@ export function createAnthropicProvider({
           allowed: context.agent.tools,
           canSpawn: (context.agent.subagents ?? []).length > 0,
           extraTools: context.extraTools ?? extraTools,
+          scopedInstructions: context.scopedInstructions,
           fetchImpl,
         })
         : undefined;
@@ -169,7 +170,7 @@ export function createAnthropicProvider({
             tool_use_id: call.id,
             ...(result.ok === true ? {} : { is_error: true }),
             // The model sees the same bounded result the receipt records.
-            content: envelope.wrap(result),
+            content: envelope.render(result),
           });
         }
         messages.push({ role: "user", content: results });

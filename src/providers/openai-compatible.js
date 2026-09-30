@@ -68,6 +68,7 @@ export function createOpenAICompatibleProvider({
           allowed: context.agent.tools,
           canSpawn: (context.agent.subagents ?? []).length > 0,
           extraTools: context.extraTools ?? extraTools,
+          scopedInstructions: context.scopedInstructions,
           fetchImpl,
         })
         : undefined;
@@ -135,7 +136,7 @@ export function createOpenAICompatibleProvider({
             role: "tool",
             tool_call_id: call.id,
             // The model sees the same bounded result the receipt records.
-            content: envelope.wrap(result),
+            content: envelope.render(result),
           });
         }
         const bounded = compactConversation(messages, {

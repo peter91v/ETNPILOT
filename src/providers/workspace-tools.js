@@ -187,6 +187,10 @@ export function createWorkspaceTools({
   // join the same list so that one approval path, one allow-list and one
   // receipt cover them too.
   extraTools = [],
+  // Instructions that apply under one directory: [{scope, path, content}].
+  // They are handed over once, with the first result that touches a file
+  // beneath their scope — so they cost nothing in a run that never goes there.
+  scopedInstructions = [],
   fetchImpl = globalThis.fetch,
 } = {}) {
   if (!workingDirectory) throw new TypeError("Workspace tools require a workingDirectory.");
@@ -200,10 +204,37 @@ export function createWorkspaceTools({
       .map((tool) => tool.definition),
   ];
   const permitted = new Set(definitions.map((definition) => definition.name));
+  const delivered = new Set();
+  const PATH_TOOLS = new Set(["read_file", "list_files", "write_file", "edit_file"]);
+
+  // Which not-yet-delivered scoped instructions apply to this path.
+  const scopedFor = (path) => {
+    const due = [];
+    for (const entry of scopedInstructions) {
+      if (delivered.has(entry.path)) continue;
+      if (path === entry.scope || path.startsWith(`${entry.scope}/`)) {
+        delivered.add(entry.path);
+        due.push({ path: entry.path, scope: entry.scope, content: entry.content });
+      }
+    }
+    return due;
+  };
 
   return {
     definitions,
     async invoke(name, rawArguments, context) {
+      const result = await invokeTool(name, rawArguments, context);
+      if (scopedInstructions.length > 0 && PATH_TOOLS.has(name) && result?.ok === true && typeof result.path === "string") {
+        const due = scopedFor(result.path);
+        // Outside the result on purpose: the result is tool output and the
+        // envelope calls it data. These come from the pinned project content.
+        if (due.length > 0) return { ...result, projectInstructions: due };
+      }
+      return result;
+    },
+  };
+
+  async function invokeTool(name, rawArguments, context) {
       if (!permitted.has(name)) {
         // Named as a refusal rather than as 'unknown tool': the tool exists,
         // this agent may not use it, and the receipt should say which it was.
@@ -232,8 +263,7 @@ export function createWorkspaceTools({
         case "run_command": return runWorkspaceCommand(root, bounds, args, context, signal, sandbox);
         default: return { ok: false, error: `Unknown tool '${name}'.` };
       }
-    },
-  };
+  }
 }
 
 async function readWorkspaceFile(root, bounds, args, context) {

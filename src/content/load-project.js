@@ -14,7 +14,11 @@ export async function loadProject(harness, root = process.cwd(), env = process.e
   const { snapshot, evidence } = await loadPinnedProjectContent(projectRoot, config);
 
   for (const item of snapshot.items.filter(({ type }) => type === "instruction")) {
-    harness.instructions.push(item.content);
+    const scope = instructionScope(item.path);
+    // Top-level instructions apply to every run; one in a subdirectory only
+    // to a run that works under that directory (see workspace-tools).
+    if (scope === "") harness.instructions.push(item.content);
+    else harness.scopedInstructions.push({ scope, path: item.path, content: item.content });
   }
   for (const item of snapshot.items.filter(({ type }) => type === "prompt")) {
     harness.prompts.register(item.name, item.content);
@@ -46,6 +50,12 @@ export async function loadProject(harness, root = process.cwd(), env = process.e
     });
   }
   return { root: projectRoot, config, content: evidence };
+}
+
+// '.etnpilot/instructions/src/ui/rules.md' -> 'src/ui'; a top-level file -> ''.
+export function instructionScope(path) {
+  const parts = path.split("/").slice(2, -1);
+  return parts.join("/");
 }
 
 function isBootstrapPlugin(entry) {
