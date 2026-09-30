@@ -287,9 +287,10 @@ export async function openProjectState({ root = process.cwd(), env = process.env
       // was abandoned. This surface knows what it started, so it says so.
       const runId = file.replace(/\.jsonl$/, "");
       const active = runId !== undefined && [...running].some((record) => record.runId === runId);
-      return active
+      const described = active
         ? { ...receipt, outcome: describeOutcome(receipt, { running: true }) }
         : receipt;
+      return withCurrentPricing(described, { root: projectRoot, config: current, runId });
     },
     // Worktrees and merge requests are read on demand for the same reason,
     // more sharply: one runs 'git status' per worktree, the other crosses the
@@ -768,6 +769,21 @@ function assertReceiptName(file) {
   if (typeof file !== "string" || file.includes("/") || file.includes("\\") || !file.endsWith(".jsonl")) {
     throw new TypeError(`'${file}' is not a receipt file in this project.`);
   }
+}
+
+// The sealed receipt holds the cost as it was worked out during the run, and
+// must not change. When that was 'no rate' for a model the table of published
+// prices knows, the run's usage is read back from the telemetry file, which
+// prices it now; the receipt itself stays exactly as sealed.
+export async function withCurrentPricing(receipt, { root, config, runId }) {
+  const usage = receipt.outcome?.usage;
+  if (!usage || !(usage.unpricedInvocations > 0) || usage.estimatedCost !== undefined) return receipt;
+  const file = resolve(root, config?.observability?.file ?? ".etnpilot/state/telemetry.jsonl");
+  const fresh = await summarizeTelemetryFile(file, { workflowRunId: receipt.terminal?.runId ?? runId }).catch(() => undefined);
+  if (!fresh || fresh.estimatedCost === undefined) return receipt;
+  const merged = { ...usage, ...fresh };
+  if (!fresh.unpricedModels) delete merged.unpricedModels;
+  return { ...receipt, outcome: { ...receipt.outcome, usage: merged } };
 }
 
 export async function readReceipt(directory, file) {

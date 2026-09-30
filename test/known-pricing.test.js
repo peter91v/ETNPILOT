@@ -108,3 +108,24 @@ test("a call recorded before any rate existed is priced from the table when read
   assert.equal(summary.unpricedInvocations, 0);
   assert.equal(summary.currency, "USD");
 });
+
+test("a sealed run that says 'not priced' is shown with the cost the table gives it, receipt untouched", async () => {
+  const { Telemetry, telemetryProviderAttributes } = await import("../src/observability/telemetry.js");
+  const { withCurrentPricing } = await import("../src/runtime/project-state.js");
+  const { mkdtemp, mkdir } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-shown-"));
+  await mkdir(join(root, ".etnpilot", "state"), { recursive: true });
+  const telemetry = new Telemetry({ enabled: true, file: join(root, ".etnpilot/state/telemetry.jsonl"), serviceName: "s", environment: "t", pricing: { currency: "USD", models: {} } });
+  const accounting = telemetry.recordProviderUsage({ workflowRunId: "run-1", provider: "openai", model: "gpt-6-luna", usage: { inputTokens: 7034, outputTokens: 1510 } });
+  const { estimatedCost, currency, ...unpriced } = accounting;
+  await telemetry.startSpan("gen_ai.invoke_agent", { attributes: { "etnpilot.workflow.run_id": "run-1" } }).end({ attributes: telemetryProviderAttributes(unpriced) });
+  await telemetry.flush();
+
+  const sealed = { terminal: { runId: "run-1" }, outcome: { usage: { invocations: 1, unpricedInvocations: 1, inputTokens: 7034, outputTokens: 1510 } } };
+  const shown = await withCurrentPricing(sealed, { root, config: {}, runId: "run-1" });
+  assert.ok(Math.abs(shown.outcome.usage.estimatedCost - (7034 * 0.2 + 1510 * 1.2) / 1e6) < 1e-12);
+  assert.equal(shown.outcome.usage.unpricedInvocations, 0);
+  assert.equal(sealed.outcome.usage.estimatedCost, undefined);
+});
