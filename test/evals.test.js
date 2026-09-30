@@ -127,3 +127,14 @@ test("the table names what failed, and the summary adds it up", () => {
   assert.deepEqual({ cases: summary.cases, passed: summary.passed, failed: summary.failed }, { cases: 2, passed: 1, failed: 1 });
   assert.equal(summary.usage.inputTokens, 10);
 });
+
+test("a run that could not start is an ERROR, not a failed measurement", async () => {
+  const { formatEvalTable } = await import("../src/runtime/evals.js");
+  const table = formatEvalTable([
+    { id: "broke", ok: false, error: "Provider 'x' has no API key.", checks: [{ ok: false, kind: "fileExists", path: "a", found: "absent" }] },
+    { id: "measured", ok: false, checks: [{ ok: false, kind: "fileExists", path: "a", found: "absent" }] },
+  ]);
+  assert.match(table, /ERROR\s+broke/);
+  assert.match(table, /FAIL\s+measured/);
+  assert.match(table, /agent was not measured:\n\s+broke: Provider 'x' has no API key\./);
+});

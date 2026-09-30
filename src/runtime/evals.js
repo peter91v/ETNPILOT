@@ -143,7 +143,9 @@ export function summarizeEvals(results) {
 
 export function formatEvalTable(results) {
   const rows = results.map((result) => [
-    result.ok ? "pass" : "FAIL",
+    // ERROR: the run itself broke, so the agent was not measured. FAIL: it ran,
+    // and the work did not satisfy the checks.
+    result.ok ? "pass" : result.error ? "ERROR" : "FAIL",
     result.id,
     `${result.checks.filter((check) => check.ok).length}/${result.checks.length}`,
     String(result.toolCalls ?? 0),
@@ -158,7 +160,13 @@ export function formatEvalTable(results) {
   const failures = results.flatMap((result) => result.checks
     .filter((check) => !check.ok)
     .map((check) => `  ${result.id}: ${check.kind}${check.path ? ` ${check.path}` : ""} — ${check.found}`));
-  return [line(head), ...rows.map(line), ...(failures.length > 0 ? ["", "What failed:", ...failures] : [])].join("\n");
+  const errors = results.filter((result) => result.error).map((result) => `  ${result.id}: ${result.error}`);
+  return [
+    line(head),
+    ...rows.map(line),
+    ...(errors.length > 0 ? ["", "The run itself failed, so the agent was not measured:", ...errors] : []),
+    ...(failures.length > 0 ? ["", "What failed:", ...failures] : []),
+  ].join("\n");
 }
 
 // Sets up a throwaway project for one case and runs it. The project is a real
@@ -240,6 +248,15 @@ export async function runEvalCase(evalCase, { root, provider = "scripted", runPr
     });
   } catch (error) {
     failure = error.message;
+  }
+  // A run that ended without throwing can still have failed to run: a provider
+  // with no key, a step that errored. That is not the agent doing the task
+  // badly, and a table that says only "checks failed" cannot tell the two apart.
+  if (failure === undefined && outcome?.summary?.status && outcome.summary.status !== "succeeded") {
+    const reasons = Object.entries(outcome.summary.steps ?? {})
+      .map(([id, step]) => (step.error || step.result?.error ? `${id}: ${step.error ?? step.result.error}` : undefined))
+      .filter(Boolean);
+    failure = reasons.length > 0 ? reasons.join("; ") : `the run ended '${outcome.summary.status}'`;
   }
   const verdict = await judge(root, evalCase.expect);
   const usage = await readUsage(root, outcome);
