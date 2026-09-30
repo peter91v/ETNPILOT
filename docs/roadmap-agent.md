@@ -36,7 +36,7 @@ Geprüft gegen `git log` und den Code, nicht gegen die Erinnerung. Branch
 | P4.6 Hooks (`tool.completed`, `afterWrite`) | ✅ | (dieser Commit) |
 | P4.4 `propose_instruction` | ✅ | (dieser Commit) |
 | P5.1 `page.js` geteilt | ✅ (Ausgabe byteweise identisch; größte Datei 665 Zeilen) | (dieser Commit) |
-| P5.2 | offen | — |
+| P5.2 Schema-Wächter für tote Konfiguration | ✅ | (dieser Commit) |
 | P6.2, P6.3 | offen | — |
 
 ### Was ich beim Gegenlesen gefunden habe
@@ -786,7 +786,7 @@ zurückgeben; kein Build-Schritt, keine Abhängigkeit. Der bestehende
 Parse-Check über `new Function(script)` bleibt der Wächter.
 *Fertig wenn:* keine Datei über 800 Zeilen und alle UI-Tests unverändert grün.
 
-**P5.2 Die tote Konfiguration entfernen oder einlösen** — nach P1.4 und P3.1
+**P5.2 ✅ Die tote Konfiguration entfernen oder einlösen** — nach P1.4 und P3.1
 ist `approved-network-targets` echt und `subagents:` echt. Was dann noch nichts
 tut, kommt raus. Ein Schema-Test, der Felder verbietet, die kein Code liest,
 wäre der dauerhafte Wächter — dieselbe Idee wie `test/parity.test.js`.
