@@ -10,6 +10,69 @@ Code, Kommentare und Commits bleiben Englisch wie im ganzen Repository.
 
 ---
 
+## Stand
+
+Geprüft gegen `git log` und den Code, nicht gegen die Erinnerung. Branch
+`claude/roadmap-ui-tui-4izk9s`, 409 Tests grün.
+
+| Phase | Stand | Commit |
+|---|---|---|
+| P0.1 App startet (Cookie, stabiles Token) | ✅ | `d20e20f` |
+| P0.2 `runCheck` / `openProjectState` | ✅ (`runProjectCheck`, Export da) | `d20e20f` |
+| P1.1 `edit_file`, P1.2 Diff im Approval | ✅ | `a2b1810` |
+| P1.3 `search_files` | ✅ | `535d3fa` |
+| P1.4 `fetch_url` | ✅ | `67557dd` |
+| P1.5 Werkzeuge je Agent | ✅ | `acb7633` |
+| P1.6 Fremder Text markiert | ✅ | `67b81d6` |
+| P2.1 Caching, P2.2 Kontextgrenze, P2.3 Budget, P2.4 Retry | ✅ bis auf Streaming | `11c33ae` |
+| P2.5 `--events jsonl`, P2.6 Poll-Cache | ✅ | `b1eddf7` |
+| P6.1 Evals (`npm run eval`) | ✅ gegen den Scripted-Provider | `ab332cd` |
+| P3.1 `spawn_subagent`, P3.3 `gate`, P3.4 `ask_human` | ✅ | `ce90c94` |
+| P3.2 MCP-Client für alle Provider | ✅ bis auf codegraph | `e05673a` |
+| P4.3 `approve-for-run` + Taint-Regel | ✅ | `ca85cc8` |
+| P4.1 Verzeichnisbezogene Instruktionen | ✅ | `2a9c472` |
+| P4.2, P4.4, P4.5, P4.6 | offen | — |
+| P5.1, P5.2 | offen | — |
+| P6.2, P6.3 | offen | — |
+
+### Was ich beim Gegenlesen gefunden habe
+
+Drei Stellen, an denen das Dokument oder ein Commit mehr behauptet, als der
+Code hält. Sie gehören hierher, nicht in eine Fußnote.
+
+1. **P2.4 Streaming ist nicht gebaut.** Der Commit `11c33ae` trägt „P2.1–P2.4"
+   im Titel, aber geliefert sind Caching, Retry, Kontextgrenze und Budget.
+   Beide Adapter schicken weiter eine Anfrage und warten auf die ganze
+   Antwort; `stream` steht nur in der Liste der gesperrten Body-Schlüssel
+   (`openai-compatible.js:161`). Offen, weil es die Antwortverarbeitung in
+   beiden Adaptern ändert und ein eigener Commit mit eigener Prüfung sein
+   sollte.
+2. **P3.2 ist bei codegraph nicht eingelöst.** Das „Fertig wenn" verlangte,
+   dass `codegraph` über denselben Weg läuft wie jeder andere MCP-Server. Es
+   läuft weiter über `createCodegraph` in `project-runner.js:145`. Schlimmer,
+   siehe A-23.
+3. **P6.1 misst den Harness, nicht den Agenten.** Die Evals laufen gegen den
+   Scripted-Provider. Ein aufgezeichneter echter Lauf zum Abspielen
+   (`--record-fixtures`) existiert nicht; das steht so im Modul, hier fehlte es.
+   P6.2 („Vorher/nachher mit echten Zahlen") ist dadurch noch nicht möglich.
+
+### A-23 — Der Prompt verspricht ein Werkzeug, das zwei von drei Providern nicht haben
+
+**Schwere: mittel. Gefunden beim Gegenlesen von P3.2.**
+
+`project-runner.js:149` legt für *jeden* Provider die Instruktion ab:
+„CodeGraph is available through the local codegraph_explore MCP tool." Angeboten
+wird dieses Werkzeug aber nur dem Copilot-Adapter. `anthropic` und `openai`
+bekommen den Satz, aber nicht das Werkzeug; ein Modell, das ihm folgt, ruft
+einen Namen auf, den es nicht gibt, und bekommt „Unknown tool". Das ist
+dieselbe Klasse von Fehler wie „Prompts nennen Werkzeuge, die nicht mehr
+existieren", nur in die andere Richtung.
+**Fix (klein):** codegraph als MCP-Server über `connectMcpTools` anbinden —
+dann stimmt das Fertig-wenn von P3.2 und der Satz gilt für alle. Bis dahin:
+den Satz nur für Copilot ablegen.
+
+---
+
 ## Wie ich vorgegangen bin
 
 Gelesen, nicht erinnert. Jeder Befund unten nennt die Datei und die Zeile, an
@@ -593,7 +656,7 @@ voreingestellte Obergrenze statt `{}`, kommentiert, warum sie da ist.
 *Fertig wenn:* ein neues Projekt eine Grenze hat und der bestehende
 `budget_exceeded`-Pfad sie auslöst.
 
-**P2.4 Streaming und Retry** (A-9) — beide Adapter streamen; ein `429` oder
+**P2.4 ◐ Streaming und Retry** *(Retry ✅, Streaming offen)* (A-9) — beide Adapter streamen; ein `429` oder
 `5xx` wird mit Backoff wiederholt, bevor der Router auf einen anderen Provider
 ausweicht, und jeder Versuch steht im Receipt.
 *Fertig wenn:* ein Stub-Provider zweimal 429 liefert und der dritte Versuch
@@ -634,7 +697,7 @@ aus P2.3 zwingend.
 Oberflächen erscheinen — der schon gebaut ist und heute nur eine Ebene zeigt —
 und ein Zyklus abgelehnt wird.
 
-**P3.2 MCP für alle Provider** (A-6) — ein MCP-Client im Harness statt im
+**P3.2 ◐ MCP für alle Provider** *(codegraph offen, siehe A-23)* (A-6) — ein MCP-Client im Harness statt im
 Copilot-Adapter, konfiguriert unter `mcpServers:`, dessen Werkzeuge in dieselbe
 Approval- und Policy-Kette gehen wie die eingebauten. Ein MCP-Werkzeug ist
 fremder Code: es braucht eine eigene Policy-Art, keine Ausnahme.
@@ -662,7 +725,7 @@ nächsten Modellaufruf steht, und Frage und Antwort im Receipt nachzulesen sind.
 
 ### P4 — Was der Agent weiß
 
-**P4.1 Instruktionen wie `CLAUDE.md`.** Heute lädt
+**P4.1 ✅ Instruktionen wie `CLAUDE.md`.** Heute lädt
 `.etnpilot/instructions/*.md` pauschal für alle Agenten. Sinnvoll wäre, was
 Claude Code macht: verzeichnisbezogene Instruktionen, die gelten, wenn der Run
 dort arbeitet.
@@ -676,7 +739,7 @@ System-Prompt nur Name und Einzeiler.
 *Fertig wenn:* der System-Prompt kürzer wird und ein Test zeigt, dass der
 Volltext erst nach dem Aufruf im Verlauf steht.
 
-**P4.3 Approval mit Reichweite** (A-8) — `approve-for-run` zusätzlich zu
+**P4.3 ✅ Approval mit Reichweite** (A-8) — `approve-for-run` zusätzlich zu
 `approve-once`: gilt für diesen Run und ein Muster (Pfad-Glob oder
 Kommando-Präfix), läuft mit dem Run ab, steht mit Muster und Geltungsbereich im
 Receipt. Kein globaler „alles erlauben"-Schalter, und `policy.**` bleibt
@@ -728,7 +791,7 @@ wäre der dauerhafte Wächter — dieselbe Idee wie `test/parity.test.js`.
 Der erste Durchgang endete mit „nicht geprüft: ob der Agent gut arbeitet".
 Diese Phase macht daraus eine Zahl.
 
-**P6.1 Eine Evaluierung auf den vorhandenen Fixtures** (A-17) — ein Satz
+**P6.1 ◐ Eine Evaluierung auf den vorhandenen Fixtures** (A-17) — ein Satz
 kleiner Aufträge in `test/evals/`, jeder mit einem mechanischen Urteil:
 „Datei X existiert und enthält Y", „`npm test` ist grün", „nichts außerhalb
 von `src/` wurde angefasst". Jeder Auftrag wird **einmal** gegen einen echten
