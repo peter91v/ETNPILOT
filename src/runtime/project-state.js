@@ -520,8 +520,11 @@ export function describeOutcome(receipt, { running = false } = {}) {
   for (const approval of rejected) {
     reasons.push({
       kind: "approval",
-      text: `${approval.operationKind ?? "an operation"} was ${approval.decision}`
-        + (approval.evidence?.reason ? `: ${approval.evidence.reason}` : ""),
+      // What it was about and who or what said no: 'read was reject' named
+      // neither, and five of them in a row could not be told apart.
+      text: `${approval.subject || approval.operationKind || "an operation"} was ${approval.decision === "reject" ? "refused" : approval.decision}`
+        + (approval.reason ?? approval.evidence?.reason ? `: ${approval.reason ?? approval.evidence.reason}` : "")
+        + (approval.policy ? ` (policy: ${approval.policy.rule ? `rule '${approval.policy.rule}'` : "the section default"})` : ""),
     });
   }
   // What the run actually did with its tools. A run can be told to write a
@@ -531,10 +534,14 @@ export function describeOutcome(receipt, { running = false } = {}) {
   // Chat providers record 'toolCalls'; the scripted provider records the same
   // shape under 'steps', because its steps are the tools it ran.
   const toolCalls = receipt?.entries?.flatMap((entry) => entry.result?.toolCalls ?? entry.result?.steps ?? []) ?? [];
-  for (const call of toolCalls.filter((call) => call.ok === false)) {
+  // A refusal that went through an approval already appears above as that
+  // approval; saying it twice is how five refusals became ten lines. One that
+  // never reached an approval (a tool the agent may not use) appears only here.
+  const told = new Set(rejected.map((approval) => approval.reason ?? approval.evidence?.reason).filter(Boolean));
+  for (const call of toolCalls.filter((call) => call.ok === false && !(call.refused && told.has(call.error)))) {
     reasons.push({
       kind: "tool",
-      text: `${call.tool ?? "a tool"} did not succeed: ${call.error ?? "no reason recorded"}`,
+      text: `${call.label ?? call.tool ?? "a tool"} ${call.refused ? "was refused" : "failed"}: ${call.error ?? "no reason recorded"}`,
     });
   }
   if (terminal.content?.verificationError) {
@@ -584,9 +591,12 @@ function summarizeToolCalls(calls) {
   const byTool = new Map();
   for (const call of calls) {
     const name = call.tool ?? "unknown";
-    const row = byTool.get(name) ?? { tool: name, ok: 0, failed: 0 };
+    const row = byTool.get(name) ?? { tool: name, ok: 0, failed: 0, refused: 0 };
     if (call.ok === false) {
-      row.failed += 1;
+      // Not allowed and did not work are different things: the first is a
+      // decision somebody made, the second a fault.
+      if (call.refused) row.refused += 1;
+      else row.failed += 1;
       if (call.error && !row.error) row.error = call.error;
     } else row.ok += 1;
     byTool.set(name, row);

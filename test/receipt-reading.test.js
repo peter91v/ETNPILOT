@@ -239,7 +239,7 @@ test("a run says where its files are and what it did to them", async () => {
     "20260101000004-eeee.jsonl": [
       {
         runId: "agent-1",
-        result: { toolCalls: [{ tool: "write_file", ok: true }, { tool: "read_file", ok: false, error: "Denied by policy." }] },
+        result: { toolCalls: [{ tool: "write_file", ok: true }, { tool: "read_file", ok: false, refused: "policy", error: "Denied by policy." }, { tool: "read_file", ok: false, error: "ENOENT: no such file" }] },
       },
       {
         type: "workflow",
@@ -260,15 +260,17 @@ test("a run says where its files are and what it did to them", async () => {
 
   assert.equal(receipt.outcome.workspace.path, "/repo/.etnpilot/worktrees/run-20260101000004-eeee");
   assert.deepEqual(receipt.outcome.tools, [
-    { tool: "write_file", ok: 1, failed: 0 },
-    { tool: "read_file", ok: 0, failed: 1, error: "Denied by policy." },
+    { tool: "write_file", ok: 1, failed: 0, refused: 0 },
+    // A file that is not there is a fault; a denial is a decision. They are
+    // counted apart, because one is fixed in the task and the other in the policy.
+    { tool: "read_file", ok: 0, failed: 1, refused: 1, error: "Denied by policy." },
   ]);
   // A refusal inside a run that ended 'succeeded' is not swallowed: the model
   // finishing its turn is not the same as the work being done.
   assert.equal(receipt.outcome.status, "succeeded");
   assert.match(
     receipt.outcome.reasons.map((reason) => reason.text).join("\n"),
-    /read_file did not succeed: Denied by policy\./,
+    /read_file was refused: Denied by policy\./,
   );
 
   // The terminal says both, beside each other.

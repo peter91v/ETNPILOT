@@ -432,8 +432,13 @@ async function searchWorkspaceFiles(root, bounds, args, context, signal) {
   const limit = Number.isInteger(args.maxResults) && args.maxResults > 0
     ? Math.min(args.maxResults, bounds.maxEntries)
     : 100;
+  // A read of the workspace as a whole. Without a path, a policy rule that
+  // lists paths ('read-project' allows "**") matches nothing and the default
+  // denies: in a generated project this tool was refused every time, and only
+  // a test with a permissive stub said otherwise.
   const decision = await context.approve({
     kind: "read",
+    fileName: ".",
     toolName: "search_files",
     toolArguments: { ...(hasPattern ? { pattern: args.pattern } : {}), ...(hasGlob ? { glob: args.glob } : {}) },
   });
@@ -453,6 +458,13 @@ async function searchWorkspaceFiles(root, bounds, args, context, signal) {
     const glob = globToRegExp(args.glob);
     paths = paths.filter((path) => glob.test(path));
   }
+  // The tool reads many files under one approval, so each is held to the read
+  // policy on its own: a search must not show the inside of a file that
+  // read_file is forbidden to open, or the name of one it may not list. What is
+  // left out is counted, not silently dropped.
+  const readable = paths.filter((path) => context.canRead?.(path) !== false);
+  const withheld = paths.length - readable.length;
+  paths = readable;
   // A glob on its own is a question about names: answer it without opening
   // anything.
   if (!hasPattern) {
@@ -461,6 +473,7 @@ async function searchWorkspaceFiles(root, bounds, args, context, signal) {
       files: paths.slice(0, limit),
       total: paths.length,
       truncated: paths.length > limit,
+      ...(withheld > 0 ? { withheld } : {}),
     };
   }
 
@@ -493,7 +506,7 @@ async function searchWorkspaceFiles(root, bounds, args, context, signal) {
       });
     }
   }
-  return { ok: true, matches, files: searched, truncated };
+  return { ok: true, matches, files: searched, truncated, ...(withheld > 0 ? { withheld } : {}) };
 }
 
 // A glob, translated rather than shelled out to: '**' crosses directories,
@@ -858,8 +871,16 @@ function parseArguments(rawArguments) {
     : { ok: false, error: "Tool arguments must be a JSON object." };
 }
 
+// Not done because it was not allowed: by the policy, or by the person asked. A
+// different thing from a tool that ran and failed (a file that is not there),
+// and the record keeps them apart.
 function denied(decision) {
-  return { ok: false, error: decision.reason ?? "The operation was not approved.", approved: false };
+  return {
+    ok: false,
+    error: decision.reason ?? "The operation was not approved.",
+    approved: false,
+    refused: decision.policy?.effect === "deny" ? "policy" : "declined",
+  };
 }
 
 function describe(error) {

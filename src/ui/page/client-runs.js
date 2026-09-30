@@ -387,7 +387,9 @@ function stepDuration(step) {
 
 // Tokens and cost, in the same words everywhere they are shown.
 function describeUsage(summary) {
-  if (!summary || summary.invocations === undefined) return undefined;
+  // A whole run's summary counts invocations; one agent's own record does not,
+  // and is still usage.
+  if (!summary || (summary.invocations === undefined && summary.inputTokens === undefined && summary.outputTokens === undefined)) return undefined;
   const cost = summary.estimatedCost === undefined
     ? undefined
     : (summary.currency ? summary.currency + " " : "") + summary.estimatedCost.toFixed(4);
@@ -396,7 +398,7 @@ function describeUsage(summary) {
     input: summary.inputTokens ?? 0,
     output: summary.outputTokens ?? 0,
     cached: summary.cacheReadTokens ?? 0,
-    invocations: summary.invocations ?? 0,
+    invocations: summary.invocations,
     cost,
     unpriced: summary.unpricedInvocations ?? 0,
     unpricedModels: summary.unpricedModels ?? [],
@@ -461,26 +463,37 @@ function agentDetail(node, depth) {
   if (node.toolCalls?.length > 0) {
     parts.push(table([
       { label: "Tool", value: (call) => call.tool ?? "—", mono: true },
-      { label: "Result", value: (call) => pill(call.ok === false ? "refused" : "ran", call.ok === false ? "bad" : "ok") },
-      { label: "Reason", value: (call) => ({ text: call.error ?? "", class: "bad" }) },
+      { label: "Result", value: (call) => (call.ok !== false ? pill("ran", "ok") : call.refused ? pill("refused", "bad") : pill("failed", "warn")) },
+      { label: "Reason", value: (call) => ({ text: call.error ?? "", class: call.refused ? "bad" : "warn" }) },
     ], node.toolCalls, "No tool calls."));
   }
-  if (node.usage) parts.push(usagePanelBody(node.usage));
+  parts.push(usagePanelBody(node.usage, { whole: false }));
   return el("div", {
     class: "agent-detail",
     attrs: { style: "padding-left:" + (depth * 20 + 20) + "px" },
   }, parts);
 }
 
-function usagePanelBody(summary) {
+// Who or what decided: the person at a surface, or the policy rule (or its
+// default) that answered without asking anybody.
+function decidedBy(approval) {
+  if (approval.evidence?.decidedBy) return String(approval.evidence.decidedBy);
+  const policy = approval.policy;
+  if (!policy) return "—";
+  return "policy · " + (policy.rule ? "rule '" + policy.rule + "'" : "the section default");
+}
+
+function usagePanelBody(summary, { whole = true } = {}) {
   const described = describeUsage(summary);
-  if (!described) return el("p", { class: "muted", text: "No provider usage was recorded for this run." });
+  if (!described) return el("p", { class: "muted", text: whole ? "No provider usage was recorded for this run." : "No usage was recorded for this agent." });
   return el("div", {}, [
     el("p", { class: "muted", text: "Usage" }),
     pairs([
       ["Tokens", described.tokens.toLocaleString() + " (" + described.input.toLocaleString() + " in, " + described.output.toLocaleString() + " out)"],
       ["Cached", described.cached > 0 ? described.cached.toLocaleString() + " read from cache" : "none"],
-      ["Provider calls", String(described.invocations)],
+      // One agent's record is one invocation with however many requests its
+      // tool loop made; only a whole run can say how many calls that was.
+      ...(described.invocations === undefined ? [] : [["Provider calls", String(described.invocations)]]),
       ["Estimated cost", described.cost ? described.cost : "not priced"],
       ...(described.unpricedModels.length > 0 || !described.cost ? [["", pricingHint(described)]] : []),
       ...(described.unpriced > 0 && described.cost ? [["Unpriced calls", String(described.unpriced)]] : []),
@@ -581,7 +594,8 @@ function renderRunDetail() {
     body.push(table([
       { label: "Tool", value: (row) => row.tool, mono: true },
       { label: "Ran", value: (row) => String(row.ok) },
-      { label: "Refused", value: (row) => ({ text: String(row.failed), class: row.failed > 0 ? "bad" : "" }) },
+      { label: "Failed", value: (row) => ({ text: String(row.failed), class: row.failed > 0 ? "warn" : "" }) },
+      { label: "Refused", value: (row) => ({ text: String(row.refused ?? 0), class: row.refused > 0 ? "bad" : "" }) },
       { label: "First reason", value: (row) => ({ text: row.error ?? "", class: "bad" }) },
     ], outcome.tools, "None."));
   }
@@ -605,11 +619,14 @@ function renderRunDetail() {
     body.push(el("p", { class: "muted", text: "Approvals (" + approvals.length + ")" }));
     body.push(table([
       { label: "Operation", value: (approval) => String(approval.operationKind ?? "—") },
+      { label: "What", value: (approval) => ({ text: String(approval.subject ?? ""), class: "mono" }) },
       { label: "Decision", value: (approval) => ({
         text: String(approval.decision ?? "—"),
         class: approval.decision === "approve-once" ? "ok" : "bad",
       }) },
-      { label: "Decided by", value: (approval) => String(approval.evidence?.decidedBy ?? "—") },
+      // A person, or the rule that decided without asking one.
+      { label: "Decided by", value: (approval) => decidedBy(approval) },
+      { label: "Why", value: (approval) => ({ text: String(approval.reason ?? ""), class: approval.decision === "approve-once" ? "" : "bad" }) },
       { label: "At", value: (approval) => when(approval.at ?? approval.evidence?.decidedAt).text },
     ], approvals, "None."));
   }

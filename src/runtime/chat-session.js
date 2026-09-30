@@ -159,6 +159,7 @@ export function callsOf(outcome, limit = 30) {
       calls.push({
         label: call.label ?? call.tool,
         ok: call.ok === true,
+        ...(call.refused ? { refused: call.refused } : {}),
         ...(call.error ? { error: String(call.error).slice(0, 200) } : {}),
       });
     }

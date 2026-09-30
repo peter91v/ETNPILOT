@@ -30,7 +30,7 @@ test("workspace tools stay inside the workspace and require approval", async () 
 
   // A rejected approval performs no effect and tells the model why.
   const refused = await tools.invoke("write_file", { path: "blocked.txt", content: "x" }, rejecting);
-  assert.deepEqual(refused, { ok: false, error: "Denied by policy.", approved: false });
+  assert.deepEqual(refused, { ok: false, error: "Denied by policy.", approved: false, refused: "declined" });
   await assert.rejects(() => readFile(join(root, "blocked.txt")));
 
   const listed = await tools.invoke("list_files", {}, approving);

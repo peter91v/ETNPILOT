@@ -198,7 +198,7 @@ export async function runChat({
       sessionId = result.sessionId;
       if (streamed) say("");
       else say(`\n${choice.agent}> ${result.reply ?? "(no answer)"}`);
-      for (const call of callsOf(result.outcome)) say(`  ${call.ok ? "did" : "refused"}: ${call.label}${call.ok ? "" : ` — ${call.error ?? "no reason recorded"}`}`);
+      for (const call of callsOf(result.outcome)) say(`  ${call.ok ? "did" : call.refused ? "refused" : "failed"}: ${call.label}${call.ok ? "" : ` — ${call.error ?? "no reason recorded"}`}`);
       say(`  turn ${result.turn} · ${result.status}${usageLine(result.outcome)} · ${result.tokensUsed} tokens in this conversation\n`);
     } catch (error) {
       say(`\n! ${error.message}\n`);

@@ -365,7 +365,7 @@ function message(who, text, { tone = "", meta, extra = [] } = {}) {
 function callChips(calls = []) {
   if (calls.length === 0) return [];
   return [el("div", { class: "attach-row calls" }, calls.map((call) => pill(
-    (call.ok ? "did " : "refused ") + call.label + (call.ok ? "" : " — " + (call.error ?? "no reason recorded")),
+    (call.ok ? "did " : call.refused ? "refused " : "failed ") + call.label + (call.ok ? "" : " — " + (call.error ?? "no reason recorded")),
     call.ok ? "" : "warn",
   )))];
 }

@@ -181,7 +181,7 @@ export function createAnthropicProvider({
         for (const call of requested) {
           context.signal?.throwIfAborted();
           const result = await workspaceTools.invoke(call.name, call.input ?? {}, context);
-          toolCalls.push({ tool: call.name, label: describeCall(call.name, call.input), ok: result.ok === true, ...(result.error ? { error: result.error } : {}), ...(result.afterWrite ? { afterWrite: result.afterWrite } : {}) });
+          toolCalls.push({ tool: call.name, label: describeCall(call.name, call.input), ok: result.ok === true, ...(result.refused ? { refused: result.refused } : {}), ...(result.error ? { error: result.error } : {}), ...(result.afterWrite ? { afterWrite: result.afterWrite } : {}) });
           results.push({
             type: "tool_result",
             tool_use_id: call.id,

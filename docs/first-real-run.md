@@ -215,3 +215,34 @@ The first real conversation. What it showed:
   the host under `policy.operations`.
 - Not addressed: answers are shown as plain text, so the model's Markdown
   (`**…**`, links, fences) appears literally.
+
+### 2026-09-30 — a full workflow run on a phone, against OpenAI (`plan → build → test → review`)
+
+The first real workflow run, through the page. It ended `succeeded`: four steps, the
+build step ran `doctor`, `check doctor` and the whole test suite (486 tests, 0 failed)
+on Android/arm64 under the harness, the merge rehearsal was clean, 101,595 tokens of
+which 72,445 were read from the provider's cache. What it showed:
+
+- **`search_files` was refused every time** ("Operation is denied by the default
+  policy", five times). It asked to read without naming a path, so the generated
+  rule `read-project` (which lists `paths: ["**"]`) matched nothing and the default
+  denied. Its tests approved everything with a stub and could not have said so.
+  Fixed, and a test now runs it under the policy a generated project has.
+- **Fixing that opened a second hole, closed in the same change:** a search reads
+  many files under one approval, so it could have shown the inside of a file
+  `read_file` is forbidden to open (`.env`, `*.pem`). Each candidate is now held to
+  the read policy on its own, and the result says how many it left out.
+- **A missing file was counted as a refusal** ("Tools it used": `read_file … Refused 1`
+  was an `ENOENT`). A tool that ran and failed, and an operation that was not
+  allowed, are different things and are now counted and labelled apart everywhere
+  (page, terminal interface, chat).
+- **"read was reject", five times, with nothing else.** Approvals in the record now
+  carry what they were about and the reason, and the page names who or what decided
+  (a person, or `policy · rule '…'` / `policy · the section default`). A refusal is
+  listed once, not once as an approval and again as a failed tool.
+- **"No provider usage was recorded for this run"** under every agent, while the run
+  above showed 101,595 tokens. The per-agent record has tokens but not a call count,
+  and the reader required the count. It shows the tokens now.
+- **Still open:** the planner looked for `first-real-run.md` at the repository root
+  (it lives in `docs/`) and the run was not told otherwise; `gpt-6-luna` is not
+  priced, so the cost reads "not priced".
