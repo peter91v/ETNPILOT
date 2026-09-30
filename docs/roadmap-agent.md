@@ -35,7 +35,8 @@ Geprüft gegen `git log` und den Code, nicht gegen die Erinnerung. Branch
 | P4.5 `effort:` | ✅ | (dieser Commit) |
 | P4.6 Hooks (`tool.completed`, `afterWrite`) | ✅ | (dieser Commit) |
 | P4.4 `propose_instruction` | ✅ | (dieser Commit) |
-| P5.1, P5.2 | offen | — |
+| P5.1 `page.js` geteilt | ✅ (Ausgabe byteweise identisch; größte Datei 665 Zeilen) | (dieser Commit) |
+| P5.2 | offen | — |
 | P6.2, P6.3 | offen | — |
 
 ### Was ich beim Gegenlesen gefunden habe
@@ -780,7 +781,7 @@ Receipt steht, und ein Plugin `tool.completed` empfängt.
 
 ### P5 — Aufräumen
 
-**P5.1 `page.js` teilen** (A-10) — nach Ansicht in Module, die Strings
+**P5.1 ✅ `page.js` teilen** (A-10) — nach Ansicht in Module, die Strings
 zurückgeben; kein Build-Schritt, keine Abhängigkeit. Der bestehende
 Parse-Check über `new Function(script)` bleibt der Wächter.
 *Fertig wenn:* keine Datei über 800 Zeilen und alle UI-Tests unverändert grün.
