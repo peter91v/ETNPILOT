@@ -16,6 +16,7 @@ settings:
     "content.provenance.**": locked
     "receipts.signing.**": locked
     "supplyChain.**": locked
+    "hooks.**": locked
     "policy.**": stricter-only
     "approval.allow": stricter-only
     "approval.requireHuman": stricter-only
@@ -282,6 +283,13 @@ plugins: []
 #     args: [-y, some-mcp-server]
 #     tools: [search]        # omit to offer every tool the server lists
 mcpServers: {}
+# Commands that run after something happened, watching and never deciding:
+# a hook cannot stop a write, only the policy can. 'afterWrite' is an argv
+# list run after every write_file / edit_file, with {path} replaced by the
+# file; it is asked for like any run_command, so the policy and the approval
+# see it, and its result is in the receipt. Locked: only this file decides.
+# hooks:
+#   afterWrite: [npx, prettier, --write, "{path}"]
 
 workflow:
   concurrency: 1

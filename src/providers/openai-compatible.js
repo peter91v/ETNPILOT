@@ -136,7 +136,7 @@ export function createOpenAICompatibleProvider({
           context.signal?.throwIfAborted();
           const toolName = call.function?.name ?? call.name;
           const result = await workspaceTools.invoke(toolName, call.function?.arguments ?? call.arguments, context);
-          toolCalls.push({ tool: toolName, ok: result.ok === true, ...(result.error ? { error: result.error } : {}) });
+          toolCalls.push({ tool: toolName, ok: result.ok === true, ...(result.error ? { error: result.error } : {}), ...(result.afterWrite ? { afterWrite: result.afterWrite } : {}) });
           messages.push({
             role: "tool",
             tool_call_id: call.id,

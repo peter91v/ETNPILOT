@@ -65,6 +65,8 @@ export class Harness {
     this.instructions = [];
     // Instructions that apply only where a run works: [{scope, path, content}].
     this.scopedInstructions = [];
+    // Observing hooks from the project's configuration; see workspace-tools.
+    this.hooks = {};
     this.approvalPolicy = approvalPolicy;
     this.approvalHandler = approvalHandler;
     this.receiptStore = receiptStore;
@@ -197,6 +199,10 @@ export class Harness {
         signal,
         instructions: [...this.instructions],
         scopedInstructions: [...this.scopedInstructions],
+        hooks: this.hooks,
+        // Tells subscribers a tool call finished. Watching only: nothing a
+        // subscriber returns changes the call.
+        notifyToolCompleted: (info) => this.events.emit("tool.completed", { runId, agent: agentName, ...info }),
         skills: agent.skills.map((name) => this.skills.get(name)),
         spawn: (subagent, subInput) => {
           if (!agent.subagents.includes(subagent)) {

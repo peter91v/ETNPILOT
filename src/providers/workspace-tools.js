@@ -240,7 +240,20 @@ export function createWorkspaceTools({
   return {
     definitions,
     async invoke(name, rawArguments, context) {
-      const result = await invokeTool(name, rawArguments, context);
+      const started = Date.now();
+      let result = await invokeTool(name, rawArguments, context);
+      if (result?.ok === true && (name === "write_file" || name === "edit_file")) {
+        result = await runAfterWrite(result, context);
+      }
+      // A subscriber that fails must not fail the tool it was watching.
+      try {
+        await context?.notifyToolCompleted?.({
+          tool: name,
+          ok: result?.ok === true,
+          durationMs: Date.now() - started,
+          ...(result?.ok === true ? {} : { error: result?.error }),
+        });
+      } catch { /* watching only */ }
       if (scopedInstructions.length > 0 && PATH_TOOLS.has(name) && result?.ok === true && typeof result.path === "string") {
         const due = scopedFor(result.path);
         // Outside the result on purpose: the result is tool output and the
@@ -250,6 +263,26 @@ export function createWorkspaceTools({
       return result;
     },
   };
+
+  // The project's formatter, or whatever it named. Asked for exactly like a
+  // run_command the model had made — policy and approval see it — and its
+  // outcome rides on the write's result, so the receipt shows what ran and
+  // that it did not decide anything: a failing hook never fails the write.
+  async function runAfterWrite(result, context) {
+    const template = context?.hooks?.afterWrite;
+    if (!Array.isArray(template) || template.length === 0 || typeof result.path !== "string") return result;
+    const command = template.map((part) => String(part).replaceAll("{path}", result.path));
+    const ran = await runWorkspaceCommand(root, bounds, { command }, context, signal, sandbox);
+    return {
+      ...result,
+      afterWrite: {
+        command,
+        ok: ran.ok === true,
+        ...(ran.ok === true ? {} : { error: ran.error }),
+        ...(ran.stdout ? { output: tail(ran.stdout) } : {}),
+      },
+    };
+  }
 
   async function invokeTool(name, rawArguments, context) {
       if (!permitted.has(name)) {

@@ -33,7 +33,8 @@ Geprüft gegen `git log` und den Code, nicht gegen die Erinnerung. Branch
 | P4.1 Verzeichnisbezogene Instruktionen | ✅ | `2a9c472` |
 | P4.2 `load_skill` | ✅ | (dieser Commit) |
 | P4.5 `effort:` | ✅ | (dieser Commit) |
-| P4.4, P4.6 | offen | — |
+| P4.6 Hooks (`tool.completed`, `afterWrite`) | ✅ | (dieser Commit) |
+| P4.4 | offen | — |
 | P5.1, P5.2 | offen | — |
 | P6.2, P6.3 | offen | — |
 
@@ -769,7 +770,7 @@ die Vorgabe, das Agentenfeld überschreibt sie.
 *Fertig wenn:* derselbe Provider für zwei Agenten zwei verschiedene
 Request-Bodies schickt und beide im Receipt stehen.
 
-**P4.6 Beobachtende Hooks** (A-18) — ein Ereignis `tool.completed` je
+**P4.6 ✅ Beobachtende Hooks** (A-18) — ein Ereignis `tool.completed` je
 Werkzeugaufruf, für Plugins abonnierbar, und in der Konfiguration ein
 `afterWrite:`-Befehl (etwa ein Formatter), der nach jedem Schreibzugriff läuft,
 durch dieselbe Policy wie jeder `run_command`. Keine blockierenden Hooks — das

@@ -142,6 +142,7 @@ export async function runProject({
       bootstrapPluginsLoaded: true,
       layerRoot: repositoryRoot,
     }).catch((error) => { throw describeProjectLoadError(error, useWorktree); }));
+    harness.hooks = config.hooks ?? {};
     codegraph = createCodegraph(workspace.path, config, { importer: codegraphImporter });
     if (codegraph) {
       try {

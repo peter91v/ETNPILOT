@@ -22,6 +22,7 @@ export const DEFAULT_MODES = Object.freeze({
   "content.provenance.**": "locked",
   "receipts.signing.**": "locked",
   "supplyChain.**": "locked",
+  "hooks.**": "locked",
   "policy.**": "stricter-only",
   "approval.allow": "stricter-only",
   "approval.requireHuman": "stricter-only",
