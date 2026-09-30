@@ -12,8 +12,14 @@ jobs:
   test:
     strategy:
       matrix:
-        node: [22, 24]
-    runs-on: ubuntu-latest
+        node: [22, 24, 26]
+        os: [ubuntu-latest]
+        include:
+          # The one documented real use ran on Node 26 on arm64 (Android);
+          # x64 alone could not have caught the five faults of 23 September.
+          - node: 26
+            os: ubuntu-24.04-arm
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7

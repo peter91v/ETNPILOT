@@ -37,7 +37,8 @@ Geprüft gegen `git log` und den Code, nicht gegen die Erinnerung. Branch
 | P4.4 `propose_instruction` | ✅ | (dieser Commit) |
 | P5.1 `page.js` geteilt | ✅ (Ausgabe byteweise identisch; größte Datei 665 Zeilen) | (dieser Commit) |
 | P5.2 Schema-Wächter für tote Konfiguration | ✅ | (dieser Commit) |
-| P6.2, P6.3 | offen | — |
+| P6.3 CI-Matrix Node 22/24/26 + arm64 | ✅ eingetragen, **noch nicht gelaufen** (lokal nur Node 22) | (dieser Commit) |
+| P6.2 Vorher/nachher-Zahlen | blockiert: braucht einen aufgezeichneten echten Lauf | — |
 
 ### Was ich beim Gegenlesen gefunden habe
 
@@ -815,7 +816,7 @@ Phase nimmt ihre Aufträge neu auf und schreibt die Zahlen in ihren Commit.
 *Fertig wenn:* die Commit-Nachricht von P2.1 die Kosten desselben Auftrags vor
 und nach dem Caching nennt.
 
-**P6.3 CI auf der Plattform, auf der das Projekt läuft** (A-21) — Node 26 in
+**P6.3 ✅ CI auf der Plattform, auf der das Projekt läuft** (A-21) — Node 26 in
 die Matrix, und ein Lauf auf arm64 (`ubuntu-24.04-arm`). Android selbst lässt
 sich in CI nicht vernünftig abbilden; arm64 mit Node 26 fängt den Großteil
 dessen, was am 23.09. gebrochen ist.
