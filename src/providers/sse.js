@@ -1,0 +1,182 @@
+import { ProviderError } from "./router.js";
+
+// Server-sent events, and the two ways a provider's stream is folded back into
+// the single response the rest of the adapter already knows how to read.
+//
+// Streaming exists here for one reason: a long answer over one silent request
+// is a request that can time out before it finishes, and nothing in between
+// can tell "still working" from "gone". The adapters keep their loop exactly
+// as it was — a stream is read to its end and becomes the same payload
+// 'response.json()' would have returned — so tool calls, usage and the receipt
+// do not learn a second shape.
+
+export async function* readEvents(response) {
+  if (!response.body?.getReader) {
+    throw new ProviderError("The provider sent no stream to read.", { code: "stream_missing", retryable: false, safeToRetry: false });
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let boundary = nextBoundary(buffer);
+      while (boundary) {
+        const raw = buffer.slice(0, boundary.index);
+        buffer = buffer.slice(boundary.index + boundary.length);
+        const event = parseEvent(raw);
+        if (event) yield event;
+        boundary = nextBoundary(buffer);
+      }
+    }
+    // Whatever is left has no blank line after it: by the SSE rules an event
+    // is only complete once it does, so a stream cut mid-event ends without it
+    // rather than delivering half a JSON object as though it were whole.
+  } finally {
+    reader.releaseLock?.();
+  }
+}
+
+function nextBoundary(text) {
+  const match = /\r?\n\r?\n/.exec(text);
+  return match ? { index: match.index, length: match[0].length } : undefined;
+}
+
+function parseEvent(raw) {
+  let name;
+  const data = [];
+  for (const line of raw.split(/\r?\n/)) {
+    if (line === "" || line.startsWith(":")) continue;
+    const colon = line.indexOf(":");
+    const field = colon === -1 ? line : line.slice(0, colon);
+    const value = colon === -1 ? "" : line.slice(colon + 1).replace(/^ /, "");
+    if (field === "event") name = value;
+    else if (field === "data") data.push(value);
+  }
+  return data.length === 0 && !name ? undefined : { event: name, data: data.join("\n") };
+}
+
+function parseJson(text, what) {
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new ProviderError(`The provider's stream carried ${what} that is not JSON: ${error.message}`, {
+      code: "stream_protocol",
+      retryable: false,
+      safeToRetry: false,
+    });
+  }
+}
+
+// Anthropic: message_start, then content blocks built from deltas, then
+// message_delta with the stop reason and the final output count.
+export async function collectAnthropicStream(response) {
+  const message = { content: [], usage: {} };
+  const blocks = [];
+  for await (const { event, data } of readEvents(response)) {
+    if (!data || event === "ping") continue;
+    const payload = parseJson(data, `a '${event}' event`);
+    const type = payload.type ?? event;
+    if (type === "message_start") {
+      const start = payload.message ?? {};
+      Object.assign(message, { ...start, content: [] });
+      message.usage = { ...(start.usage ?? {}) };
+    } else if (type === "content_block_start") {
+      blocks[payload.index] = { ...payload.content_block };
+      if (blocks[payload.index].type === "tool_use") blocks[payload.index]._json = "";
+    } else if (type === "content_block_delta") {
+      const block = blocks[payload.index];
+      const delta = payload.delta ?? {};
+      if (!block) continue;
+      if (delta.type === "text_delta") block.text = (block.text ?? "") + delta.text;
+      else if (delta.type === "input_json_delta") block._json = (block._json ?? "") + delta.partial_json;
+      else if (delta.type === "thinking_delta") block.thinking = (block.thinking ?? "") + delta.thinking;
+      // A thinking block is sent back unchanged on the next request, and the
+      // API refuses it without the signature it was given.
+      else if (delta.type === "signature_delta") block.signature = delta.signature;
+    } else if (type === "content_block_stop") {
+      const block = blocks[payload.index];
+      if (block && "_json" in block) {
+        block.input = block._json === "" ? {} : parseJson(block._json, `the arguments of '${block.name}'`);
+        delete block._json;
+      }
+    } else if (type === "message_delta") {
+      Object.assign(message, payload.delta ?? {});
+      message.usage = { ...message.usage, ...(payload.usage ?? {}) };
+    } else if (type === "error") {
+      const kind = payload.error?.type ?? "error";
+      // 'overloaded_error' is the API asking for a retry, mid-stream.
+      const retryable = kind === "overloaded_error" || kind === "api_error";
+      throw new ProviderError(`Provider stream failed (${kind}): ${payload.error?.message ?? "no message"}`, {
+        code: `stream_${kind}`,
+        retryable,
+        safeToRetry: retryable,
+      });
+    }
+  }
+  if (!message.stop_reason) {
+    throw new ProviderError("The provider's stream ended before it said why it stopped.", {
+      code: "stream_truncated",
+      retryable: true,
+      safeToRetry: true,
+    });
+  }
+  message.content = blocks.filter(Boolean);
+  return message;
+}
+
+// OpenAI-compatible: chat.completion.chunk objects, tool calls arriving in
+// pieces keyed by index, and a final chunk with usage when asked for.
+export async function collectChatStream(response) {
+  const message = { role: "assistant", content: "" };
+  const calls = [];
+  let finish;
+  let usage;
+  let model;
+  let id;
+  let sawDone = false;
+  for await (const { data } of readEvents(response)) {
+    if (data === "[DONE]") {
+      sawDone = true;
+      break;
+    }
+    if (!data) continue;
+    const chunk = parseJson(data, "a chunk");
+    if (chunk.error) {
+      throw new ProviderError(`Provider stream failed: ${chunk.error.message ?? "no message"}`, {
+        code: "stream_error",
+        retryable: false,
+        safeToRetry: false,
+      });
+    }
+    model = chunk.model ?? model;
+    id = chunk.id ?? id;
+    usage = chunk.usage ?? usage;
+    const choice = chunk.choices?.[0];
+    if (!choice) continue;
+    const delta = choice.delta ?? {};
+    if (typeof delta.content === "string") message.content += delta.content;
+    for (const piece of delta.tool_calls ?? []) {
+      const call = calls[piece.index ?? 0] ??= { id: undefined, type: "function", function: { name: "", arguments: "" } };
+      call.id = piece.id ?? call.id;
+      call.function.name += piece.function?.name ?? "";
+      call.function.arguments += piece.function?.arguments ?? "";
+    }
+    finish = choice.finish_reason ?? finish;
+  }
+  if (!sawDone && finish === undefined) {
+    throw new ProviderError("The provider's stream ended before it finished.", {
+      code: "stream_truncated",
+      retryable: true,
+      safeToRetry: true,
+    });
+  }
+  const done = calls.filter(Boolean);
+  if (done.length > 0) {
+    message.tool_calls = done;
+    if (message.content === "") message.content = null;
+  }
+  return { id, model, choices: [{ index: 0, message, finish_reason: finish }], usage };
+}

@@ -1,5 +1,6 @@
 import { missingApiKey } from "./openai-compatible.js";
 import { ProviderError } from "./router.js";
+import { collectAnthropicStream } from "./sse.js";
 import { retryAfterMs, withRetry } from "./retry.js";
 import { createWorkspaceTools, lazySkills, skillsOf } from "./workspace-tools.js";
 import { createResultEnvelope } from "./tool-results.js";
@@ -53,6 +54,9 @@ export function createAnthropicProvider({
   // the point is to stay inside it, not to find its edge.
   contextTokens = 120_000,
   extraTools = [],
+  // Read the answer as a stream and fold it into the same payload. Off by
+  // default: it changes how a long answer travels, not what it says.
+  stream = false,
   fetchImpl = globalThis.fetch,
   toolsImpl,
   apiKeySource,
@@ -120,7 +124,9 @@ export function createAnthropicProvider({
           fetchImpl,
           context,
           attempt: number,
+          stream,
           body: {
+            ...(stream ? { stream: true } : {}),
             model: context.agent.model ?? model,
             max_tokens: maxTokens,
             // Only when the agent asks: adaptive thinking is refused by models
@@ -239,7 +245,7 @@ export async function listModels({ baseUrl = DEFAULT_BASE_URL, apiKey, fetchImpl
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
-async function request({ endpoint, apiKey, fetchImpl, context, body }) {
+async function request({ endpoint, apiKey, fetchImpl, context, body, stream }) {
   let response;
   try {
     response = await fetchImpl(endpoint, {
@@ -283,7 +289,14 @@ async function request({ endpoint, apiKey, fetchImpl, context, body }) {
       },
     );
   }
-  return response.json();
+  if (!stream) return response.json();
+  try {
+    return await collectAnthropicStream(response);
+  } catch (error) {
+    // Same rule as a failed status: what already ran tools is not replayed blindly.
+    if (error instanceof ProviderError && bodyHasToolResults(body)) error.safeToRetry = false;
+    throw error;
+  }
 }
 
 async function errorDetail(response) {

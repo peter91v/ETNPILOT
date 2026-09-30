@@ -1,6 +1,7 @@
 import { ProviderError } from "./router.js";
 import { retryAfterMs, withRetry } from "./retry.js";
 import { createWorkspaceTools, lazySkills, skillsOf } from "./workspace-tools.js";
+import { collectChatStream } from "./sse.js";
 import { createResultEnvelope } from "./tool-results.js";
 import { compactConversation } from "./compaction.js";
 
@@ -29,6 +30,9 @@ export function createOpenAICompatibleProvider({
   retry,
   contextTokens = 120_000,
   extraTools = [],
+  // Read the answer as a stream and fold it into the same payload. Off by
+  // default: it changes how a long answer travels, not what it says.
+  stream = false,
   // Which environment variable and which secret this provider was wired to,
   // so a message about a missing key names the one to set rather than the
   // adapter's generic default.
@@ -102,9 +106,12 @@ export function createOpenAICompatibleProvider({
             ...(context.agent.effort ? { reasoning_effort: context.agent.effort } : {}),
             model: context.agent.model ?? model,
             messages,
+            // Usage arrives in a last chunk only when asked for.
+            ...(stream ? { stream: true, stream_options: { include_usage: true } } : {}),
             ...(workspaceTools ? { tools: toolSchema(workspaceTools.definitions), tool_choice: "auto" } : {}),
           },
           reasoningEffortConfigured: extraBody.reasoning_effort !== undefined || Boolean(context.agent.effort),
+          stream,
         }), { ...retry, signal: context.signal });
         payload = attempt.value;
         retried.push(...attempt.tried);
@@ -185,7 +192,7 @@ function normalizeExtraBody(requestBody, reasoningEffort) {
   return body;
 }
 
-async function request({ endpoint, apiKey, fetchImpl, context, body, name, reasoningEffortConfigured }) {
+async function request({ endpoint, apiKey, fetchImpl, context, body, name, reasoningEffortConfigured, stream }) {
   let response;
   try {
     response = await fetchImpl(endpoint, {
@@ -231,7 +238,14 @@ async function request({ endpoint, apiKey, fetchImpl, context, body, name, reaso
       },
     );
   }
-  return response.json();
+  if (!stream) return response.json();
+  try {
+    return await collectChatStream(response);
+  } catch (error) {
+    // Same rule as a failed status: what already ran tools is not replayed blindly.
+    if (error instanceof ProviderError && bodyHasToolResults(body)) error.safeToRetry = false;
+    throw error;
+  }
 }
 
 // A 400 that names 'reasoning_effort' next to function tools is the one

@@ -24,7 +24,8 @@ Geprüft gegen `git log` und den Code, nicht gegen die Erinnerung. Branch
 | P1.4 `fetch_url` | ✅ | `67557dd` |
 | P1.5 Werkzeuge je Agent | ✅ | `acb7633` |
 | P1.6 Fremder Text markiert | ✅ | `67b81d6` |
-| P2.1 Caching, P2.2 Kontextgrenze, P2.3 Budget, P2.4 Retry | ✅ bis auf Streaming | `11c33ae` |
+| P2.1 Caching, P2.2 Kontextgrenze, P2.3 Budget, P2.4 Retry | ✅ | `11c33ae` |
+| P2.4 Streaming | ✅ als Option (`stream: true` je Provider), nur mit Stubs getestet, nie gegen eine echte API | (dieser Commit) |
 | P2.5 `--events jsonl`, P2.6 Poll-Cache | ✅ | `b1eddf7` |
 | P6.1 Evals (`npm run eval`) | ✅ gegen den Scripted-Provider | `ab332cd` |
 | P3.1 `spawn_subagent`, P3.3 `gate`, P3.4 `ask_human` | ✅ | `ce90c94` |
@@ -45,7 +46,7 @@ Geprüft gegen `git log` und den Code, nicht gegen die Erinnerung. Branch
 Drei Stellen, an denen das Dokument oder ein Commit mehr behauptet, als der
 Code hält. Sie gehören hierher, nicht in eine Fußnote.
 
-1. **P2.4 Streaming ist nicht gebaut.** Der Commit `11c33ae` trägt „P2.1–P2.4"
+1. **P2.4 Streaming war nicht gebaut** *(inzwischen als Option `stream: true` nachgeliefert, siehe Tabelle)*. Der Commit `11c33ae` trägt „P2.1–P2.4"
    im Titel, aber geliefert sind Caching, Retry, Kontextgrenze und Budget.
    Beide Adapter schicken weiter eine Anfrage und warten auf die ganze
    Antwort; `stream` steht nur in der Liste der gesperrten Body-Schlüssel
@@ -662,7 +663,7 @@ voreingestellte Obergrenze statt `{}`, kommentiert, warum sie da ist.
 *Fertig wenn:* ein neues Projekt eine Grenze hat und der bestehende
 `budget_exceeded`-Pfad sie auslöst.
 
-**P2.4 ◐ Streaming und Retry** *(Retry ✅, Streaming offen)* (A-9) — beide Adapter streamen; ein `429` oder
+**P2.4 ✅ Streaming und Retry** *(Streaming opt-in, ungeprüft gegen echte APIs)* (A-9) — beide Adapter streamen; ein `429` oder
 `5xx` wird mit Backoff wiederholt, bevor der Router auf einen anderen Provider
 ausweicht, und jeder Versuch steht im Receipt.
 *Fertig wenn:* ein Stub-Provider zweimal 429 liefert und der dritte Versuch
