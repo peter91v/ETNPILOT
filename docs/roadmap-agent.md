@@ -902,3 +902,132 @@ Phase, nicht Empfehlungen daneben:
 P1 und P2 zusammen sind der Unterschied zwischen „läuft" und „brauchbar".
 P6.1 ist der Unterschied zwischen „wir glauben, es ist besser" und „es ist
 besser". Alles darüber ist Ausbau.
+
+
+---
+
+## Teil D — Vor dem ersten Lauf, und ein Chat neben dem Workflow
+
+Stand: alles aus Teil C ist gebaut bis auf P6.2. Was jetzt fehlt, ist weniger
+Funktion als **Beweis** — und eine Bedienung, die man kennt.
+
+### D-1 — Was vor dem ersten echten Lauf fehlt
+
+Geordnet nach dem, was ein Lauf sonst mit Geld bezahlen würde.
+
+1. **`doctor` weiß nichts von dem, was neu ist.** Es prüft Node, sqlite, git
+   und den Provider. Es prüft nicht: ob ein konfigurierter MCP-Server startet,
+   ob `hooks.afterWrite` ein Programm nennt, das es gibt, ob `stream: true`
+   auf einem Provider steht, dessen Endpunkt es nicht kann. Jedes davon würde
+   sich sonst mitten im Lauf zeigen.
+2. **Zwei Evals sind kein Maß.** `write-a-file` und `fix-a-failing-test`
+   messen, ob der Harness arbeitet. Für „arbeitet der Agent gut" fehlen Fälle
+   mit Suchen (`search_files`), mehrdeutigem `edit_file`, einem Reviewer, der
+   nicht schreiben darf, und einem Auftrag, bei dem `ask_human` richtig wäre.
+3. **Streaming, Caching und `effort:` sind nur gegen Stubs gesehen.** Ob eine
+   echte Anthropic- oder OpenAI-Antwort so aussieht, wie die Adapter es
+   erwarten (Thinking-Signatur, `cache_read_input_tokens`, Usage im letzten
+   Chunk), weiß erst ein Lauf. Darum gehört zum ersten Lauf ein
+   `--record-fixtures`: er wird zur Aufnahme, die CI danach kostenlos abspielt.
+4. **Die Kontextgrenze kürzt nur.** Ältere Werkzeugergebnisse werden durch
+   eine Notiz ersetzt, nicht zusammengefasst. Für einen langen Chat reicht
+   das nicht (siehe D-2).
+5. **Kein Bild, kein PDF als Eingabe.** Keine Datei kommt anders in ein
+   Gespräch als über `read_file`.
+6. **Fortschritt ist unsichtbar.** Streaming ist da, aber keine Oberfläche
+   zeigt Text, während er entsteht; alle warten auf das Ende des Schritts.
+7. **PR #27 ist groß** (77 Dateien). Ein Review-Fehler dort ist teurer als
+   einer in einem kleinen PR. Ab jetzt: ein PR je Phase.
+
+### D-2 — Ein Chat, wie man ihn von Claude Code, Codex und opencode kennt
+
+**Ziel.** Neben `etnpilot run "<Auftrag>"` (Workflow: planen → freigeben →
+bauen → prüfen → Merge Request) ein zweiter Einstieg: ein **Gespräch** mit
+einem Agenten, mit Modellwahl, Agentenwahl, Texteingabe und Dateien. Der
+Workflow bleibt, wie er ist; der Chat ersetzt ihn nicht.
+
+**Leitgedanke: ein Chat ist ein Lauf mit Gedächtnis, kein zweites System.**
+Jede Runde geht durch denselben Harness — dieselbe Policy, dieselben
+Freigaben (`approve-once`, `approve-for-run`), dieselben Receipts. Es gibt
+keinen zweiten Vertrauenspfad. Was der Chat hinzufügt, ist nur: ein
+Verlauf, eine Eingabezeile und Kommandos.
+
+| Was man kennt | Wie es hier aussieht |
+|---|---|
+| Nachricht eingeben, Antwort kommt stückweise | Composer; Text erscheint beim Entstehen (`stream: true`, Ereignis `run.delta`) |
+| Modell wählen | `/model` und ein Auswahlfeld; überschreibt `agent.model` für die Sitzung, nur unter dem, was `policy.providers` erlaubt; die Liste kommt von der schon gebauten Live-Abfrage |
+| Agent wählen | `/agent <name>` und ein Auswahlfeld, aus den Manifesten; jeder Agent behält seine `tools:` |
+| Denk-Aufwand | `/effort low|medium|high` (das `effort:`-Feld aus P4.5, pro Sitzung überschreibbar) |
+| Datei anhängen | `@pfad` in der Eingabe (mit Vervollständigung aus `git ls-files`), in der Web-Ansicht zusätzlich Anhängen-Knopf und Ablegen. Der Inhalt geht **als Anhang mit Digest und Grenze** in die Runde — gelesen über dieselbe `read`-Policy, in derselben Hülle wie jedes Werkzeugergebnis |
+| Bild / PDF | später (D5), nur wo der Provider es kann; nie stillschweigend weggelassen |
+| Rückgängig | `/undo` setzt die Arbeitskopie auf den Stand vor der letzten Runde; Grundlage ist ein Schnappschuss je Runde (`git stash create`, verändert nichts) |
+| Kompaktieren | `/compact` fasst ältere Runden zusammen — und **das steht im Receipt**, wie bei der Kontextgrenze |
+| Plan-Modus | `/plan` schaltet den `gate` aus P3.3 vor die nächste schreibende Runde |
+| Kosten | `/cost` und eine Zeile unter jeder Antwort, aus dem Receipt, nicht aus einer zweiten Zählung |
+| Sitzung fortsetzen | `etnpilot chat --resume [id]` |
+
+**Was ETNPilot dabei anders macht, weil es das Projekt ausmacht:**
+
+- Jede Runde hat ein Receipt, und die Sitzung ist die geordnete Liste dieser
+  Receipts. `receipt verify` prüft einen ganzen Chat.
+- Eine Freigabe erscheint **im Verlauf**, mit Diff, an der Stelle, an der sie
+  gebraucht wird — nicht in einem anderen Fenster.
+- Ein Anhang ist Fremdtext: er geht in die Hülle, und das Lesen einer Datei
+  von außerhalb des Projekts setzt die Taint-Regel aus P4.3 in Gang.
+- `/model` kann die Policy nicht aufweichen: ein Modell eines nicht erlaubten
+  Providers wird abgelehnt, bevor die Anfrage rausgeht.
+
+**Bauplan.** Jede Stufe ist für sich mergefähig und hat ein „Fertig wenn".
+
+**D0 — Der Verlauf (Kern, ohne Oberfläche).** Sitzung als
+`.etnpilot/state/sessions/<id>.jsonl` (eine Zeile je Runde: Text, Anhänge
+mit Digest, Agent, Modell, `runId`). Die Provider nehmen einen `history`-Teil
+im Kontext an und stellen ihn der Runde voran; die Kompaktierung gilt für den
+ganzen Verlauf. `openProjectState()` bekommt `chat` — der eine Lesepfad, auf
+dem alle Oberflächen stehen.
+*Fertig wenn:* zwei Runden nacheinander laufen, die zweite den Inhalt der
+ersten kennt, beide Receipts eine gemeinsame `sessionId` tragen und eine
+Sitzung nach einem Neustart weitergeführt werden kann.
+
+**D1 — `etnpilot chat` im Terminal.** Eine Zeile Eingabe, Ausgabe beim
+Entstehen, die Freigabe im Verlauf (`y` / `n` / `a` für „für diesen Lauf").
+Kommandos: `/model`, `/agent`, `/effort`, `/files`, `/clear`, `/help`, `/exit`.
+Zuerst das Terminal, weil es auf Android/Termux ohne Browser läuft und die
+kleinste Fläche hat.
+*Fertig wenn:* ein Test in einem echten pty ein Gespräch mit Scripted-Provider
+führt, eine Schreibfreigabe mit sichtbarem Diff beantwortet, und `/model` einen
+nicht erlaubten Provider abweist.
+
+**D2 — Dateien.** `@pfad` mit Vervollständigung, Grenze je Datei und je
+Runde, Digest im Receipt; Verzeichnisse als Liste; ein Pfad außerhalb des
+Arbeitsverzeichnisses wird abgelehnt.
+*Fertig wenn:* ein angehängter Dateiinhalt in der Anfrage steht, in der Hülle,
+mit Digest im Receipt — und ein Anhang, der „ignoriere deine Anweisungen"
+enthält, nichts an den Freigaben ändert.
+
+**D3 — Die Web-Ansicht „Chat".** Verlauf, Composer, Auswahlfelder für Modell
+und Agent, Anhängen-Knopf, Freigaben inline. Gleiche Material-Tokens, gleiche
+Regel: gerendert und angesehen bei 412 und 1180 px in beiden Farbschemata.
+*Fertig wenn:* der Playwright-Durchlauf die Runde vom Tippen bis zur Freigabe
+ohne `pageerror` und ohne horizontales Scrollen schafft.
+
+**D4 — Die TUI-Ansicht „Chat".** Dieselben Bausteine im Vollbild-Terminal.
+*Fertig wenn:* ein pty-Test sie bei 40 × 20 und 100 × 30 bedient.
+
+**D5 — Streaming sichtbar, Zusammenfassen, Rückgängig, Bilder.** `run.delta`
+in allen drei Oberflächen; `/compact` mit Zusammenfassung im Receipt;
+`/undo` über den Schnappschuss; Bild- und PDF-Anhang für Provider, die es
+können.
+
+**Entscheidung, die ich getroffen habe und die du kippen kannst:** Der Chat
+arbeitet **im Arbeitsverzeichnis**, nicht in einem Worktree (wie Claude Code
+und Codex). Begründung: jede Schreib- und Kommandofreigabe ist ohnehin
+menschlich, und ein Worktree je Sitzung nimmt dem Gespräch die Unmittelbarkeit.
+Dagegen sichert `/undo`, und `etnpilot chat --worktree` gibt die Isolation des
+Workflows zurück. Ein Chat startet nicht in einem Verzeichnis mit
+uncommitteten Änderungen, ohne es zu sagen.
+
+**Was ich bewusst nicht baue:** eine zweite Freigabelogik für den Chat, einen
+„alles erlauben"-Schalter (`--dangerously-skip-permissions` u. ä.), und
+Gedächtnis, das der Agent selbst in Instruktionen schreibt (siehe P4.4:
+Vorschlag, nie angewendet).
