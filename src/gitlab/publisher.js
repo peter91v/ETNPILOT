@@ -13,17 +13,28 @@ export class GitLabPublisher {
     this.client = new GitLabClient({ baseUrl, token, fetchImpl });
   }
 
-  async publish({ cwd, branch, targetBranch = "main", title, description, receipt, receiptProof }) {
+  async publish({ cwd, branch, targetBranch = "main", title, description, receipt, receiptProof, proposalsPath }) {
     const status = await git(["status", "--porcelain"], { cwd });
     if (!status.stdout) throw new Error("Nothing to publish: the worktree has no changes.");
-    await git(["add", "--all"], { cwd });
     // Automated runs carry their own identity so publishing also works where
     // no user.name/user.email is configured, such as CI containers.
-    await git([
+    const commit = (message) => git([
       "-c", `user.name=${this.committer.name}`,
       "-c", `user.email=${this.committer.email}`,
-      "commit", "-m", title,
+      "commit", "-m", message,
     ], { cwd });
+    // Suggested instruction changes travel in a commit of their own, apart
+    // from the work, so a reviewer sees which is which and can drop one.
+    await git(["add", "--all", "--", ".", ...(proposalsPath ? [`:(exclude)${proposalsPath}`] : [])], { cwd });
+    const staged = await git(["diff", "--cached", "--quiet"], { cwd, allowExitCodes: [1] });
+    if (staged.exitCode !== 0) await commit(title);
+    if (proposalsPath) {
+      await git(["add", "--all", "--", proposalsPath], { cwd });
+      const proposed = await git(["diff", "--cached", "--quiet"], { cwd, allowExitCodes: [1] });
+      if (proposed.exitCode !== 0) {
+        await commit("ETNPilot: proposed instruction changes (not applied — read before adopting)");
+      }
+    }
     await git(["push", "--set-upstream", this.remote, branch], { cwd });
     const mergeRequest = await this.client.createMergeRequest(this.project, {
       sourceBranch: branch,

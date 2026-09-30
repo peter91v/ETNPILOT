@@ -5,6 +5,7 @@ import { WORKSPACE_TOOL_DEFINITIONS } from "../providers/workspace-tools.js";
 import { telemetryProviderAttributes } from "../observability/telemetry.js";
 
 const DEFAULT_MAX_SUBAGENT_DEPTH = 4;
+const MAX_PROPOSALS_PER_RUN = 5;
 
 const EFFORT_LEVELS = Object.freeze(["low", "medium", "high"]);
 
@@ -67,6 +68,8 @@ export class Harness {
     this.scopedInstructions = [];
     // Observing hooks from the project's configuration; see workspace-tools.
     this.hooks = {};
+    // Instruction changes agents suggested: never applied, see content/proposals.
+    this.proposals = [];
     this.approvalPolicy = approvalPolicy;
     this.approvalHandler = approvalHandler;
     this.receiptStore = receiptStore;
@@ -245,6 +248,22 @@ export class Harness {
             return { answered: true, text: decision.answer ?? decision.reason ?? "yes" };
           }
           return { answered: false, reason: decision.reason ?? "Not answered." };
+        },
+        propose: (proposal) => {
+          if (this.proposals.length >= MAX_PROPOSALS_PER_RUN) {
+            return { ok: false, error: `At most ${MAX_PROPOSALS_PER_RUN} proposals per run.` };
+          }
+          if (this.proposals.some((entry) => entry.name === proposal.name)) {
+            return { ok: false, error: `'${proposal.name}' is already proposed in this run.` };
+          }
+          this.proposals.push({
+            ...proposal,
+            agent: agentName,
+            // Recorded now: a proposal written after reading outside text is
+            // one a reviewer should read differently.
+            ...(this.taintReason(metadata.workflowRunId ?? runId) ? { tainted: this.taintReason(metadata.workflowRunId ?? runId) } : {}),
+          });
+          return { ok: true, proposed: proposal.name, applied: false, note: "Recorded for review. Nothing has changed." };
         },
         // Called by the one tool that brings in text nobody here wrote.
         taint: (reason) => {

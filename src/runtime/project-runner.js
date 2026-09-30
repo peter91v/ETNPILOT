@@ -33,6 +33,9 @@ import { createTelemetry } from "../observability/telemetry.js";
 import { buildDevcontainerImage, createSandbox, readDevcontainerImage } from "./sandbox.js";
 import { createFixtureRecorder, fixtureProviderFactories, loadFixtures } from "./fixtures.js";
 import { connectMcpTools } from "../providers/mcp-client.js";
+import { describeProposals, summarizeProposal, writeProposals } from "../content/proposals.js";
+
+const PROPOSALS_ROOT = ".etnpilot/proposals";
 
 // Every branch a run publishes from starts here, which is also how a surface
 // tells ETNPilot's own merge requests apart from everyone else's.
@@ -427,6 +430,12 @@ export async function runProject({
     durationMs: Date.now() - startedAt,
     file: bootstrapConfig.observability?.file,
   });
+  // What agents suggested for the project's instructions. Written into the
+  // worktree here, by the harness, after the evidence about the run's own
+  // changes was taken — so it is neither counted as the agent's edit nor
+  // able to alter what the run itself was told.
+  const proposals = dryRun ? [] : harness.proposals;
+  if (proposals.length > 0) await writeProposals(workspace.path, proposals, runId);
   const receiptHash = await receiptStore.append({
     type: "workflow",
     terminal: true,
@@ -443,6 +452,7 @@ export async function runProject({
       ...(mergeTrain ? { mergeTrain } : {}),
     },
     ...(fixtureEvidence ? { fixtures: fixtureEvidence } : {}),
+    ...(proposals.length > 0 ? { proposals: proposals.map(summarizeProposal) } : {}),
     codegraph: codegraphEvidence,
     observability,
     summary,
@@ -461,7 +471,9 @@ export async function runProject({
       branch,
       targetBranch: config.git?.targetBranch ?? "main",
       title: `ETNPilot: ${firstLine(input)}`,
-      description: `Automated ETNPilot run \`${runId}\`. Review the attached evidence before merging.`,
+      description: `Automated ETNPilot run \`${runId}\`. Review the attached evidence before merging.`
+        + describeProposals(proposals, { tainted: proposals.find((entry) => entry.tainted)?.tainted }),
+      proposalsPath: proposals.length > 0 ? PROPOSALS_ROOT : undefined,
       receipt: receiptHash,
       receiptProof: receiptSigner ? {
         algorithm: receiptSigner.algorithm,

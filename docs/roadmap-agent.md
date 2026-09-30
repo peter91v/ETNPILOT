@@ -34,7 +34,7 @@ Geprüft gegen `git log` und den Code, nicht gegen die Erinnerung. Branch
 | P4.2 `load_skill` | ✅ | (dieser Commit) |
 | P4.5 `effort:` | ✅ | (dieser Commit) |
 | P4.6 Hooks (`tool.completed`, `afterWrite`) | ✅ | (dieser Commit) |
-| P4.4 | offen | — |
+| P4.4 `propose_instruction` | ✅ | (dieser Commit) |
 | P5.1, P5.2 | offen | — |
 | P6.2, P6.3 | offen | — |
 
@@ -753,7 +753,7 @@ statt zwölf, ein Zugriff außerhalb des Musters wieder fragt, und der Receipt
 die Reichweite jeder Entscheidung nennt.
 **Nicht ohne die Taint-Regel** (siehe „Sicherheit als Reihenfolge").
 
-**P4.4 Gelerntes als Vorschlag** (A-19) — ein Werkzeug `propose_instruction`,
+**P4.4 ✅ Gelerntes als Vorschlag** (A-19) — ein Werkzeug `propose_instruction`,
 mit dem ein Agent eine Änderung an `.etnpilot/instructions/` vorschlägt. Sie
 wird nicht angewendet, sondern als eigener Commit in die Merge Request des
 Laufs gelegt, klar als Vorschlag markiert. Ein Mensch liest ihn, merged ihn,
