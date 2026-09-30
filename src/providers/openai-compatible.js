@@ -83,7 +83,7 @@ export function createOpenAICompatibleProvider({
         ...(context.history ?? []),
         { role: "user", content: String(context.input) },
       ];
-      const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+      const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, requests: 0 };
       const toolCalls = [];
       const retried = [];
       const compactions = [];
@@ -389,6 +389,9 @@ function toolSchema(definitions) {
 }
 
 function addUsage(total, usage = {}) {
+  // One per answer received: a turn that reads files and then answers is
+  // several requests to the provider, and the provider bills and counts them so.
+  total.requests = (total.requests ?? 0) + 1;
   const normalized = normalizeUsage(usage);
   total.inputTokens += normalized.inputTokens;
   total.outputTokens += normalized.outputTokens;

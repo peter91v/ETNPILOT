@@ -185,7 +185,15 @@ function usageCards() {
       hint: described.input.toLocaleString() + " in · " + described.output.toLocaleString() + " out",
     }),
     summaryCard("From cache", described.cached.toLocaleString(), { accent: "accent", hint: "read rather than sent again" }),
-    summaryCard("Provider calls", described.invocations.toLocaleString(), { accent: "accent", hint: "across every run on disk" }),
+    // The provider counts every request of a tool loop; a call here is one agent
+    // invocation, which can be several. Runs from before requests were counted
+    // only have the invocation figure.
+    summaryCard(described.requests > 0 ? "API requests" : "Provider calls", (described.requests || described.invocations).toLocaleString(), {
+      accent: "accent",
+      hint: described.requests > 0
+        ? described.invocations.toLocaleString() + " agent calls, as the provider counts them"
+        : "agent calls across every run on disk",
+    }),
     summaryCard("Estimated cost", described.cost ?? "not priced", {
       accent: "amber",
       hint: pricingHint(described),
@@ -409,6 +417,7 @@ function describeUsage(summary) {
     output: summary.outputTokens ?? 0,
     cached: summary.cacheReadTokens ?? 0,
     invocations: summary.invocations,
+    requests: summary.requests ?? 0,
     cost,
     unpriced: summary.unpricedInvocations ?? 0,
     unpricedModels: summary.unpricedModels ?? [],
@@ -504,6 +513,7 @@ function usagePanelBody(summary, { whole = true } = {}) {
       // One agent's record is one invocation with however many requests its
       // tool loop made; only a whole run can say how many calls that was.
       ...(described.invocations === undefined ? [] : [["Provider calls", String(described.invocations)]]),
+      ...(described.requests > 0 ? [["API requests", String(described.requests)]] : []),
       ["Estimated cost", described.cost ? described.cost : "not priced"],
       ...(described.unpricedModels.length > 0 || !described.cost ? [["", pricingHint(described)]] : []),
       ...(described.unpriced > 0 && described.cost ? [["Unpriced calls", String(described.unpriced)]] : []),

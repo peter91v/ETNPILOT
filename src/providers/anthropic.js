@@ -103,7 +103,7 @@ export function createAnthropicProvider({
       // the marker in use.
       const envelope = createResultEnvelope(context.runId);
       const system = buildSystemMessage(context, workspaceTools ? envelope : undefined, workspaceTools);
-      const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+      const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, requests: 0 };
       // Marks the last block of a list so everything before it is cached.
       // Anthropic allows four such breakpoints; this uses three — the tools,
       // the system prompt, and a rolling one at the end of the conversation.
@@ -349,6 +349,9 @@ function toolSchema(definitions) {
 }
 
 function addUsage(total, usage = {}) {
+  // One per answer received: a turn that reads files and then answers is
+  // several requests to the provider, and the provider bills and counts them so.
+  total.requests = (total.requests ?? 0) + 1;
   total.inputTokens += usage.input_tokens ?? 0;
   total.outputTokens += usage.output_tokens ?? 0;
   total.cacheReadTokens += usage.cache_read_input_tokens ?? 0;

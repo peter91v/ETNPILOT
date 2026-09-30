@@ -103,7 +103,7 @@ test("the OpenAI-compatible provider runs an approved tool loop", async () => {
   assert.deepEqual(approvals, ["write"]);
   // The record says what was asked of the tool, not only that it ran.
   assert.deepEqual(result.toolCalls, [{ tool: "write_file", label: "write_file out.txt", ok: true }]);
-  assert.deepEqual(result.usage, { inputTokens: 22, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 });
+  assert.deepEqual(result.usage, { inputTokens: 22, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0, requests: 2 });
   // Instructions and skills reach the model, and tool results are fed back.
   assert.match(bodies[0].messages[0].content, /Do the work\.\n\nFollow the checklist\.\n\nSkill text\./);
   // Every tool this agent may use. It declares no subagents, so it is not

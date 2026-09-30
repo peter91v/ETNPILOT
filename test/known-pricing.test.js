@@ -129,3 +129,12 @@ test("a sealed run that says 'not priced' is shown with the cost the table gives
   assert.equal(shown.outcome.usage.unpricedInvocations, 0);
   assert.equal(sealed.outcome.usage.estimatedCost, undefined);
 });
+
+test("requests are counted as the provider counts them, not as agent calls", async () => {
+  const { Telemetry } = await import("../src/observability/telemetry.js");
+  const telemetry = new Telemetry({ enabled: false });
+  telemetry.recordProviderUsage({ workflowRunId: "r", provider: "p", model: "m", usage: { inputTokens: 1, outputTokens: 1, requests: 3 } });
+  const second = telemetry.recordProviderUsage({ workflowRunId: "r", provider: "p", model: "m", usage: { inputTokens: 1, outputTokens: 1, requests: 2 } });
+  assert.equal(second.workflow.requests, 5);
+  assert.equal(second.workflow.invocations, 2);
+});

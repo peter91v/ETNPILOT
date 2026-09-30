@@ -113,6 +113,7 @@ export class Telemetry {
       cacheReadTokens: previous.cacheReadTokens + normalized.cacheReadTokens,
       cacheWriteTokens: previous.cacheWriteTokens + normalized.cacheWriteTokens,
       providerUnits: previous.providerUnits + normalized.providerUnits,
+      requests: previous.requests + normalized.requests,
       estimatedCost: addOptional(previous.estimatedCost, estimatedCost),
       invocations: previous.invocations + 1,
       pricedInvocations: previous.pricedInvocations + (estimatedCost === undefined ? 0 : 1),
@@ -188,6 +189,7 @@ export async function summarizeTelemetryFile(path, { workflowRunId } = {}) {
           summary.cacheReadTokens += attributes["gen_ai.usage.cache_read.input_tokens"] ?? 0;
           summary.cacheWriteTokens += attributes["gen_ai.usage.cache_creation.input_tokens"] ?? 0;
           summary.providerUnits += attributes["etnpilot.provider.usage_units"] ?? 0;
+          summary.requests += attributes["etnpilot.provider.requests"] ?? 0;
           const model = attributes["gen_ai.request.model"] ?? "unknown";
           if (attributes["etnpilot.cost.estimated"] !== undefined) {
             summary.estimatedCost = (summary.estimatedCost ?? 0) + attributes["etnpilot.cost.estimated"];
@@ -330,6 +332,7 @@ function normalizeUsage(usage) {
     cacheReadTokens: nonNegativeInteger(usage.cacheReadTokens ?? 0, "cacheReadTokens"),
     cacheWriteTokens: nonNegativeInteger(usage.cacheWriteTokens ?? 0, "cacheWriteTokens"),
     providerUnits: nonNegative(usage.providerUnits ?? 0, "providerUnits"),
+    requests: nonNegativeInteger(usage.requests ?? 0, "requests"),
   });
 }
 
@@ -468,6 +471,7 @@ function providerAttributes(accounting = {}) {
     "gen_ai.usage.cache_read.input_tokens": accounting.cacheReadTokens,
     "gen_ai.usage.cache_creation.input_tokens": accounting.cacheWriteTokens,
     "etnpilot.provider.usage_units": accounting.providerUnits,
+    "etnpilot.provider.requests": accounting.requests,
     "etnpilot.cost.estimated": accounting.estimatedCost,
     "etnpilot.cost.currency": accounting.currency,
   });
@@ -493,6 +497,7 @@ function emptySummary(currency) {
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
     providerUnits: 0,
+    requests: 0,
     estimatedCost: undefined,
     currency,
     invocations: 0,
