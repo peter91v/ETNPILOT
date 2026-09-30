@@ -411,7 +411,7 @@ function drawThread(thread) {
     if (turn.status === "succeeded") {
       thread.append(message(turn.agent ?? "agent", turn.reply ?? "", {
         tone: "agent",
-        meta: (turn.undone ? "undone · " : "") + "turn " + turn.turn + (turn.runId ? " · run " + turn.runId.slice(0, 8) : "") + (turn.historyOmitted ? " · " + turn.historyOmitted + " earlier exchange(s) left out" : ""),
+        meta: (turn.undone ? "undone · " : "") + "turn " + turn.turn + (turn.runId ? " · run " + turn.runId.slice(0, 8) : "") + (turn.usage ? " · " + (turn.usage.inputTokens + turn.usage.outputTokens) + " tokens" : "") + (turn.historyOmitted ? " · " + turn.historyOmitted + " earlier exchange(s) left out" : ""),
       }));
     } else {
       thread.append(message(turn.agent ?? "agent", turn.error ?? "The turn ended " + turn.status + ".", { tone: "failed", meta: "turn " + turn.turn + " · " + turn.status }));

@@ -341,6 +341,8 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     await webhookServer.close();
   } else if (command === "tui") {
     const root = resolve(values.root);
+    const { quietSqliteWarning } = await import("./quiet-warnings.js");
+    quietSqliteWarning();
     if (!process.stdin.isTTY) {
       throw new Error("The TUI needs an interactive terminal. Use 'etnpilot ui' or the plain commands instead.");
     }

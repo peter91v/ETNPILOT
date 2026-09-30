@@ -68,6 +68,47 @@ What to look for, in order:
 `reasoning_effort` refuses function tools on `/v1/chat/completions`. The error
 says which setting fixes it; see `docs/trying-it-out.md`.
 
+## 1b. A conversation
+
+The same provider, through the chat instead of a run. Nothing here has been
+done against a live API yet; every feature below has only been seen against
+stub providers, so this section is a list of things to *watch*, not things known
+to work.
+
+```bash
+etnpilot chat
+```
+
+It says, before your first message, if the provider the agent would use cannot
+run here (no key, a policy that denies it). Then, in order:
+
+1. **A plain question.** `what does @README.md say about tests?` — the file
+   should show as `attached README.md`, the answer should come back, and the
+   line under it should give tokens and the running total for the conversation.
+   No tokens shown means the provider returned no usage, and the budget below
+   cannot be enforced for it.
+2. **A write.** `create notes.txt containing the word ready` — the approval
+   appears in the conversation with the diff. Answer `n` once and see what the
+   agent does with a refusal; then ask again and answer `y`.
+3. **`/undo`.** `notes.txt` should be gone, and a file you edit by hand between
+   the write and the `/undo` should be left alone and named.
+4. **Memory.** Ask a follow-up that only makes sense with the earlier turn. Then
+   `/compact` and ask another: the model should still know, and
+   `etnpilot receipt show` on the summary run should show it used no tool.
+5. **Streaming.** Set `stream: true` on the provider (`etnpilot config set
+   providers.anthropic.stream true`) and repeat step 1. The answer should
+   appear as it is written and not be printed twice. **If the reply is garbled,
+   cut short, or the tool loop stops, this is the first thing to switch off.**
+6. **Effort.** `/effort high` on Anthropic sends adaptive thinking, which
+   models older than the 4.6 generation refuse. The error will say so.
+7. **The limit.** `chat.budget.maxTotalTokens` (default 1,000,000) bounds the
+   whole conversation, across turns and summaries. Lower it to a few thousand to
+   watch it stop a conversation with a sentence, then raise it again.
+
+To keep the first real conversation as a recording the suite can replay for
+free, run the equivalent single turns with `etnpilot run --record-fixtures`;
+the chat itself does not record yet.
+
 ## 2. A workflow, in a worktree
 
 ```bash

@@ -307,3 +307,51 @@ test("/undo and /compact answer at the prompt, and a failing summary does not en
   t.send("/exit");
   await done;
 });
+
+test("a conversation is bounded as a whole, and says how to go on", async () => {
+  const root = await project();
+  const { readFile: read, writeFile: write } = await import("node:fs/promises");
+  const file = join(root, ".etnpilot", "etnpilot.yaml");
+  await write(file, (await read(file, "utf8")).replace("maxTotalTokens: 1000000", "maxTotalTokens: 50"));
+  const used = {
+    scripted: async () => ({
+      name: "scripted",
+      capabilities: ["chat"],
+      async invoke() { return { text: "ok", model: "m", usage: { inputTokens: 40, outputTokens: 20 } }; },
+    }),
+  };
+  const t = terminal();
+  const done = runChat({ root, input: t.input, output: t.output, interactive: true, providerFactories: used });
+  await t.until(/you> /);
+  t.send("one");
+  await t.until(/turn 1 · succeeded · 40 in, 20 out · m · 60 tokens in this conversation/);
+  t.send("two");
+  await t.until(/! This conversation has used 60 tokens; the limit is 50 \('chat\.budget\.maxTotalTokens'\)\. Start a new conversation, or raise the limit\./);
+  // A new conversation starts from zero.
+  t.send("/clear");
+  await t.until(/New conversation/);
+  t.send("three");
+  await t.until(/turn 1 · succeeded/);
+  t.send("/exit");
+  await done;
+});
+
+test("a provider that cannot run is said so before the first message, not in its answer", async () => {
+  const root = await project();
+  const t = terminal();
+  const { readFile: read, writeFile: write } = await import("node:fs/promises");
+  const file = join(root, ".etnpilot", "etnpilot.yaml");
+  // Route the default agent to a provider that needs a key nobody has set.
+  await write(file, (await read(file, "utf8")).replace(/defaultProvider:.*/, "defaultProvider: anthropic"));
+  const saved = process.env.ANTHROPIC_API_KEY;
+  delete process.env.ANTHROPIC_API_KEY;
+  try {
+    const done = runChat({ root, input: t.input, output: t.output, interactive: true });
+    await t.until(/you> /);
+    await t.until(/! No routed provider can run here/);
+    t.send("/exit");
+    await done;
+  } finally {
+    if (saved !== undefined) process.env.ANTHROPIC_API_KEY = saved;
+  }
+});

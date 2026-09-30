@@ -1,4 +1,6 @@
 import { createInterface } from "node:readline";
+import { quietSqliteWarning } from "./quiet-warnings.js";
+import { diagnose } from "../runtime/diagnose.js";
 import { join, resolve } from "node:path";
 import { loadConfig } from "../config/load.js";
 import { PolicyEngine } from "../policy/engine.js";
@@ -33,6 +35,7 @@ export async function runChat({
   if (!interactive) {
     throw new Error("Chat needs an interactive terminal. For a single request use 'etnpilot run'.");
   }
+  const restoreWarnings = interactive ? quietSqliteWarning() : () => {};
   const projectRoot = resolve(root);
   const config = await loadConfig(join(projectRoot, ".etnpilot", "etnpilot.yaml"), env);
   const policy = new PolicyEngine(config.policy);
@@ -44,6 +47,7 @@ export async function runChat({
   const chosen = agent ?? known.defaultAgent ?? "orchestrator";
   if (!names.includes(chosen)) {
     state.close();
+    restoreWarnings();
     throw new Error(`Unknown agent '${chosen}'. This project has: ${names.join(", ") || "none"}.`);
   }
 
@@ -53,6 +57,7 @@ export async function runChat({
     sessionId = resume === "last" ? sessions[0]?.id : resume;
     if (!sessionId || !(await readSession(projectRoot, sessionId)).exists) {
       state.close();
+      restoreWarnings();
       throw new Error(resume === "last" ? "There is no conversation to resume." : `No conversation '${resume}'.`);
     }
   }
@@ -128,6 +133,7 @@ export async function runChat({
   } finally {
     readline.close();
     state.close();
+    restoreWarnings();
   }
   return 0;
 
@@ -140,6 +146,12 @@ export async function runChat({
       say(`Note: ${count} uncommitted change${count === 1 ? "" : "s"} in this directory. The agent works here, not in a copy; every write is still asked for.`);
     }
     say("/help lists the commands.");
+    // Before the first message rather than in its answer: a missing key found
+    // by spending a turn is one turn too late.
+    const health = await diagnose(projectRoot).catch(() => undefined);
+    if (health?.routing && health.routing.usable === null && health.routing.agent === choice.agent) {
+      say(`! ${health.routing.hints.join(" ")}`);
+    }
   }
 
   async function turn(text) {
@@ -183,7 +195,7 @@ export async function runChat({
       sessionId = result.sessionId;
       if (streamed) say("");
       else say(`\n${choice.agent}> ${result.reply ?? "(no answer)"}`);
-      say(`  turn ${result.turn} · ${result.status}${usageLine(result.outcome)}\n`);
+      say(`  turn ${result.turn} · ${result.status}${usageLine(result.outcome)} · ${result.tokensUsed} tokens in this conversation\n`);
     } catch (error) {
       say(`\n! ${error.message}\n`);
     } finally {

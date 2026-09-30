@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { appendFile, mkdir, readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { loadConfig } from "../config/load.js";
 import { boundHistory } from "../core/history.js";
 import { composeTurnInput, summarizeAttachments } from "./chat-attachments.js";
 import { pinSnapshot, snapshotTree, undoBetween } from "./chat-snapshots.js";
@@ -134,6 +135,42 @@ export function historyFrom(turns, compactions = []) {
   return messages;
 }
 
+// What the run cost in tokens, from the result the provider returned.
+export function usageOf(outcome) {
+  for (const step of Object.values(outcome?.summary?.steps ?? {})) {
+    const result = step?.result?.result ?? step?.result;
+    const usage = result?.usage;
+    if (usage && (usage.inputTokens || usage.outputTokens)) {
+      return { inputTokens: usage.inputTokens ?? 0, outputTokens: usage.outputTokens ?? 0, ...(result.model ? { model: result.model } : {}) };
+    }
+  }
+  return undefined;
+}
+
+export const DEFAULT_MAX_SESSION_TOKENS = 1_000_000;
+
+// Everything this conversation has spent: its turns and its summaries.
+export function sessionTokens(session) {
+  const add = (total, entry) => total + (entry.usage?.inputTokens ?? 0) + (entry.usage?.outputTokens ?? 0);
+  return [...session.turns, ...(session.compactions ?? [])].reduce(add, 0);
+}
+
+// Each turn is a run with its own workflow budget; nothing bounded the
+// conversation as a whole, so a long chat could spend without limit one
+// affordable turn at a time. This does, and says how to go on.
+async function assertWithinBudget(root, session, env) {
+  const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"), env ?? process.env).catch(() => undefined);
+  const limit = config?.chat?.budget?.maxTotalTokens ?? DEFAULT_MAX_SESSION_TOKENS;
+  const used = sessionTokens(session);
+  if (used >= limit) {
+    throw new Error(
+      `This conversation has used ${used} tokens; the limit is ${limit} ('chat.budget.maxTotalTokens').`
+      + " Start a new conversation, or raise the limit.",
+    );
+  }
+  return { used, limit };
+}
+
 // The agent's answer, wherever this run kept it.
 export function replyOf(outcome) {
   for (const step of Object.values(outcome?.summary?.steps ?? {})) {
@@ -159,6 +196,7 @@ export async function runChatTurn({
   const id = sessionId ?? createSessionId();
   assertId(id);
   const prior = await readSession(root, id);
+  await assertWithinBudget(root, prior, runOptions.env);
   const number = prior.turns.length + 1;
   const bounded = boundHistory(historyFrom(prior.turns, prior.compactions));
   const run = runner ?? (await import("./project-runner.js")).runProject;
@@ -207,11 +245,13 @@ export async function runChatTurn({
     ...(attachments.length > 0 ? { attachments: summarizeAttachments(attachments) } : {}),
     runId: outcome.runId,
     status,
+    ...(usageOf(outcome) ? { usage: usageOf(outcome) } : {}),
     snapshots: before && after ? { before, after } : { unavailable: dryRun ? "a dry run" : "not a git repository" },
     ...(reply !== undefined ? { reply } : {}),
     ...(bounded.omitted > 0 ? { historyOmitted: bounded.omitted } : {}),
   });
-  return { sessionId: id, turn: number, reply, status, record: turn, outcome };
+  const totals = { used: sessionTokens({ turns: [...prior.turns, turn], compactions: prior.compactions }) };
+  return { sessionId: id, turn: number, reply, status, record: turn, outcome, tokensUsed: totals.used };
 }
 
 // Whether the conversation is what it claims to be: every turn's run has a
@@ -302,6 +342,7 @@ export async function compactSession({ root, sessionId, agent, runner, now = () 
   const check = await compactionCheck(root, sessionId);
   if (!check.ok) return check;
   const { prior, covered, fresh } = check;
+  await assertWithinBudget(root, prior, runOptions.env);
   const upToTurn = prior.turns.at(-1).turn;
   const run = runner ?? (await import("./project-runner.js")).runProject;
   const outcome = await run({
@@ -318,6 +359,6 @@ export async function compactSession({ root, sessionId, agent, runner, now = () 
   if (outcome.status !== "succeeded" || typeof summary !== "string" || summary.trim() === "") {
     return { ok: false, message: `The summary was not written (the run ended ${outcome.status ?? "without an answer"}); the conversation is unchanged.` };
   }
-  await appendTurn(root, sessionId, { type: "compact", at: now().toISOString(), upToTurn, turns: fresh.length, runId: outcome.runId, summary: summary.trim() });
+  await appendTurn(root, sessionId, { type: "compact", at: now().toISOString(), upToTurn, turns: fresh.length, runId: outcome.runId, summary: summary.trim(), ...(usageOf(outcome) ? { usage: usageOf(outcome) } : {}) });
   return { ok: true, upToTurn, summary: summary.trim(), runId: outcome.runId, message: `Turns ${covered + 1}–${upToTurn} are now carried as a summary (${summary.trim().length} characters). The turns themselves are unchanged on disk.` };
 }

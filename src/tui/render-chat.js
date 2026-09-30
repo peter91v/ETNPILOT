@@ -55,7 +55,7 @@ function threadLines(chat, { style, width }) {
     }
     if (turn.status === "succeeded") {
       say("agent", turn.reply ?? "", "ok");
-      lines.push(`      ${style.dim(`turn ${turn.turn}${turn.runId ? ` · run ${turn.runId.slice(0, 8)}` : ""}${turn.historyOmitted ? ` · ${turn.historyOmitted} earlier exchange(s) left out` : ""}`)}`);
+      lines.push(`      ${style.dim(`turn ${turn.turn}${turn.runId ? ` · run ${turn.runId.slice(0, 8)}` : ""}${turn.usage ? ` · ${turn.usage.inputTokens + turn.usage.outputTokens} tokens` : ""}${turn.historyOmitted ? ` · ${turn.historyOmitted} earlier exchange(s) left out` : ""}`)}`);
     } else {
       say("agent", turn.error ?? `The turn ended ${turn.status}.`, "bad");
     }

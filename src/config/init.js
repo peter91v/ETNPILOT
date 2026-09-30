@@ -185,6 +185,13 @@ observability:
     maxEstimatedCostPerWorkflow: 5
     maxInputTokensPerWorkflow: 2000000
     maxOutputTokensPerWorkflow: 200000
+# A conversation as a whole ('etnpilot chat' and the Chat views). Each turn is a
+# run with its own budget above; nothing else bounded the sum, so a long chat
+# could spend without limit one affordable turn at a time. Tokens, input and
+# output together, across turns and summaries. Raise it for real work.
+chat:
+  budget:
+    maxTotalTokens: 1000000
 approval:
   allow: [read]
   requireHuman: [write, shell, network]
