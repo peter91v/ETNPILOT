@@ -85,6 +85,9 @@ test("the harness turns it into an event a plugin can subscribe to", async () =>
   assert.equal(seen[0].agent, "a");
 });
 
-test("hooks are locked: a local file cannot add a command to run", () => {
+test("hooks and MCP servers are locked: a local file cannot add a command to run", () => {
   assert.equal(DEFAULT_MODES["hooks.**"], "locked");
+  // A server is a process that starts with the run, before any tool call is
+  // asked for, so it is decided by the committed file alone.
+  assert.equal(DEFAULT_MODES["mcpServers.**"], "locked");
 });

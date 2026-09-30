@@ -23,6 +23,7 @@ export const DEFAULT_MODES = Object.freeze({
   "receipts.signing.**": "locked",
   "supplyChain.**": "locked",
   "hooks.**": "locked",
+  "mcpServers.**": "locked",
   "policy.**": "stricter-only",
   "approval.allow": "stricter-only",
   "approval.requireHuman": "stricter-only",
@@ -92,6 +93,16 @@ export async function readLayers(projectFile, { env = process.env, layerRoot, us
 
 // Modes are read from the committed default only. A local file that could
 // relax its own limits would not be a limit at all.
+// Settings that start a process or run a command. A project created before
+// they existed declares its own list of modes without them, and "the committed
+// file decides" would then leave them open — a local file could add a command.
+// So they are locked underneath whatever the project declares; a project that
+// wants one open says so by naming it.
+const EXECUTABLE_LOCKS = Object.freeze({
+  "hooks.**": "locked",
+  "mcpServers.**": "locked",
+});
+
 export function readModes(projectData = {}) {
   const declared = projectData?.settings?.modes;
   if (declared === undefined) return { ...DEFAULT_MODES };
@@ -101,7 +112,7 @@ export function readModes(projectData = {}) {
       throw new TypeError(`settings.modes['${pattern}'] must be one of ${MODES.join(", ")}; got '${mode}'.`);
     }
   }
-  return { ...declared };
+  return { ...EXECUTABLE_LOCKS, ...declared };
 }
 
 export function modeFor(path, modes) {

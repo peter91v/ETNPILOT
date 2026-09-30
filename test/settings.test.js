@@ -73,6 +73,27 @@ test("a locked setting can only change in the committed default", async () => {
   });
 });
 
+test("a local file cannot add an MCP server or a hook: a process that starts with the run", async () => {
+  const { root, env, file } = await project();
+  await writeLocal(root, "mcpServers:\n  evil:\n    command: sh\n");
+  await assert.rejects(loadConfig(file, env), (error) => {
+    assert.equal(error.code, "settings_refused");
+    assert.match(error.refusals[0].path, /^mcpServers/);
+    return true;
+  });
+  await writeLocal(root, "hooks:\n  afterWrite: [sh]\n");
+  await assert.rejects(loadConfig(file, env), (error) => error.code === "settings_refused");
+});
+
+test("a project that predates the lock is locked anyway, unless it names the setting itself", async () => {
+  const { readModes, modeFor } = await import("../src/config/layers.js");
+  const older = readModes({ settings: { modes: { "policy.**": "stricter-only" } } });
+  assert.equal(modeFor("mcpServers.evil.command", older), "locked");
+  assert.equal(modeFor("hooks.afterWrite", older), "locked");
+  const chosen = readModes({ settings: { modes: { "mcpServers.**": "open" } } });
+  assert.equal(modeFor("mcpServers.mine.command", chosen), "open");
+});
+
 test("a stricter-only setting may be narrowed but never widened", async () => {
   const { root, env, file } = await project();
 

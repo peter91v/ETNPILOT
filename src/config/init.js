@@ -17,6 +17,7 @@ settings:
     "receipts.signing.**": locked
     "supplyChain.**": locked
     "hooks.**": locked
+    "mcpServers.**": locked
     "policy.**": stricter-only
     "approval.allow": stricter-only
     "approval.requireHuman": stricter-only
