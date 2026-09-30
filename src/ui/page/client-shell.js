@@ -168,12 +168,19 @@ async function refresh({ force = false } = {}) {
   }
   holding = false;
   try {
-    state = await api("/api/state?runs=" + runLimit);
+    const fetched = await api("/api/state?runs=" + runLimit);
+    // Nothing new: leave the page as it is. Redrawing identical content every
+    // few seconds is what reset a scrolled table or a half-typed field.
+    const { generatedAt: _stamp, ...content } = fetched;
+    const signature = JSON.stringify(content) + "|" + view;
+    const unchanged = state !== undefined && signature === lastStateSignature && !force;
+    lastStateSignature = signature;
+    state = fetched;
     const root = state.root ?? "";
     const title = $("context-title");
     title.textContent = root.split("/").filter(Boolean).at(-1) ?? "this project";
     title.title = root;
-    render();
+    if (!unchanged) render();
     clearError();
     // The conversation lives on the server; while this view is open it is read
     // on the same beat as everything else.
@@ -191,6 +198,7 @@ async function refresh({ force = false } = {}) {
 }
 
 let usageSignature;
+let lastStateSignature;
 // How many receipts the list asks for; 'Show more' raises it.
 let runLimit = 20;
 

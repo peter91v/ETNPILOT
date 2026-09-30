@@ -449,8 +449,44 @@ function closeSidebar() {
 
 // ------------------------------------------------------------- the views
 
+// Drawing replaces the view's elements, and a replaced element starts at
+// scroll 0: a table scrolled sideways, a long receipt, the page itself all
+// jumped back to the origin on every refresh. What was scrolled is noted by
+// its place in the tree and put back where it was after the new one is drawn.
+let renderedView;
+
+function scrollPath(node) {
+  const parts = [];
+  for (let at = node; at && at !== document.body; at = at.parentElement) {
+    parts.push(at.tagName + ":" + Array.prototype.indexOf.call(at.parentElement?.children ?? [], at));
+  }
+  return parts.join("/");
+}
+
 function render() {
   if (!state) return;
+  const page = { x: window.scrollX, y: window.scrollY };
+  const kept = [];
+  for (const node of document.body.querySelectorAll("*")) {
+    if (node.scrollTop > 0 || node.scrollLeft > 0) kept.push({ path: scrollPath(node), top: node.scrollTop, left: node.scrollLeft });
+  }
+  const sameView = renderedView === view;
+  renderedView = view;
+  draw();
+  if (sameView && kept.length > 0) {
+    const byPath = new Map();
+    for (const node of document.body.querySelectorAll("*")) {
+      if (node.scrollHeight > node.clientHeight || node.scrollWidth > node.clientWidth) byPath.set(scrollPath(node), node);
+    }
+    for (const entry of kept) {
+      const node = byPath.get(entry.path);
+      if (node) { node.scrollTop = entry.top; node.scrollLeft = entry.left; }
+    }
+  }
+  if (sameView && (window.scrollX !== page.x || window.scrollY !== page.y)) window.scrollTo(page.x, page.y);
+}
+
+function draw() {
   renderNav();
   renderRuntime();
   if (view === "overview") renderOverview();
