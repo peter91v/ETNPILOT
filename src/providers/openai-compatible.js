@@ -1,6 +1,6 @@
 import { ProviderError } from "./router.js";
 import { retryAfterMs, withRetry } from "./retry.js";
-import { createWorkspaceTools } from "./workspace-tools.js";
+import { createWorkspaceTools, lazySkills, skillsOf } from "./workspace-tools.js";
 import { createResultEnvelope } from "./tool-results.js";
 import { compactConversation } from "./compaction.js";
 
@@ -69,12 +69,13 @@ export function createOpenAICompatibleProvider({
           canSpawn: (context.agent.subagents ?? []).length > 0,
           extraTools: context.extraTools ?? extraTools,
           scopedInstructions: context.scopedInstructions,
+          skills: skillsOf(context),
           fetchImpl,
         })
         : undefined;
       const envelope = createResultEnvelope(context.runId);
       const messages = [
-        { role: "system", content: buildSystemMessage(context, workspaceTools ? envelope : undefined) },
+        { role: "system", content: buildSystemMessage(context, workspaceTools ? envelope : undefined, workspaceTools) },
         { role: "user", content: String(context.input) },
       ];
       const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
@@ -332,9 +333,16 @@ function bodyHasToolResults(body) {
   return (body.messages ?? []).some((message) => message.role === "tool");
 }
 
-function buildSystemMessage(context, envelope) {
+function buildSystemMessage(context, envelope, tools) {
   const parts = [context.agent.prompt, ...context.instructions];
-  for (const skill of context.skills ?? []) parts.push(skill?.content ?? String(skill));
+  // Listed by name when the agent can open them; sent whole when it cannot,
+  // because a skill it may neither see nor load would be a skill it lacks.
+  const lazy = lazySkills(context, tools);
+  if (lazy.length > 0) {
+    parts.push(["Skills you can load with load_skill (name: what it is for):", ...lazy.map((skill) => `- ${skill.name}: ${skill.summary}`)].join("\n"));
+  } else {
+    for (const skill of context.skills ?? []) parts.push(skill?.content ?? String(skill));
+  }
   // Last, so it is the most recent thing said about how to read what follows.
   if (envelope) parts.push(envelope.instruction);
   return parts.filter(Boolean).join("\n\n");

@@ -110,7 +110,7 @@ test("the Anthropic provider runs an approved tool loop", async () => {
   // offered the one tool the harness would refuse it anyway.
   assert.deepEqual(
     bodies[0].tools.map((tool) => tool.name ?? tool.function?.name).sort(),
-    WORKSPACE_TOOL_DEFINITIONS.map((one) => one.name).filter((name) => name !== "spawn_subagent").sort(),
+    WORKSPACE_TOOL_DEFINITIONS.map((one) => one.name).filter((name) => name !== "spawn_subagent" && name !== "load_skill").sort(),
   );
   assert.equal(bodies[0].tools[0].input_schema.type, "object");
   const back = bodies[1].messages.at(-1);

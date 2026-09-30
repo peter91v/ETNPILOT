@@ -109,6 +109,19 @@ export const WORKSPACE_TOOL_DEFINITIONS = Object.freeze([
     },
   },
   {
+    name: "load_skill",
+    description:
+      "Load the full text of one of your skills, listed by name in your instructions."
+      + " Load it when the task calls for it, not in advance: a skill you never open costs nothing."
+      + " Loading changes nothing and needs no approval.",
+    parameters: {
+      type: "object",
+      properties: { name: { type: "string", description: "The skill's name, exactly as listed." } },
+      required: ["name"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "spawn_subagent",
     description:
       "Hand a piece of work to another agent and get back what it produced."
@@ -165,12 +178,13 @@ export const WORKSPACE_TOOL_DEFINITIONS = Object.freeze([
 // Enforced twice on purpose. The filtered list is what the model is offered,
 // and 'invoke' refuses anything outside it — a model can name a tool nobody
 // showed it, and an offer is not a boundary.
-function allowedDefinitions(allowed, { canSpawn = true } = {}) {
-  const offered = canSpawn
-    ? WORKSPACE_TOOL_DEFINITIONS
-    // An agent with no 'subagents' has nothing it may spawn, so offering the
-    // tool is offering a refusal.
-    : WORKSPACE_TOOL_DEFINITIONS.filter((definition) => definition.name !== "spawn_subagent");
+function allowedDefinitions(allowed, { canSpawn = true, hasSkills = true } = {}) {
+  // An agent with no 'subagents' has nothing it may spawn, and one with no
+  // skills has nothing to load: offering either is offering a refusal.
+  const offered = WORKSPACE_TOOL_DEFINITIONS.filter((definition) => (
+    (canSpawn || definition.name !== "spawn_subagent")
+    && (hasSkills || definition.name !== "load_skill")
+  ));
   if (allowed === undefined) return offered;
   const wanted = new Set(allowed);
   return offered.filter((definition) => wanted.has(definition.name));
@@ -183,6 +197,9 @@ export function createWorkspaceTools({
   sandbox,
   allowed,
   canSpawn = true,
+  // The agent's skills: [{name, content}]. Listed by name in the prompt and
+  // opened here on request, instead of all being sent every time.
+  skills = [],
   // Tools from somewhere else — an MCP server the project configured. They
   // join the same list so that one approval path, one allow-list and one
   // receipt cover them too.
@@ -198,7 +215,7 @@ export function createWorkspaceTools({
   const bounds = { ...DEFAULT_LIMITS, ...limits };
   const extra = new Map(extraTools.map((tool) => [tool.definition.name, tool]));
   const definitions = [
-    ...allowedDefinitions(allowed, { canSpawn }),
+    ...allowedDefinitions(allowed, { canSpawn, hasSkills: skills.length > 0 }),
     ...extraTools
       .filter((tool) => allowed === undefined || allowed.includes(tool.definition.name))
       .map((tool) => tool.definition),
@@ -257,6 +274,7 @@ export function createWorkspaceTools({
         case "search_files": return searchWorkspaceFiles(root, bounds, args, context, signal);
         case "write_file": return writeWorkspaceFile(root, bounds, args, context);
         case "edit_file": return editWorkspaceFile(root, bounds, args, context);
+        case "load_skill": return loadSkill(skills, args);
         case "ask_human": return askHuman(args, context);
         case "spawn_subagent": return spawnSubagent(args, context);
         case "fetch_url": return fetchWorkspaceUrl(bounds, args, context, signal, fetchImpl);
@@ -264,6 +282,21 @@ export function createWorkspaceTools({
         default: return { ok: false, error: `Unknown tool '${name}'.` };
       }
   }
+}
+
+// Pinned project content, not tool output: it comes back beside the result the
+// way scoped instructions do, outside the envelope that calls its contents data.
+function loadSkill(skills, args) {
+  const skill = skills.find((entry) => entry.name === args.name);
+  if (!skill) {
+    return { ok: false, error: `No skill named '${args.name}'. Available: ${skills.map((entry) => entry.name).join(", ")}.` };
+  }
+  return {
+    ok: true,
+    path: `skills/${skill.name}`,
+    loaded: skill.name,
+    projectInstructions: [{ label: `Skill '${skill.name}'`, content: skill.content }],
+  };
 }
 
 async function readWorkspaceFile(root, bounds, args, context) {
@@ -766,4 +799,27 @@ function denied(decision) {
 
 function describe(error) {
   return `${error.code ? `${error.code}: ` : ""}${error.message}`;
+}
+
+// A skill's one line: what the file says it is for. 'description:' in front
+// matter if there is any, else the first line of prose that is not a heading.
+export function skillSummary(content = "") {
+  const front = /^---\n([\s\S]*?)\n---/.exec(content);
+  const described = front && /^description:\s*(.+)$/m.exec(front[1]);
+  if (described) return described[1].trim().replace(/^["']|["']$/g, "").slice(0, 200);
+  const body = front ? content.slice(front[0].length) : content;
+  const line = body.split("\n").map((entry) => entry.trim()).find((entry) => entry && !entry.startsWith("#"));
+  return (line ?? "(no description)").slice(0, 200);
+}
+
+// The named skills of a run, as the tools and the prompt both need them.
+export function skillsOf(context) {
+  return (context.skills ?? [])
+    .filter((skill) => skill && typeof skill === "object" && skill.name)
+    .map((skill) => ({ name: skill.name, content: skill.content ?? "", summary: skill.summary ?? skillSummary(skill.content) }));
+}
+
+// Skills to list rather than send: only when this agent can actually load them.
+export function lazySkills(context, tools) {
+  return tools?.definitions?.some((definition) => definition.name === "load_skill") ? skillsOf(context) : [];
 }

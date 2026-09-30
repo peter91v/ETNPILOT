@@ -44,7 +44,7 @@ export function createResultEnvelope(runId = randomUUID()) {
       const wrapped = this.wrap(data);
       if (!Array.isArray(projectInstructions) || projectInstructions.length === 0) return wrapped;
       const notes = projectInstructions
-        .map((entry) => `Project instructions for ${entry.scope}/ (${entry.path}):\n${entry.content}`)
+        .map((entry) => `${entry.label ?? `Project instructions for ${entry.scope}/ (${entry.path})`}:\n${entry.content}`)
         .join("\n\n");
       return `${wrapped}\n\n${notes}`;
     },

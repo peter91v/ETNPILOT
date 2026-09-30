@@ -58,7 +58,8 @@ test("an agent is offered only its own tools, and refused the rest", async () =>
 
 test("no list means every tool, which is what every agent had before", async () => {
   const root = await mkdtemp(join(tmpdir(), "etnpilot-privilege-all-"));
-  const tools = createWorkspaceTools({ workingDirectory: root });
+  // With something to load; load_skill is offered only to an agent with skills.
+  const tools = createWorkspaceTools({ workingDirectory: root, skills: [{ name: "s", content: "x" }] });
   assert.deepEqual(tools.definitions, WORKSPACE_TOOL_DEFINITIONS);
 });
 
@@ -82,7 +83,7 @@ test("the provider offers the agent's list, not the provider's", async () => {
   await provider.invoke(context("builder"));
   assert.deepEqual(
     bodies[1].tools.map((tool) => tool.name).sort(),
-    WORKSPACE_TOOL_DEFINITIONS.map((one) => one.name).filter((name) => name !== "spawn_subagent").sort(),
+    WORKSPACE_TOOL_DEFINITIONS.map((one) => one.name).filter((name) => name !== "spawn_subagent" && name !== "load_skill").sort(),
     "everything except the one tool an agent with no subagents could not use",
   );
 

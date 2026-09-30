@@ -1,7 +1,7 @@
 import { missingApiKey } from "./openai-compatible.js";
 import { ProviderError } from "./router.js";
 import { retryAfterMs, withRetry } from "./retry.js";
-import { createWorkspaceTools } from "./workspace-tools.js";
+import { createWorkspaceTools, lazySkills, skillsOf } from "./workspace-tools.js";
 import { createResultEnvelope } from "./tool-results.js";
 import { compactConversation } from "./compaction.js";
 
@@ -89,6 +89,7 @@ export function createAnthropicProvider({
           canSpawn: (context.agent.subagents ?? []).length > 0,
           extraTools: context.extraTools ?? extraTools,
           scopedInstructions: context.scopedInstructions,
+          skills: skillsOf(context),
           fetchImpl,
         })
         : undefined;
@@ -96,7 +97,7 @@ export function createAnthropicProvider({
       // One envelope per invocation: the marker a file could name is never
       // the marker in use.
       const envelope = createResultEnvelope(context.runId);
-      const system = buildSystemMessage(context, workspaceTools ? envelope : undefined);
+      const system = buildSystemMessage(context, workspaceTools ? envelope : undefined, workspaceTools);
       const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
       // Marks the last block of a list so everything before it is cached.
       // Anthropic allows four such breakpoints; this uses three — the tools,
@@ -301,9 +302,16 @@ function textOf(content) {
     .join("");
 }
 
-function buildSystemMessage(context, envelope) {
+function buildSystemMessage(context, envelope, tools) {
   const parts = [context.agent.prompt, ...context.instructions];
-  for (const skill of context.skills ?? []) parts.push(skill?.content ?? String(skill));
+  // Listed by name when the agent can open them; sent whole when it cannot,
+  // because a skill it may neither see nor load would be a skill it lacks.
+  const lazy = lazySkills(context, tools);
+  if (lazy.length > 0) {
+    parts.push(["Skills you can load with load_skill (name: what it is for):", ...lazy.map((skill) => `- ${skill.name}: ${skill.summary}`)].join("\n"));
+  } else {
+    for (const skill of context.skills ?? []) parts.push(skill?.content ?? String(skill));
+  }
   // Last, so it is the most recent thing said about how to read what follows.
   if (envelope) parts.push(envelope.instruction);
   return parts.filter(Boolean).join("\n\n");

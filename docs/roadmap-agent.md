@@ -31,7 +31,8 @@ Geprüft gegen `git log` und den Code, nicht gegen die Erinnerung. Branch
 | P3.2 MCP-Client für alle Provider | ✅ (codegraph für die Chat-Provider über denselben Client; Copilot behält seinen Deskriptor) | `e05673a` + A-23 |
 | P4.3 `approve-for-run` + Taint-Regel | ✅ | `ca85cc8` |
 | P4.1 Verzeichnisbezogene Instruktionen | ✅ | `2a9c472` |
-| P4.2, P4.4, P4.5, P4.6 | offen | — |
+| P4.2 `load_skill` | ✅ | (dieser Commit) |
+| P4.4, P4.5, P4.6 | offen | — |
 | P5.1, P5.2 | offen | — |
 | P6.2, P6.3 | offen | — |
 
@@ -733,7 +734,7 @@ dort arbeitet.
 *Fertig wenn:* eine Instruktion in einem Unterverzeichnis nur dann im
 System-Prompt steht, wenn der Schritt Dateien darunter anfasst.
 
-**P4.2 Skills nachladen.** Heute werden alle Skills eines Agenten immer
+**P4.2 ✅ Skills nachladen.** Heute werden alle Skills eines Agenten immer
 mitgeschickt. Bei drei kurzen Dateien ist das egal; bei dreißig nicht.
 Ein Werkzeug `load_skill`, das den Volltext auf Verlangen holt, und im
 System-Prompt nur Name und Einzeiler.
