@@ -42,6 +42,11 @@ const OPENAI_RATES = Object.freeze({
   "gpt-5.4-mini": { inputPerMillion: 0.75, cacheReadPerMillion: 0.075, outputPerMillion: 4.5 },
   "gpt-5.3-codex": { inputPerMillion: 1.75, cacheReadPerMillion: 0.175, outputPerMillion: 14 },
   "gpt-5.2": { inputPerMillion: 1.75, cacheReadPerMillion: 0.175, outputPerMillion: 14 },
+  // The one non-numbered row whose API id is known, because a real run
+  // returned it: the page lists it as 'GPT-5.6 Luna' (0.20 / 0.02 / 1.20),
+  // the API answered 'gpt-6-luna'. That mismatch is exactly why the other
+  // display names stay out until their ids are seen the same way.
+  "gpt-6-luna": { inputPerMillion: 0.2, cacheReadPerMillion: 0.02, outputPerMillion: 1.2 },
 });
 
 const RATE_TABLES = Object.freeze({

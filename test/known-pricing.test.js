@@ -53,3 +53,10 @@ test("a pricing-page display name with no confirmed API id is not guessed at", (
     assert.equal(knownPriceFor("openai-compatible", guess), undefined, guess);
   }
 });
+
+test("the model a real run used is priced, from the row the page lists as Luna", () => {
+  const rate = knownPriceFor("openai-compatible", "gpt-6-luna");
+  assert.equal(rate.inputPerMillion, 0.2);
+  assert.equal(rate.cacheReadPerMillion, 0.02);
+  assert.equal(rate.outputPerMillion, 1.2);
+});
