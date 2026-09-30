@@ -7,6 +7,7 @@ import { git } from "../git/command.js";
 import { openProjectState } from "../runtime/project-state.js";
 import { createSessionId, listSessions, readSession, runChatTurn } from "../runtime/chat-session.js";
 import { resolveAttachments } from "../runtime/chat-attachments.js";
+import { createChoice, overrideOf, runChatCommand } from "../runtime/chat-commands.js";
 
 // 'etnpilot chat': a conversation with an agent, in the terminal.
 //
@@ -16,19 +17,6 @@ import { resolveAttachments } from "../runtime/chat-attachments.js";
 // how hard it thinks, which files) is a choice about one turn's inputs; none of
 // it can widen what the policy allows, because the policy is asked after the
 // choice, not before.
-
-const HELP = [
-  "Type a message and press Enter. Put @path in it to attach a file.",
-  "",
-  "  /agent [name]        show the agents, or talk to another one",
-  "  /model [id]          use another model; 'provider:id' also picks the provider; 'reset' undoes it",
-  "  /effort [level]      low, medium or high; 'reset' undoes it",
-  "  /files               the files attached in this conversation",
-  "  /sessions            conversations in this project (resume one with --resume <id>)",
-  "  /clear               start a new conversation",
-  "  /help                this list",
-  "  /exit                leave (Ctrl-D does too)",
-].join("\n");
 
 export async function runChat({
   root = process.cwd(),
@@ -68,7 +56,7 @@ export async function runChat({
       throw new Error(resume === "last" ? "There is no conversation to resume." : `No conversation '${resume}'.`);
     }
   }
-  const choice = { agent: chosen, model: undefined, provider: undefined, effort: undefined };
+  const choice = createChoice(chosen);
 
   const readline = createInterface({ input, output, terminal: Boolean(input.isTTY) });
   let closed = false;
@@ -194,94 +182,11 @@ export async function runChat({
 
   // True when the conversation should end.
   async function command(text) {
-    const [name, ...rest] = text.slice(1).split(/\s+/);
-    const argument = rest.join(" ").trim();
-    switch (name) {
-      case "exit":
-      case "quit":
-        return true;
-      case "help":
-        say(HELP);
-        return false;
-      case "agent":
-        if (!argument) {
-          say(known.agents.map((entry) => `${entry.name === choice.agent ? "*" : " "} ${entry.name}${entry.description ? ` — ${entry.description}` : ""}`).join("\n"));
-        } else if (!names.includes(argument)) {
-          say(`No agent '${argument}'. Known: ${names.join(", ")}.`);
-        } else {
-          choice.agent = argument;
-          choice.model = choice.provider = choice.effort = undefined;
-          say(`Now talking to ${argument}.`);
-        }
-        return false;
-      case "model":
-        setModel(argument);
-        return false;
-      case "effort":
-        if (!argument) say(`effort: ${choice.effort ?? "the agent's own"}`);
-        else if (argument === "reset") { choice.effort = undefined; say("effort: the agent's own"); }
-        else if (["low", "medium", "high"].includes(argument)) { choice.effort = argument; say(`effort: ${argument}`); }
-        else say("effort is low, medium or high (or reset).");
-        return false;
-      case "files": {
-        const session = sessionId ? await readSession(projectRoot, sessionId) : { turns: [] };
-        const files = session.turns.flatMap((entry) => (entry.attachments ?? []).map((file) => `  turn ${entry.turn}: ${file.path} (${file.bytes} bytes, sha256 ${file.digest.slice(0, 12)}${file.truncated ? ", cut" : ""})`));
-        say(files.length > 0 ? files.join("\n") : "No files attached in this conversation.");
-        return false;
-      }
-      case "sessions": {
-        const sessions = await listSessions(projectRoot);
-        say(sessions.length > 0
-          ? sessions.slice(0, 15).map((entry) => `  ${entry.id}  ${entry.turns} turn${entry.turns === 1 ? "" : "s"}  ${entry.preview}`).join("\n")
-          : "No conversations yet.");
-        return false;
-      }
-      case "clear":
-        sessionId = undefined;
-        say("New conversation. The earlier one stays on disk.");
-        return false;
-      default:
-        say(`Unknown command '/${name}'. /help lists them.`);
-        return false;
-    }
+    const result = await runChatCommand(text, { choice, known, config, policy, root: projectRoot, sessionId });
+    for (const line of result.lines) say(line);
+    if (result.action === "clear") sessionId = undefined;
+    return result.action === "exit";
   }
-
-  function setModel(argument) {
-    if (!argument) {
-      say(`model: ${choice.model ?? "the agent's own"}${choice.provider ? ` on ${choice.provider}` : ""}`);
-      return;
-    }
-    if (argument === "reset") {
-      choice.model = choice.provider = undefined;
-      say("model: the agent's own");
-      return;
-    }
-    const [head, ...tail] = argument.split(":");
-    const provider = tail.length > 0 ? head : undefined;
-    const model = tail.length > 0 ? tail.join(":") : argument;
-    // Asked now so a refusal is a sentence at the prompt and not a failed turn.
-    // The router asks again before anything is sent: this is a courtesy, the
-    // policy is the authority.
-    if (provider) {
-      const verdict = policy.evaluateProvider(provider, { agent: choice.agent });
-      if (verdict.allowed === false) {
-        say(`Refused: ${verdict.reason ?? `the policy does not allow provider '${provider}'.`}`);
-        return;
-      }
-      if (!config.providers?.[provider]) {
-        say(`No provider '${provider}' is configured. Configured: ${Object.keys(config.providers ?? {}).join(", ")}.`);
-        return;
-      }
-    }
-    choice.model = model;
-    choice.provider = provider;
-    say(`model: ${model}${provider ? ` on ${provider}` : ""}`);
-  }
-}
-
-function overrideOf(choice) {
-  const { model, provider, effort } = choice;
-  return model || provider || effort ? { model, provider, effort } : undefined;
 }
 
 function usageLine(outcome) {

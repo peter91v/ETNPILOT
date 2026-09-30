@@ -1,10 +1,11 @@
+import { renderChat } from "./render-chat.js";
 import { createStyle, displayWidth, duration, pad, padStart, shortId, since, truncate, until } from "./ansi.js";
 
 // Every view is a pure function of state and viewport: state in, lines out.
 // The runtime below only paints what these return, which is what makes the
 // interface testable without a terminal.
 
-const VIEWS = Object.freeze(["approvals", "runs", "queue", "settings", "worktrees", "merges", "checks"]);
+const VIEWS = Object.freeze(["approvals", "runs", "queue", "settings", "worktrees", "merges", "checks", "chat"]);
 
 export function viewList() {
   return [...VIEWS];
@@ -26,6 +27,7 @@ export function renderApp(state, options = {}) {
     filtering = false,
     scope = "local",
     prompt,
+    compose,
     help = false,
     helpOffset = 0,
     receipt,
@@ -38,7 +40,7 @@ export function renderApp(state, options = {}) {
   const style = createStyle({ color });
   // Typing happens on the bottom line, the way a terminal tool has always done
   // it, so whatever you were looking at stays on screen while you type.
-  const input = inputState({ prompt, editor, filtering, filter });
+  const input = inputState({ prompt, editor, filtering, filter, compose });
   const body = height - (input ? 4 : 3);
   const lines = [
     header(state, { style, width, view, project, active }),
@@ -51,6 +53,7 @@ export function renderApp(state, options = {}) {
     agentMode: options.agentMode, agentCursor: options.agentCursor,
     checks: options.checks ?? [], results: options.checkResults ?? {}, running: options.checksRunning ?? new Set(),
     verification: options.verification,
+    chat: options.chat, cursor,
   };
   const rendered = help
     ? renderHelp({ style, width, height: body, offset: helpOffset })
@@ -80,6 +83,7 @@ export function renderApp(state, options = {}) {
 }
 
 function renderView(view, state, context) {
+  if (view === "chat") return renderChat(state, context);
   if (view === "runs") return renderRuns(state, context);
   if (view === "checks") return renderChecks(state, context);
   if (view === "queue") return renderQueue(state, context);
@@ -135,6 +139,9 @@ function footer({ style, width, view, detail, message, editor, prompt, help, ...
 // Whatever is on screen decides which keys the footer promises. A key it names
 // has to do something here, or the footer is teaching the wrong thing.
 function footerKeys({ view, detail, editor, prompt, help, diff, agentMode, agentText }) {
+  if (view === "chat" && !detail) {
+    return [["enter", "write"], ["a", "approve"], ["r", "reject"], ["s", "stop"], ["PgUp", "back"], ["tab", "view"], ["q", "quit"]];
+  }
   if (help) return [["↑↓", "scroll"], ["?", "close"], ["esc", "close"], ["q", "quit"]];
   if (prompt) return [["enter", "start"], ["tab", "agent"], ["esc", "cancel"], ["^u", "clear"]];
   if (editor) {
@@ -865,9 +872,9 @@ function trimTrailing(rows) {
 
 const HELP_SECTIONS = Object.freeze([
   ["Everywhere", [
-    ["tab / 1-7", "switch view"],
+    ["tab / 1-8", "switch view"],
     ["↑ ↓ / k j", "move the cursor"],
-    ["n", "start a run"],
+    ["n / t", "start a run / talk to an agent"],
     ["g", "refresh now"],
     ["?", "this help"],
     ["q / ^c", "quit"],
@@ -984,7 +991,13 @@ function modeTone(mode) {
 // a prefix that says what is being typed, the text, and the caret. What was on
 // screen stays there, which is the point — you can read the list you are
 // filtering, or the approval you are about to answer, while you type.
-function inputState({ prompt, editor, filtering, filter }) {
+function inputState({ prompt, editor, filtering, filter, compose }) {
+  if (compose) {
+    const near = compose.suggestions?.length > 0
+      ? `@ ${compose.suggestions.slice(0, 4).map((path, index) => (index === compose.index ? `[${path}]` : path)).join("  ")} · tab completes`
+      : `agent ${compose.agent ?? "—"} · enter sends · / commands · @ files · esc leaves`;
+    return { prefix: "you", value: compose.buffer, bad: Boolean(compose.error), hint: compose.error ?? near };
+  }
   if (editor) {
     return {
       prefix: `set ${editor.entry.path}`,

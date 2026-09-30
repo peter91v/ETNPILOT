@@ -1,5 +1,7 @@
 import { screen, shortId } from "./ansi.js";
 import { parseSettingValue } from "../config/settings.js";
+import { PolicyEngine } from "../policy/engine.js";
+import { createChoice, runChatCommand } from "../runtime/chat-commands.js";
 import { clamp, flattenAgents, mergeEntries, renderApp, settingEntries, settingLiteral, settingValue, viewList } from "./render.js";
 
 const VIEWS = viewList();
@@ -47,6 +49,10 @@ export function createTuiApp({
   let agentTextOffset = 0;
   let worktreesReadAt = 0;
   let merges;
+  // The conversation, as this window sees it: what the server keeps about it
+  // plus the choices made for the next turn. 'compose' is the line being typed.
+  let chat = { sessionId: undefined, turns: [], running: false, pending: undefined, choice: createChoice(undefined), scroll: 0, notes: [], known: undefined };
+  let compose;
   // The checks are listed from the registry once; what each one found is kept
   // per check, so a result stays on screen until it is run again. Nothing here
   // is ever run by the poll — 'scan secrets' reads the whole working tree.
@@ -81,6 +87,8 @@ export function createTuiApp({
     get agentMode() { return agentMode; },
     get agentText() { return agentText; },
     get merges() { return merges; },
+    get chat() { return chat; },
+    get compose() { return compose; },
     get checks() { return checks; },
     get checkResults() { return checkResults; },
     get verification() { return verification; },
@@ -94,6 +102,7 @@ export function createTuiApp({
       // The worktrees are local but not free — one 'git status' each — so they
       // are reread while their view is open and not more often than that.
       if (view === "worktrees" && now() - worktreesReadAt > worktreeIntervalMs) await load("worktrees", { force: true });
+      if (view === "chat" && chat.sessionId) await syncChat();
       return snapshot;
     },
 
@@ -116,6 +125,8 @@ export function createTuiApp({
         filtering,
         scope,
         prompt,
+        compose: compose ? { ...compose, agent: chat.choice.agent } : undefined,
+        chat,
         help,
         helpOffset,
         receipt,
@@ -146,6 +157,11 @@ export function createTuiApp({
     async handle(key) {
       // While text is being typed, every printable key belongs to the buffer.
       // Only then do the single-letter commands mean anything again.
+      if (compose) {
+        await composeKey(key);
+        app.paint();
+        return true;
+      }
       if (editor) {
         await editKey(key);
         app.paint();
@@ -183,7 +199,19 @@ export function createTuiApp({
         app.paint();
         return true;
       }
-      if (key === "\t") {
+      if (key === "t") {
+        // 'talk': straight to the conversation, with the cursor in the message.
+        show("chat");
+        await startCompose();
+      } else if (view === "chat" && (key === "\r" || key === "\n" || key === "i")) {
+        await startCompose();
+      } else if (view === "chat" && key === "s") {
+        stopTurn();
+      } else if (view === "chat" && key === "\u001B[5~") {
+        chat.scroll += 5;
+      } else if (view === "chat" && key === "\u001B[6~") {
+        chat.scroll = Math.max(0, chat.scroll - 5);
+      } else if (key === "\t") {
         show(VIEWS[(VIEWS.indexOf(view) + 1) % VIEWS.length]);
       } else if (/^[1-9]$/.test(key) && Number(key) <= VIEWS.length) {
         show(VIEWS[Number(key) - 1]);
@@ -318,6 +346,7 @@ export function createTuiApp({
     view = next;
     cursor = 0;
     detail = false;
+    if (view === "chat") void prepareChat().then(app.paint, report);
     // A view that reads on demand starts empty and says it is reading, rather
     // than showing yesterday's answer or nothing at all.
     if ((view === "worktrees" || view === "merges") && (view === "merges" ? merges : worktrees) === undefined) {
@@ -639,7 +668,8 @@ export function createTuiApp({
   }
 
   async function decide(decision) {
-    if (view !== "approvals") return;
+    // The chat view shows the same pending decisions, so it answers them.
+    if (view !== "approvals" && view !== "chat") return;
     const approval = selection()[clamp(cursor, selection().length)];
     if (!approval) return;
     try {
@@ -663,6 +693,138 @@ export function createTuiApp({
       note(error.message);
     }
     await app.refresh();
+  }
+
+  // --- the conversation ---------------------------------------------------
+
+  async function prepareChat() {
+    if (chat.known) return;
+    chat.known = await state.agents();
+    chat.choice.agent ??= chat.known.defaultAgent ?? "orchestrator";
+  }
+
+  async function startCompose() {
+    await prepareChat().catch((error) => note(error.message));
+    compose = { buffer: "", suggestions: [], index: 0 };
+  }
+
+  async function composeKey(key) {
+    if (key === "\u0003" || key === "\u001B") {
+      compose = undefined;
+      return;
+    }
+    if (key === "\r" || key === "\n") return submitCompose();
+    if (key === "\t") return completeMention();
+    if (key === "\u0015") {
+      compose = { ...compose, buffer: "", suggestions: [], error: undefined };
+      return;
+    }
+    if (key === "\u007F" || key === "\b") {
+      compose = { ...compose, buffer: [...compose.buffer].slice(0, -1).join(""), error: undefined };
+      void suggestFiles();
+      return;
+    }
+    // Arrow keys and other escape sequences are not text.
+    if (key.startsWith("\u001B") || [...key].length !== 1 || key < " ") return;
+    compose = { ...compose, buffer: compose.buffer + key, error: undefined };
+    void suggestFiles();
+  }
+
+  // The file a '@' at the end of the line could mean, offered the way the page
+  // offers it: only what git tracks and the read policy allows.
+  async function suggestFiles() {
+    const match = /(^|\s)@([^\s]*)$/.exec(compose?.buffer ?? "");
+    if (!match) {
+      if (compose) compose = { ...compose, suggestions: [], index: 0 };
+      return;
+    }
+    const buffer = compose.buffer;
+    try {
+      const files = await state.chat.files(match[2]);
+      if (compose && compose.buffer === buffer) {
+        compose = { ...compose, suggestions: files, index: 0 };
+        app.paint();
+      }
+    } catch (error) {
+      note(error.message);
+    }
+  }
+
+  function completeMention() {
+    if (!compose?.suggestions?.length) return;
+    const path = compose.suggestions[compose.index % compose.suggestions.length];
+    compose = {
+      ...compose,
+      buffer: compose.buffer.replace(/@[^\s]*$/, `@${path} `),
+      suggestions: [],
+      index: 0,
+    };
+  }
+
+  async function submitCompose() {
+    const text = compose.buffer.trim();
+    if (text === "") return;
+    if (text.startsWith("/")) {
+      const known = chat.known ?? await state.agents();
+      const result = await runChatCommand(text, {
+        choice: chat.choice,
+        known,
+        config: state.config,
+        policy: new PolicyEngine(state.config.policy),
+        root: state.root,
+        sessionId: chat.sessionId,
+      });
+      chat.notes = result.lines.flatMap((line) => String(line).split("\n"));
+      if (result.action === "clear") resetChat();
+      if (result.action === "exit") {
+        chat.notes = ["q leaves the interface; enter writes another message."];
+        compose = undefined;
+        return;
+      }
+      compose = { ...compose, buffer: "", suggestions: [], index: 0, error: undefined };
+      return;
+    }
+    try {
+      const { model, provider, effort, agent } = chat.choice;
+      const started = await state.chat.send({ sessionId: chat.sessionId, text, agent, model, provider, effort });
+      chat.sessionId = started.sessionId;
+      chat.pending = { text, attached: started.attached ?? [], refused: started.refused ?? [], since: chat.turns.length };
+      chat.running = true;
+      chat.notes = [];
+      chat.scroll = 0;
+      // Out of the message line, so the keys that answer the agent work: a
+      // decision cannot be given while every letter is going into a message.
+      compose = undefined;
+    } catch (error) {
+      // Kept in the line: a message the server refused is not a message lost.
+      compose = { ...compose, error: error.message };
+    }
+  }
+
+  function resetChat() {
+    chat.sessionId = undefined;
+    chat.turns = [];
+    chat.pending = undefined;
+    chat.running = false;
+    chat.scroll = 0;
+  }
+
+  async function syncChat() {
+    const session = await state.chat.read(chat.sessionId);
+    chat.turns = session.turns ?? [];
+    chat.running = session.running === true;
+    if (chat.pending && chat.turns.length > chat.pending.since) chat.pending = undefined;
+    // A turn that ended without a record must not hang as though it were being
+    // answered: after a few quiet seconds it says so.
+    if (chat.pending && !chat.running) {
+      chat.pending.idleSince ??= now();
+      if (now() - chat.pending.idleSince > 4000) chat.pending.lost = true;
+    }
+  }
+
+  function stopTurn() {
+    if (!chat.sessionId) return;
+    note(state.chat.stop(chat.sessionId) > 0 ? "Stopped." : "Nothing is running here.");
   }
 
   function note(text) {

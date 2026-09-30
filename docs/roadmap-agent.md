@@ -1011,7 +1011,7 @@ Regel: gerendert und angesehen bei 412 und 1180 px in beiden Farbschemata.
 *Fertig wenn:* der Playwright-Durchlauf die Runde vom Tippen bis zur Freigabe
 ohne `pageerror` und ohne horizontales Scrollen schafft.
 
-**D4 — Die TUI-Ansicht „Chat".** Dieselben Bausteine im Vollbild-Terminal.
+**D4 ✅ — Die TUI-Ansicht „Chat".** Dieselben Bausteine im Vollbild-Terminal.
 *Fertig wenn:* ein pty-Test sie bei 40 × 20 und 100 × 30 bedient.
 
 **D5 — Streaming sichtbar, Zusammenfassen, Rückgängig, Bilder.** `run.delta`
@@ -1053,3 +1053,19 @@ Vorschlag, nie angewendet).
 - Abweichung vom Plan: kein Taint durch Anhänge — Pfade außerhalb des Projekts
   werden abgelehnt statt gelesen, es gibt also keinen Fremdtext von außen.
 - Offen: die Node-Warnung zu `node:sqlite` erscheint mitten im Gespräch.
+
+### Stand D3/D4 (gebaut)
+
+- D3: Web-Ansicht „Chat" (Verlauf, Composer mit `@`-Vorschlägen, Freigaben mit Diff
+  im Verlauf). Die untere Leiste auf dem Handy hat jetzt Overview · Chat ·
+  Approvals · Runs · More; **Queue liegt unter More**, weil Material höchstens
+  fünf Ziele einschließlich More erlaubt.
+- D4: TUI-Ansicht „Chat" (8. Ansicht, Taste `t` springt direkt hinein). Dieselben
+  Kommandos wie im Terminal-Chat — sie stehen jetzt an einer Stelle
+  (`src/runtime/chat-commands.js`), nicht zweimal. Die Freigabe erscheint unter
+  dem Verlauf, `a`/`r` beantworten sie. In einem echten pty bei 40×20 und
+  100×30 geprüft.
+- Bekannt: bei genau 100 Spalten passt die Tab-Leiste mit acht Ansichten nicht
+  mehr und fällt auf die Kurzform „chat 8/8" zurück (ab etwa 110 Spalten
+  sichtbar). Eingefügter Text mit Zeilenumbruch sendet an der ersten Zeile —
+  wie beim bestehenden „Run starten"-Dialog.
