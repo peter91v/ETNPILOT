@@ -979,7 +979,7 @@ Verlauf, eine Eingabezeile und Kommandos.
 
 **Bauplan.** Jede Stufe ist für sich mergefähig und hat ein „Fertig wenn".
 
-**D0 — Der Verlauf (Kern, ohne Oberfläche).** Sitzung als
+**D0 ✅ — Der Verlauf (Kern, ohne Oberfläche).** Sitzung als
 `.etnpilot/state/sessions/<id>.jsonl` (eine Zeile je Runde: Text, Anhänge
 mit Digest, Agent, Modell, `runId`). Die Provider nehmen einen `history`-Teil
 im Kontext an und stellen ihn der Runde voran; die Kompaktierung gilt für den
@@ -989,7 +989,7 @@ dem alle Oberflächen stehen.
 ersten kennt, beide Receipts eine gemeinsame `sessionId` tragen und eine
 Sitzung nach einem Neustart weitergeführt werden kann.
 
-**D1 — `etnpilot chat` im Terminal.** Eine Zeile Eingabe, Ausgabe beim
+**D1 ✅ — `etnpilot chat` im Terminal.** Eine Zeile Eingabe, Ausgabe beim
 Entstehen, die Freigabe im Verlauf (`y` / `n` / `a` für „für diesen Lauf").
 Kommandos: `/model`, `/agent`, `/effort`, `/files`, `/clear`, `/help`, `/exit`.
 Zuerst das Terminal, weil es auf Android/Termux ohne Browser läuft und die
@@ -998,23 +998,23 @@ kleinste Fläche hat.
 führt, eine Schreibfreigabe mit sichtbarem Diff beantwortet, und `/model` einen
 nicht erlaubten Provider abweist.
 
-**D2 — Dateien.** `@pfad` mit Vervollständigung, Grenze je Datei und je
+**D2 ✅ — Dateien.** `@pfad` mit Vervollständigung, Grenze je Datei und je
 Runde, Digest im Receipt; Verzeichnisse als Liste; ein Pfad außerhalb des
 Arbeitsverzeichnisses wird abgelehnt.
 *Fertig wenn:* ein angehängter Dateiinhalt in der Anfrage steht, in der Hülle,
 mit Digest im Receipt — und ein Anhang, der „ignoriere deine Anweisungen"
 enthält, nichts an den Freigaben ändert.
 
-**D3 — Die Web-Ansicht „Chat".** Verlauf, Composer, Auswahlfelder für Modell
+**D3 ✅ — Die Web-Ansicht „Chat".** Verlauf, Composer, Auswahlfelder für Modell
 und Agent, Anhängen-Knopf, Freigaben inline. Gleiche Material-Tokens, gleiche
 Regel: gerendert und angesehen bei 412 und 1180 px in beiden Farbschemata.
 *Fertig wenn:* der Playwright-Durchlauf die Runde vom Tippen bis zur Freigabe
 ohne `pageerror` und ohne horizontales Scrollen schafft.
 
-**D4 — Die TUI-Ansicht „Chat".** Dieselben Bausteine im Vollbild-Terminal.
+**D4 ✅ — Die TUI-Ansicht „Chat".** Dieselben Bausteine im Vollbild-Terminal.
 *Fertig wenn:* ein pty-Test sie bei 40 × 20 und 100 × 30 bedient.
 
-**D5 — Streaming sichtbar, Zusammenfassen, Rückgängig, Bilder.** `run.delta`
+**D5 ◐ — Streaming sichtbar ✅, Zusammenfassen ✅, Rückgängig ✅, Bilder ✗, `--worktree` ✗.** `run.delta`
 in allen drei Oberflächen; `/compact` mit Zusammenfassung im Receipt;
 `/undo` über den Schnappschuss; Bild- und PDF-Anhang für Provider, die es
 können.
@@ -1023,11 +1023,69 @@ können.
 arbeitet **im Arbeitsverzeichnis**, nicht in einem Worktree (wie Claude Code
 und Codex). Begründung: jede Schreib- und Kommandofreigabe ist ohnehin
 menschlich, und ein Worktree je Sitzung nimmt dem Gespräch die Unmittelbarkeit.
-Dagegen sichert `/undo`, und `etnpilot chat --worktree` gibt die Isolation des
-Workflows zurück. Ein Chat startet nicht in einem Verzeichnis mit
+Dagegen sichert `/undo` (D5, noch nicht gebaut). `--worktree` ist **nicht**
+gebaut: ein Worktree je Runde würde die Änderungen der vorigen Runde verlieren,
+es bräuchte einen Worktree je Sitzung. Ein Chat startet nicht in einem Verzeichnis mit
 uncommitteten Änderungen, ohne es zu sagen.
 
 **Was ich bewusst nicht baue:** eine zweite Freigabelogik für den Chat, einen
 „alles erlauben"-Schalter (`--dangerously-skip-permissions` u. ä.), und
 Gedächtnis, das der Agent selbst in Instruktionen schreibt (siehe P4.4:
 Vorschlag, nie angewendet).
+
+### Stand D1/D2 (gebaut)
+
+- `etnpilot chat [--agent] [--resume <id>|last | -c]`: Zeile für Zeile, Freigaben
+  im Verlauf mit Diff (`y` / `n` / `a` = ja für den Rest dieser **Runde** — eine
+  Runde ist ein Lauf, und ein Grant endet mit seinem Lauf; ein Grant über die
+  ganze Sitzung wäre eine eigene Entscheidung). Was während einer Runde vorab
+  getippt wurde, gilt nie als Antwort auf eine Freigabe.
+- Kommandos: `/agent`, `/model [provider:]id`, `/effort`, `/files`, `/sessions`,
+  `/clear`, `/help`, `/exit`. `/model` prüft `policy.providers` sofort, der
+  Router danach noch einmal; `agent.model`, `agent.provider` und `agent.effort`
+  werden nur für diesen einen Agenten und Lauf überschrieben.
+- `@pfad`: nur Dateien und Verzeichnisse **im Arbeitsverzeichnis**; die
+  Read-Policy entscheidet (`.env` wird auch auf Zuruf abgelehnt); Binärdateien
+  werden abgelehnt; 64 KiB je Datei, 192 KiB je Runde, Digest der ganzen Datei
+  im Receipt (`session.attachments`). Der Inhalt steht in einem Umschlag mit
+  Nonce, der Inhalt einer Datei kann ihn nicht beenden. In späteren Runden
+  steht nur „[attached: …]" mit Digest.
+- Abweichung vom Plan: kein Taint durch Anhänge — Pfade außerhalb des Projekts
+  werden abgelehnt statt gelesen, es gibt also keinen Fremdtext von außen.
+- Offen: die Node-Warnung zu `node:sqlite` erscheint mitten im Gespräch.
+
+### Stand D3/D4 (gebaut)
+
+- D3: Web-Ansicht „Chat" (Verlauf, Composer mit `@`-Vorschlägen, Freigaben mit Diff
+  im Verlauf). Die untere Leiste auf dem Handy hat jetzt Overview · Chat ·
+  Approvals · Runs · More; **Queue liegt unter More**, weil Material höchstens
+  fünf Ziele einschließlich More erlaubt.
+- D4: TUI-Ansicht „Chat" (8. Ansicht, Taste `t` springt direkt hinein). Dieselben
+  Kommandos wie im Terminal-Chat — sie stehen jetzt an einer Stelle
+  (`src/runtime/chat-commands.js`), nicht zweimal. Die Freigabe erscheint unter
+  dem Verlauf, `a`/`r` beantworten sie. In einem echten pty bei 40×20 und
+  100×30 geprüft.
+- Bekannt: bei genau 100 Spalten passt die Tab-Leiste mit acht Ansichten nicht
+  mehr und fällt auf die Kurzform „chat 8/8" zurück (ab etwa 110 Spalten
+  sichtbar). Eingefügter Text mit Zeilenumbruch sendet an der ersten Zeile —
+  wie beim bestehenden „Run starten"-Dialog.
+
+### Stand D5 (teilweise gebaut)
+
+- `/undo`: Der Arbeitsbaum wird vor und nach jeder Runde als git-Tree festgehalten
+  (in einem Wegwerf-Index, die Staging-Area der Person bleibt unberührt; unter
+  `refs/etnpilot/chat/` festgehalten). Rückgängig gemacht wird eine Datei nur,
+  wenn sie noch genau so ist, wie die Runde sie hinterlassen hat — eine
+  inzwischen geänderte wird stehen gelassen und genannt. Neueste Runde zuerst;
+  das Gespräch erfährt, dass die Änderungen zurückgenommen wurden.
+- `/compact`: Der Agent schreibt selbst eine Zusammenfassung — als eigener Lauf
+  mit Receipt, ohne jedes Werkzeug (durch die Werkzeugliste, nicht durch Bitten).
+  Die Runden bleiben unverändert auf der Platte; das nächste Gespräch bekommt
+  die Zusammenfassung statt der älteren Runden. `verifySession` prüft sie mit.
+- Streaming sichtbar: `stream: true` am Provider; der Text erscheint im Terminal-
+  Chat, in der TUI und auf der Seite, während er entsteht (Ereignis
+  `agent.delta`; mit `run --events jsonl` erscheinen diese Ereignisse auch).
+  Noch nie gegen eine echte API gesehen.
+- **Nicht gebaut:** Bild- und PDF-Anhänge (bräuchten strukturierte Nachrichten je
+  Provider und ein Medientyp-Modell) und `--worktree` je Sitzung (bräuchte einen
+  Worktree, der über Runden lebt).

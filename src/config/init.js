@@ -46,6 +46,9 @@ providers:
     # harness's own tools, so every effect goes through the approval path.
     tools: true
     maxTokens: 8192
+    # Read the answer as it is written, so a chat can show it forming. Not on
+    # by default: it has been tested against stubs, not against the live API.
+    # stream: true
   openai:
     type: openai-compatible
     baseUrl: https://api.openai.com/v1
@@ -182,6 +185,13 @@ observability:
     maxEstimatedCostPerWorkflow: 5
     maxInputTokensPerWorkflow: 2000000
     maxOutputTokensPerWorkflow: 200000
+# A conversation as a whole ('etnpilot chat' and the Chat views). Each turn is a
+# run with its own budget above; nothing else bounded the sum, so a long chat
+# could spend without limit one affordable turn at a time. Tokens, input and
+# output together, across turns and summaries. Raise it for real work.
+chat:
+  budget:
+    maxTotalTokens: 1000000
 approval:
   allow: [read]
   requireHuman: [write, shell, network]

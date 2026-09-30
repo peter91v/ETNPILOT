@@ -1,3 +1,7 @@
+import { compactSession, compactionCheck, createSessionId, listSessions, readSession, runChatTurn, undoLastTurn, verifySession } from "./chat-session.js";
+import { resolveAttachments, summarizeAttachments } from "./chat-attachments.js";
+import { PolicyEngine } from "../policy/engine.js";
+import { git } from "../git/command.js";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import YAML from "yaml";
@@ -43,7 +47,7 @@ export async function openProjectState({ root = process.cwd(), env = process.env
   // one must stop what it started rather than stranding it.
   const running = new Set();
   const runErrors = [];
-  return {
+  const self = {
     root: projectRoot,
     get config() { return current; },
     inbox,
@@ -53,6 +57,114 @@ export async function openProjectState({ root = process.cwd(), env = process.env
       { inbox, queue, runsDirectory, root: projectRoot, env, running, runErrors },
       options,
     ),
+    // Conversations, read from the same place as everything else. Sending a
+    // turn is not here: that starts a run, and starting runs is the caller's.
+    chat: {
+      list: () => listSessions(projectRoot),
+      read: async (id) => {
+        const session = await readSession(projectRoot, id);
+        // Whether a turn is going now is known here and nowhere on disk.
+        const active = [...running].find((record) => record.session === id);
+        return { ...session, running: Boolean(active), ...(active?.partial ? { partial: active.partial } : {}) };
+      },
+      verify: (id) => verifySession(projectRoot, id, {
+        verifyReceipt: (file) => verifyProjectReceipt(runsDirectory, file, { root: projectRoot, config: current }),
+        readEntries: async (file) => {
+          const text = await readFile(join(runsDirectory, file), "utf8");
+          return text.split("\n").filter(Boolean).map((line) => JSON.parse(line));
+        },
+      }),
+      // Files a person can name with '@': what git tracks, minus what the read
+      // policy refuses them. The same set search_files searches.
+      async files(query = "", { limit = 50 } = {}) {
+        const listed = await git(["ls-files", "-z"], { cwd: projectRoot, trim: false }).catch(() => ({ stdout: "" }));
+        const policy = new PolicyEngine(current.policy);
+        const needle = String(query).toLowerCase();
+        const found = [];
+        for (const path of listed.stdout.split("\0").filter(Boolean)) {
+          if (needle && !path.toLowerCase().includes(needle)) continue;
+          const verdict = policy.evaluateOperation({ kind: "read", path }, { workspace: projectRoot });
+          if (verdict?.kind === "reject") continue;
+          found.push(path);
+          if (found.length >= limit) break;
+        }
+        return found;
+      },
+      // One turn of a conversation, started the way any run from a surface is:
+      // its approvals land in the inbox this page already shows. Not awaited.
+      async send({ sessionId, text, agent, model, provider, effort, providerFactories } = {}) {
+        if (typeof text !== "string" || text.trim() === "") throw new TypeError("A message is required.");
+        const id = sessionId ?? createSessionId();
+        if ([...running].some((record) => record.session === id)) {
+          throw new Error("A turn is already running in this conversation. Wait for it, or stop it.");
+        }
+        const names = (await readAgents({ root: projectRoot, config: current })).agents.filter((entry) => !entry.error).map((entry) => entry.name);
+        const chosen = agent ?? current.defaultAgent ?? "orchestrator";
+        if (!names.includes(chosen)) throw new TypeError(`Unknown agent '${chosen}'. This project has: ${names.join(", ")}.`);
+        if (provider) {
+          const verdict = new PolicyEngine(current.policy).evaluateProvider(provider, { agent: chosen });
+          if (verdict.allowed === false) throw new Error(verdict.reason ?? `The policy does not allow provider '${provider}'.`);
+          if (!current.providers?.[provider]) throw new TypeError(`No provider '${provider}' is configured.`);
+        }
+        const policy = new PolicyEngine(current.policy);
+        const { attachments, refused } = await resolveAttachments(text, {
+          root: projectRoot,
+          authorize: (path) => policy.evaluateOperation({ kind: "read", path }, { agent: chosen, workspace: projectRoot }),
+        });
+        const override = model || provider || effort ? { model, provider, effort } : undefined;
+        const started = self.startRun({
+          input: text.trim(),
+          agent: chosen,
+          providerFactories,
+          session: id,
+          // 'input' is dropped: the turn composes its own, with the attachments.
+          via: ({ input: _task, agent: _agent, ...options }) => runChatTurn({
+            ...options,
+            sessionId: id,
+            text: text.trim(),
+            agent: chosen,
+            attachments,
+            agentOverride: override,
+          }),
+        });
+        // A failure is reported through runErrors like any run's; nothing here waits.
+        started.catch(() => {});
+        return { sessionId: id, agent: chosen, attached: summarizeAttachments(attachments), refused };
+      },
+      // Asks the model to summarise the older turns, as a run of its own. The
+      // answer is not awaited; it lands in the session as a 'compact' line.
+      async compact(id, { agent, model, provider, effort, providerFactories } = {}) {
+        const check = await compactionCheck(projectRoot, id);
+        if (!check.ok) return check;
+        if ([...running].some((record) => record.session === id)) {
+          return { ok: false, message: "A turn is running in this conversation; wait for it." };
+        }
+        const chosen = agent ?? current.defaultAgent ?? "orchestrator";
+        const override = model || provider || effort ? { model, provider, effort } : undefined;
+        const started = self.startRun({
+          input: "Summarise the conversation",
+          agent: chosen,
+          providerFactories,
+          session: id,
+          via: ({ input: _task, agent: _agent, ...options }) => compactSession({ ...options, sessionId: id, agent: chosen, agentOverride: override }),
+        });
+        started.catch(() => {});
+        return { ok: true, message: "Asking the model for a summary (one call). It appears in the conversation when it is written." };
+      },
+      // Takes back the newest turn's file changes. Not while a turn is running:
+      // the files are moving.
+      undo: async (id) => {
+        if ([...running].some((record) => record.session === id)) {
+          return { ok: false, message: "A turn is running in this conversation; stop it first." };
+        }
+        return undoLastTurn({ root: projectRoot, sessionId: id });
+      },
+      stop: (id) => {
+        const mine = [...running].filter((record) => record.session === id);
+        for (const record of mine) record.controller.abort();
+        return mine.length;
+      },
+    },
     settings: () => describeSettings({ root: projectRoot, env }),
     // The models a configured provider can currently reach, read live — never
     // cached here, because the answer is the provider's own and changes on
@@ -87,7 +199,7 @@ export async function openProjectState({ root = process.cwd(), env = process.env
     // A run started from a live surface asks that surface for its approvals:
     // the requests land in the same inbox the screen is already showing, so
     // nobody has to open a second window to answer their own run.
-    startRun({ input, agent, signal, dryRun, providerFactories } = {}) {
+    startRun({ input, agent, signal, dryRun, providerFactories, via, session } = {}) {
       if (!input || !String(input).trim()) throw new TypeError("A task is required to start a run.");
       const inboxConfig = current.approval?.inbox ?? {};
       if (inboxConfig.enabled === false) {
@@ -101,8 +213,9 @@ export async function openProjectState({ root = process.cwd(), env = process.env
         if (signal.aborted) controller.abort();
         else signal.addEventListener("abort", () => controller.abort(), { once: true });
       }
-      const record = { task, agent, startedAt: new Date().toISOString(), controller, done: 0 };
-      const started = runProject({
+      const record = { task, agent, startedAt: new Date().toISOString(), controller, done: 0, ...(session ? { session } : {}) };
+      const execute = via ?? runProject;
+      const started = execute({
         root: projectRoot,
         env,
         input: task,
@@ -120,6 +233,9 @@ export async function openProjectState({ root = process.cwd(), env = process.env
             record.stepAgent = undefined;
           }
           if (event.type === "run.started") record.stepAgent = event.agent;
+          // What a streaming provider has written so far, for a surface that
+          // shows an answer as it forms. Bounded: it is a preview, not the record.
+          if (event.type === "agent.delta") record.partial = `${record.partial ?? ""}${event.text}`.slice(-20_000);
           if (event.type === "workflow.step.completed") {
             record.done += 1;
             record.step = undefined;
@@ -242,6 +358,7 @@ export async function openProjectState({ root = process.cwd(), env = process.env
       queue.close();
     },
   };
+  return self;
 }
 
 export async function collectState(
@@ -282,6 +399,7 @@ function presentRun(record) {
     task: record.task,
     agent: record.agent,
     startedAt: record.startedAt,
+    ...(record.session ? { session: record.session } : {}),
     ...(record.steps ? { steps: record.steps, done: record.done } : {}),
     ...(record.step ? { step: record.step, stepSince: record.stepSince } : {}),
     ...(record.stepAgent ? { stepAgent: record.stepAgent } : {}),
@@ -757,6 +875,8 @@ export async function readAgents({ root, config }) {
   }
   return {
     agents,
+    // The providers a conversation may name for one turn.
+    providers: Object.keys(config?.providers ?? {}),
     // What an empty choice means, so the surface does not have to guess.
     defaultAgent: config?.defaultAgent,
     steps: (config?.workflow?.steps ?? []).map((step) => step.id ?? step.agent).filter(Boolean),

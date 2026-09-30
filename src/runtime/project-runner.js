@@ -60,6 +60,11 @@ export async function runProject({
   approvalHandler,
   signal,
   metadata = {},
+  // Set by a conversation: { id, turn, history }. The run is one turn of it.
+  session,
+  // A conversation's choice of model, provider, effort or tools for the agent it
+  // talks to: { model, provider, effort, tools }. Applied to that one agent for this run.
+  agentOverride,
   secretResolver,
   onEvent,
 } = {}) {
@@ -231,6 +236,7 @@ export async function runProject({
       requested: agent,
       fallback: config.defaultAgent ?? "orchestrator",
     });
+    if (agentOverride && agent) applyAgentOverride(harness, agent, agentOverride);
     assertWorkflowAgents(harness, workflow);
     await harness.events.emit("workflow.planned", {
       runId,
@@ -277,6 +283,7 @@ export async function runProject({
             workflowRunId: runId,
             workflowStep: step.id,
             workspace: workspace.path,
+            ...(session ? { sessionId: session.id, turn: session.turn, kind: session.kind, history: session.history, attachments: session.attachments } : {}),
           },
           signal: execution.signal,
         });
@@ -451,6 +458,7 @@ export async function runProject({
       ...(rehearsal ? { mergeRehearsal: rehearsal } : {}),
       ...(mergeTrain ? { mergeTrain } : {}),
     },
+    ...(session ? { session: { id: session.id, turn: session.turn, ...(session.kind ? { kind: session.kind } : {}), ...(session.attachments?.length ? { attachments: session.attachments } : {}) } } : {}),
     ...(fixtureEvidence ? { fixtures: fixtureEvidence } : {}),
     ...(proposals.length > 0 ? { proposals: proposals.map(summarizeProposal) } : {}),
     codegraph: codegraphEvidence,
@@ -796,6 +804,25 @@ async function finishTelemetry({ telemetry, span, workflowRunId, status, duratio
     summary: telemetry.summary(workflowRunId),
     exportErrors: flushed.errors.length,
   };
+}
+
+function applyAgentOverride(harness, name, override) {
+  const current = harness.agents.get(name);
+  const next = { ...current };
+  if (override.model) next.model = override.model;
+  // A list, possibly empty: an agent that may use nothing, mechanically.
+  if (Array.isArray(override.tools)) next.tools = override.tools;
+  if (override.effort) {
+    if (!["low", "medium", "high"].includes(override.effort)) throw new TypeError("effort must be low, medium or high.");
+    next.effort = override.effort;
+  }
+  if (override.provider) {
+    // One provider, chosen. The router still asks the policy before anything is
+    // sent, so this cannot reach a provider the project does not allow.
+    next.provider = override.provider;
+    delete next.providers;
+  }
+  harness.agents.replace(name, Object.freeze(next));
 }
 
 function normalizeWorkflow(workflow = {}, { requested, fallback } = {}) {

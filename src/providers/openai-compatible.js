@@ -80,6 +80,7 @@ export function createOpenAICompatibleProvider({
       const envelope = createResultEnvelope(context.runId);
       const messages = [
         { role: "system", content: buildSystemMessage(context, workspaceTools ? envelope : undefined, workspaceTools) },
+        ...(context.history ?? []),
         { role: "user", content: String(context.input) },
       ];
       const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
@@ -108,7 +109,7 @@ export function createOpenAICompatibleProvider({
             messages,
             // Usage arrives in a last chunk only when asked for.
             ...(stream ? { stream: true, stream_options: { include_usage: true } } : {}),
-            ...(workspaceTools ? { tools: toolSchema(workspaceTools.definitions), tool_choice: "auto" } : {}),
+            ...(workspaceTools?.definitions.length > 0 ? { tools: toolSchema(workspaceTools.definitions), tool_choice: "auto" } : {}),
           },
           reasoningEffortConfigured: extraBody.reasoning_effort !== undefined || Boolean(context.agent.effort),
           stream,
@@ -240,7 +241,7 @@ async function request({ endpoint, apiKey, fetchImpl, context, body, name, reaso
   }
   if (!stream) return response.json();
   try {
-    return await collectChatStream(response);
+    return await collectChatStream(response, { onDelta: context.emitDelta });
   } catch (error) {
     // Same rule as a failed status: what already ran tools is not replayed blindly.
     if (error instanceof ProviderError && bodyHasToolResults(body)) error.safeToRetry = false;

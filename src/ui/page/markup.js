@@ -53,6 +53,7 @@ export const MARKUP = `</head>
       </div>
       <p class="notice bad" id="error" hidden></p>
       <section id="view-overview" class="view"></section>
+      <section id="view-chat" class="view" hidden></section>
       <section id="view-approvals" class="view" hidden></section>
       <section id="view-queue" class="view" hidden></section>
       <section id="view-runs" class="view" hidden></section>

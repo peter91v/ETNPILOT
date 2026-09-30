@@ -65,6 +65,8 @@ export const CLI_OPTIONS = Object.freeze({
   "for-run": { type: "boolean", default: false },
   scope: { type: "string" },
   cases: { type: "string" },
+  resume: { type: "string" },
+  continue: { type: "boolean", short: "c", default: false },
   json: { type: "boolean", default: false },
   "rotate-token": { type: "boolean", default: false },
   host: { type: "string" },
@@ -145,6 +147,7 @@ Usage:
   etnpilot telemetry summary [workflow-run-id] [--root directory]
   etnpilot doctor [--root directory]
   etnpilot check [name...] [--root directory]
+  etnpilot chat [--agent name] [--resume <id>|last | --continue] [--root directory]
   etnpilot eval [name...] [--provider name] [--cases directory] [--json]
 
 Exit codes:
@@ -338,6 +341,8 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     await webhookServer.close();
   } else if (command === "tui") {
     const root = resolve(values.root);
+    const { quietSqliteWarning } = await import("./quiet-warnings.js");
+    quietSqliteWarning();
     if (!process.stdin.isTTY) {
       throw new Error("The TUI needs an interactive terminal. Use 'etnpilot ui' or the plain commands instead.");
     }
@@ -623,6 +628,14 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"));
     const path = resolve(root, config.observability?.file ?? ".etnpilot/state/telemetry.jsonl");
     console.log(JSON.stringify(await summarizeTelemetryFile(path, { workflowRunId: rest[0] }), null, 2));
+  } else if (command === "chat") {
+    const { runChat } = await import("./chat.js");
+    if (values.resume && values.continue) throw new Error("Choose either --resume or --continue, not both.");
+    return runChat({
+      root: resolve(values.root),
+      agent: values.agent,
+      resume: values.continue ? "last" : values.resume,
+    });
   } else if (command === "eval") {
     // Whether a run does the job, rather than whether the code runs. Against
     // the scripted provider this is free and deterministic and measures the

@@ -149,6 +149,57 @@ export async function createReviewServer({
         });
         return send(response, 200, diff);
       }
+      // Conversations. A turn is started the way a run is, and answered the
+      // same way (202): its approvals appear in the inbox the page shows.
+      if (request.method === "GET" && url.pathname === "/api/chat/sessions") {
+        return send(response, 200, { sessions: await state.chat.list() });
+      }
+      if (request.method === "GET" && url.pathname === "/api/chat/session") {
+        const id = url.searchParams.get("id") ?? "";
+        if (!/^[a-z0-9][a-z0-9-]{2,63}$/.test(id)) throw badRequest("That is not a conversation id.");
+        return send(response, 200, await state.chat.read(id));
+      }
+      if (request.method === "GET" && url.pathname === "/api/chat/files") {
+        return send(response, 200, { files: await state.chat.files(url.searchParams.get("q") ?? "") });
+      }
+      if (request.method === "POST" && url.pathname === "/api/chat/send") {
+        const body = await readJsonBody(request);
+        const text = typeof body.text === "string" ? body.text.trim() : "";
+        if (text === "") throw badRequest("A message is required.");
+        const pick = (value) => (typeof value === "string" && value.trim() !== "" ? value.trim() : undefined);
+        try {
+          const started = await state.chat.send({
+            sessionId: pick(body.sessionId),
+            text,
+            agent: pick(body.agent),
+            model: pick(body.model),
+            provider: pick(body.provider),
+            effort: pick(body.effort),
+          });
+          return send(response, 202, started);
+        } catch (error) {
+          // Anything the person can fix by choosing differently is a 400, not a fault.
+          throw badRequest(error.message);
+        }
+      }
+      if (request.method === "POST" && url.pathname === "/api/chat/compact") {
+        const body = await readJsonBody(request);
+        const id = String(body.sessionId ?? "");
+        if (!/^[a-z0-9][a-z0-9-]{2,63}$/.test(id)) throw badRequest("That is not a conversation id.");
+        const pick = (value) => (typeof value === "string" && value.trim() !== "" ? value.trim() : undefined);
+        const result = await state.chat.compact(id, { agent: pick(body.agent), model: pick(body.model), provider: pick(body.provider), effort: pick(body.effort) });
+        return send(response, result.ok ? 202 : 200, result);
+      }
+      if (request.method === "POST" && url.pathname === "/api/chat/undo") {
+        const body = await readJsonBody(request);
+        const id = String(body.sessionId ?? "");
+        if (!/^[a-z0-9][a-z0-9-]{2,63}$/.test(id)) throw badRequest("That is not a conversation id.");
+        return send(response, 200, await state.chat.undo(id));
+      }
+      if (request.method === "POST" && url.pathname === "/api/chat/stop") {
+        const body = await readJsonBody(request);
+        return send(response, 200, { stopped: state.chat.stop(String(body.sessionId ?? "")) });
+      }
       if (request.method === "GET" && url.pathname === "/api/agents") {
         return send(response, 200, await state.agents());
       }

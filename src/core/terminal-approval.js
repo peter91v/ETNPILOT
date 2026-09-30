@@ -30,7 +30,7 @@ async function askForApproval(request, context, { input, output }) {
 
 // Every field below is agent-controlled text rendered into a terminal, so it
 // is escaped rather than printed raw, and shown in full rather than summarized.
-function describeRequest(request) {
+export function describeRequest(request) {
   const lines = [];
   if (request.fullCommandText) lines.push(`Command: ${display(request.fullCommandText)}`);
   if (request.fileName) lines.push(`File: ${display(request.fileName)}`);
@@ -43,11 +43,13 @@ function describeRequest(request) {
   }
   // Last, and whole: it is the thing being decided, and it is the only field
   // that runs to several lines.
-  if (request.diff) lines.push(`Changes:\n${display(request.diff)}`);
+  if (request.diff) lines.push(`Changes:\n${display(request.diff, { allowNewlines: true })}`);
   return lines.length > 0 ? `\n${lines.join("\n")}` : "";
 }
 
-function display(value) {
-  const { text, truncated } = sanitizeForDisplay(value ?? "", { maxLength: 8192 });
+export function display(value, { allowNewlines = false } = {}) {
+  // A diff is lines; escaping its newlines turns it into one unreadable row.
+  // Every other control character is still escaped.
+  const { text, truncated } = sanitizeForDisplay(value ?? "", { maxLength: 8192, allowNewlines });
   return truncated ? `${text} […truncated, inspect with 'etnpilot approval show']` : text;
 }

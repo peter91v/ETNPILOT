@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import "../src/cli/early-warnings.js";
 import { parseArgs } from "node:util";
 import { CLI_OPTIONS, runCli } from "../src/cli/commands.js";
 

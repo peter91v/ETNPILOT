@@ -97,7 +97,8 @@ export function createAnthropicProvider({
           fetchImpl,
         })
         : undefined;
-      const messages = [{ role: "user", content: String(context.input) }];
+      // A conversation's earlier turns come first, as plain text.
+      const messages = [...(context.history ?? []), { role: "user", content: String(context.input) }];
       // One envelope per invocation: the marker a file could name is never
       // the marker in use.
       const envelope = createResultEnvelope(context.runId);
@@ -145,7 +146,9 @@ export function createAnthropicProvider({
             // rewrites it into blocks for nothing, because a prompt that
             // short is under the minimum a cache entry needs anyway.
             messages: caching && messages.length > 1 ? withConversationBreakpoint(messages) : messages,
-            ...(workspaceTools ? { tools: cacheable(toolSchema(workspaceTools.definitions)) } : {}),
+            // An agent allowed no tool at all is sent none: an empty list is not a
+            // request every API accepts.
+            ...(workspaceTools?.definitions.length > 0 ? { tools: cacheable(toolSchema(workspaceTools.definitions)) } : {}),
           },
         }), { ...retry, signal: context.signal });
         const payload = attempt.value;
@@ -291,7 +294,7 @@ async function request({ endpoint, apiKey, fetchImpl, context, body, stream }) {
   }
   if (!stream) return response.json();
   try {
-    return await collectAnthropicStream(response);
+    return await collectAnthropicStream(response, { onDelta: context.emitDelta });
   } catch (error) {
     // Same rule as a failed status: what already ran tools is not replayed blindly.
     if (error instanceof ProviderError && bodyHasToolResults(body)) error.safeToRetry = false;

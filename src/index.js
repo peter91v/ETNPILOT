@@ -82,3 +82,6 @@ export {
   createFileSecretProvider,
 } from "./secrets/builtins.js";
 export { createSecretResolver, SecretResolutionError, SecretResolver } from "./secrets/resolver.js";
+
+export { createSessionId, historyFrom, listSessions, readSession, runChatTurn, verifySession } from "./runtime/chat-session.js";
+export { boundHistory, normalizeHistory } from "./core/history.js";
