@@ -93,12 +93,8 @@ export async function runSmoke(root, { config, env = process.env, provider: want
       return account(result);
     },
     tools: async () => {
-      const result = await ask(await build({ tools: true, stream: false }), "Use the read_file tool to read hello.txt, then tell me the exact text inside it.", { tools: ["read_file", "list_files"] });
-      if ((result.toolCalls ?? []).length === 0) throw new Error("the model answered without calling a tool");
-      const failed = result.toolCalls.find((call) => call.ok === false);
-      if (failed) throw new Error(`a tool call failed: ${failed.error ?? failed.name}`);
-      if (!String(result.text ?? "").includes(MARKER)) throw new Error(`the answer did not contain the file's text: "${String(result.text ?? "").slice(0, 80)}"`);
-      return `${result.toolCalls.length} tool call(s), ${account(result)}`;
+      const result = await ask(await build({ tools: true, stream: false }), TOOL_PROMPT, { tools: ["read_file", "list_files"] });
+      return `${toolCalls(result)} tool call(s), ${account(result)}`;
     },
     stream: async () => {
       const pieces = [];
@@ -112,13 +108,10 @@ export async function runSmoke(root, { config, env = process.env, provider: want
     // tool step (no stream) nor the stream step (no tools) reaches it.
     toolstream: async () => {
       const pieces = [];
-      const result = await ask(await build({ tools: true, stream: true }), "Use the read_file tool to read hello.txt, then tell me the exact text inside it.", { tools: ["read_file", "list_files"], emitDelta: (piece) => pieces.push(piece) });
-      if ((result.toolCalls ?? []).length === 0) throw new Error("the model answered without calling a tool");
-      const failed = result.toolCalls.find((call) => call.ok === false);
-      if (failed) throw new Error(`a tool call failed: ${failed.error ?? failed.name}`);
-      if (!String(result.text ?? "").includes(MARKER)) throw new Error(`the answer did not contain the file's text: "${String(result.text ?? "").slice(0, 80)}"`);
+      const result = await ask(await build({ tools: true, stream: true }), TOOL_PROMPT, { tools: ["read_file", "list_files"], emitDelta: (piece) => pieces.push(piece) });
+      const calls = toolCalls(result);
       if (pieces.length < 2) throw new Error(`the text arrived in ${pieces.length} piece(s), not as a stream`);
-      return `${result.toolCalls.length} tool call(s) while streaming ${pieces.length} pieces, ${account(result)}`;
+      return `${calls} tool call(s) while streaming ${pieces.length} pieces, ${account(result)}`;
     },
     forge: async () => {
       const dry = await forgeProject(root, /** @type {any} */ ({ config, env, dryRun: true }));
@@ -141,6 +134,19 @@ export async function runSmoke(root, { config, env = process.env, provider: want
     }
   }
   return report;
+}
+
+const TOOL_PROMPT = "Use the read_file tool to read hello.txt, then tell me the exact text inside it.";
+
+// The model called the tool, the tool worked, and the answer used what it read.
+// Returns how many calls were made.
+function toolCalls(result) {
+  const calls = result.toolCalls ?? [];
+  if (calls.length === 0) throw new Error("the model answered without calling a tool");
+  const failed = calls.find((call) => call.ok === false);
+  if (failed) throw new Error(`a tool call failed: ${failed.error ?? failed.name}`);
+  if (!String(result.text ?? "").includes(MARKER)) throw new Error(`the answer did not contain the file's text: "${String(result.text ?? "").slice(0, 80)}"`);
+  return calls.length;
 }
 
 function serviceOf(entry) {
