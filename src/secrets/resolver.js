@@ -117,18 +117,18 @@ export class SecretResolver {
     return value;
   }
 
-  async check(name) {
+  async check(name, { baseUrl } = {}) {
     const reference = this.values[name];
     if (!reference) {
-      const stored = await this.stored(name);
-      return { name, configured: stored !== undefined, available: stored !== undefined, ...(stored !== undefined ? { provider: "stored-login" } : {}) };
+      const stored = await this.stored(name, baseUrl);
+      return { name, configured: stored !== undefined, available: stored !== undefined, ...(stored !== undefined ? { provider: "stored-login" } : {}), ...(this.refusals.has(name) ? { refused: this.refusals.get(name) } : {}) };
     }
     try {
       const value = await this.resolve(reference, { name, required: false });
-      if (value === undefined && (await this.stored(name)) !== undefined) {
+      if (value === undefined && (await this.stored(name, baseUrl)) !== undefined) {
         return { name, configured: true, available: true, provider: "stored-login" };
       }
-      return { name, configured: true, available: value !== undefined, provider: reference.provider };
+      return { name, configured: true, available: value !== undefined, provider: reference.provider, ...(value === undefined && this.refusals.has(name) ? { refused: this.refusals.get(name) } : {}) };
     } catch (error) {
       return {
         name,

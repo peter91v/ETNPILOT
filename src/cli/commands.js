@@ -472,7 +472,8 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
       // documentation.
       console.log("");
       console.log("This port is open to your network, not just this machine. Everyone who can reach");
-      console.log("it and has the token has that same power. An SSH tunnel keeps it on loopback:");
+      console.log("it and has the token has that same power, and the connection is plain HTTP, so the");
+      console.log("token can be read by anyone on that network. An SSH tunnel keeps it on loopback:");
       console.log(`  ssh -N -L ${address.port}:127.0.0.1:${address.port} <user>@<this-machine>`);
     }
     // The point of this command is to look at the page, so it opens where

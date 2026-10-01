@@ -95,3 +95,25 @@ export function hostAllowed(secretName, entry, baseUrl) {
   }
   return { ok: true };
 }
+
+// The address of a GitLab (or other self-hosted) sign-in, as given by a person
+// or a page. Anything the server will contact on request is checked first: a
+// web address without credentials in it, https unless the host is on a private
+// network, and never the cloud metadata ranges.
+export function normalizeAuthHost(value) {
+  let url;
+  try {
+    url = new URL(String(value));
+  } catch {
+    throw new Error(`'${value}' is not a web address (expected something like https://gitlab.example.com).`);
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("The address must start with https:// (or http:// on a private network).");
+  if (url.username || url.password) throw new Error("The address must not contain a user name or password.");
+  const host = url.hostname.toLowerCase();
+  if (/^169\.254\./.test(host) || host.startsWith("[fe80:") || host === "metadata.google.internal" || host === "[fd00:ec2::254]") {
+    throw new Error("That address is a link-local or cloud-metadata address, not a sign-in server.");
+  }
+  const privateHost = /^(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host) || host === "localhost" || !host.includes(".") || host.endsWith(".local") || host.endsWith(".lan") || host === "[::1]";
+  if (url.protocol === "http:" && !privateHost) throw new Error("A sign-in over plain http is only accepted on a private network. Use https://.");
+  return url.origin;
+}

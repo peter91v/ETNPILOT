@@ -795,6 +795,11 @@ async function runWorkspaceCommand(root, bounds, args, context, signal, sandbox)
   if (!Array.isArray(command) || command.length === 0 || command.some((part) => typeof part !== "string")) {
     return { ok: false, error: "'command' must be a non-empty array of strings, for example [\"npm\",\"test\"]." };
   }
+  // The stored logins are not the project's to read. An approval would show the
+  // command, but a model should not be able to ask for the file at all.
+  if (/etnpilot[\\/](credentials|trusted-projects)\.json|\.config[\\/]etnpilot/i.test(command.join(" "))) {
+    return { ok: false, error: "That command names ETNPilot's stored logins, which a run may not read.", approved: false, refused: "policy" };
+  }
   const decision = await context.approve({
     kind: "shell",
     fullCommandText: command.join(" "),

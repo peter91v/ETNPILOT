@@ -1,6 +1,6 @@
 import { awaitDeviceFlow, checkDeviceFlow, DeviceFlowError, refreshToken, startDeviceFlow } from "./device-flow.js";
 import { openCredentialStore } from "./credential-store.js";
-import { SERVICE_IDS, SERVICES, serviceFor } from "./services.js";
+import { SERVICE_IDS, SERVICES, normalizeAuthHost, serviceFor } from "./services.js";
 
 // Sign in, sign out, and say who is signed in. The terminal and the web page
 // both call this; neither holds any of it itself.
@@ -58,8 +58,9 @@ function verification(service, value, { host, baseUrl }) {
 }
 
 // A key or a token someone typed. Checked first; a refused one is not stored.
-export async function saveKey(serviceId, value, { env, fetchImpl, verify = true, host, baseUrl } = {}) {
+export async function saveKey(serviceId, value, { env, fetchImpl, verify = true, host: given, baseUrl } = {}) {
   const service = serviceFor(serviceId);
+  const host = given ? normalizeAuthHost(given) : undefined;
   const key = String(value ?? "").trim();
   if (key === "") throw new Error(`Enter the ${service.label} ${service.method === "key" ? "key" : "token"}.`);
   if (/\s/.test(key)) throw new Error("That does not look like a key: it contains spaces or line breaks.");
@@ -92,7 +93,7 @@ export async function beginDeviceLogin(serviceId, { env = process.env, fetchImpl
   const store = storeFor({ env, fetchImpl });
   const app = await store.app(service.id);
   const id = clientId ?? env[`ETNPILOT_${service.id.toUpperCase()}_CLIENT_ID`] ?? app?.clientId;
-  const base = (host ?? app?.host ?? service.host).replace(/\/$/, "");
+  const base = normalizeAuthHost(host ?? app?.host ?? service.host);
   if (!id) {
     const error = new DeviceFlowError(`Browser sign-in needs the client id of an OAuth application. ${service.appHelp}`, "client_id_required");
     throw error;

@@ -33,6 +33,14 @@ let openSetting;
 let view = "overview";
 let scope = "local";
 let settingsFilter = "";
+// The link that opened this page carried the token. The cookie holds it from
+// here on, so it comes out of the address bar and the history entry.
+try {
+  if (location.search.indexOf("token=") !== -1) history.replaceState(null, "", location.pathname + location.hash);
+} catch (error) {
+  // An address that cannot be rewritten stays as it is.
+}
+
 let changedOnly = false;
 let settingsLimit = 25;
 let paletteIndex = 0;

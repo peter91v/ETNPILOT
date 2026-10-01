@@ -123,3 +123,15 @@ test("an unknown provider is named", async () => {
   const report = await runSmoke(root, { config, env, provider: "nope" });
   assert.match(report.steps[0].detail, /No provider named 'nope'/);
 });
+
+test("doctor warns about what does not stop a run", async () => {
+  const { diagnose } = await import("../src/runtime/diagnose.js");
+  const { root } = await project();
+  const { mkdir, writeFile: write } = await import("node:fs/promises");
+  await mkdir(join(root, ".etnpilot"), { recursive: true });
+  await write(join(root, ".etnpilot", "etnpilot.yaml"), "version: 1\nproviders: {}\n");
+  const report = await diagnose(root);
+  const text = (report.warnings ?? []).join("\n");
+  assert.match(text, /Receipts are not signed/);
+  assert.match(text, /sandbox\.enabled is false/);
+});

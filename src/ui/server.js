@@ -30,6 +30,7 @@ export async function createReviewServer({
   rotateToken = false,
   getNetworkInterfaces = networkInterfaces,
   fetchImpl,
+  allowedHosts = [],
 } = {}) {
   // Kept between starts, because an installed app holds a link: a token minted
   // per start locks that icon out at the next restart. A caller may still pass
@@ -45,8 +46,19 @@ export async function createReviewServer({
 
   const accounts = createAccountRoutes({ env, fetchImpl, gitlabHost: () => state?.config?.git?.baseUrl });
 
+  // Which names a request may use for this server. An address that is a number
+  // cannot be rebound to another machine, so any IP literal and 'localhost' are
+  // fine; a name has to be one the person chose (ETNPILOT_UI_HOSTS or the
+  // 'allowedHosts' option), because a page on another site can point its own
+  // name at this port, and the browser would then send the request anyway.
+  const namedHosts = new Set([...allowedHosts, ...String(env.ETNPILOT_UI_HOSTS ?? "").split(",")]
+    .map((name) => name.trim().toLowerCase()).filter(Boolean));
+
   const server = createServer(async (request, response) => {
     try {
+      if (!hostAllowed(request.headers.host, namedHosts)) {
+        return send(response, 421, { error: "unknown-host", message: "This server answers to its own address only. To use a name, start it with ETNPILOT_UI_HOSTS=<name>." });
+      }
       const url = new URL(request.url, "http://127.0.0.1");
       if (request.method === "OPTIONS") return send(response, 405, { error: "cross-origin-requests-are-not-served" });
       // Two ways in, and the second is the one an installed app has: a link
@@ -520,6 +532,17 @@ function bracket(address) {
 
 // 'Loopback' is the whole security posture of this server, so it is decided
 // from the address it actually bound to, not from what was asked for.
+// 'Host' of a request: a number (v4 or v6) or 'localhost' always; any other name
+// only if the person listed it.
+export function hostAllowed(hostHeader, named = new Set()) {
+  if (typeof hostHeader !== "string" || hostHeader === "") return false;
+  const bracketed = /^\[([^\]]+)\](?::\d+)?$/.exec(hostHeader);
+  const name = (bracketed ? bracketed[1] : hostHeader.replace(/:\d+$/, "")).toLowerCase();
+  if (bracketed) return true;
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(name)) return true;
+  return name === "localhost" || named.has(name);
+}
+
 function isLoopback(address) {
   if (address === "::1" || address === "127.0.0.1") return true;
   if (address === "::" || address === "0.0.0.0") return false;
@@ -581,7 +604,9 @@ function html(response, status, body, extra = {}) {
     // the icons, the manifest and the service worker — and nothing else is
     // reachable from here, which is what 'default-src none' keeps true.
     "content-security-policy": "default-src 'none'; img-src data: 'self'; style-src 'unsafe-inline';"
-      + " script-src 'unsafe-inline'; connect-src 'self'; manifest-src 'self'; worker-src 'self'",
+      + " script-src 'unsafe-inline'; connect-src 'self'; manifest-src 'self'; worker-src 'self';"
+      + " frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+    "x-frame-options": "DENY",
     "referrer-policy": "no-referrer",
   });
   response.end(body);

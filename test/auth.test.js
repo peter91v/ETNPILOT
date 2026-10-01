@@ -352,3 +352,26 @@ test("the status warns when the file can be read by others", async () => {
   const status = await authStatus({ env });
   assert.match(status[0].storeProblem, /chmod 600/);
 });
+
+test("an address a page gives for sign-in is checked before the server contacts it", async () => {
+  const { normalizeAuthHost } = await import("../src/auth/services.js");
+  assert.equal(normalizeAuthHost("https://gitlab.example.com/some/path"), "https://gitlab.example.com");
+  assert.equal(normalizeAuthHost("http://gitlab.lan:8080"), "http://gitlab.lan:8080");
+  assert.equal(normalizeAuthHost("http://192.168.1.20"), "http://192.168.1.20");
+  for (const bad of ["ftp://x.test", "http://gitlab.example.com", "https://user:pw@gitlab.example.com", "http://169.254.169.254/latest", "https://169.254.169.254", "not an address", "javascript:alert(1)"]) {
+    assert.throws(() => normalizeAuthHost(bad), Error, bad);
+  }
+  const { env } = await home();
+  await assert.rejects(saveKey("gitlab", ["glpat", "abcdefghijklmnop12"].join("-"), { env, verify: false, host: "https://169.254.169.254" }), /metadata/);
+});
+
+test("a run's command may not name the stored logins", async () => {
+  const { createWorkspaceTools } = await import("../src/providers/workspace-tools.js");
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-guard-"));
+  const tools = createWorkspaceTools({ workingDirectory: root, allowed: ["run_command"] });
+  let asked = false;
+  const result = await tools.invoke("run_command", { command: ["cat", "/root/.config/etnpilot/credentials.json"] }, { approve: async () => { asked = true; return { kind: "approve-once" }; } });
+  assert.equal(result.ok, false);
+  assert.equal(result.refused, "policy");
+  assert.equal(asked, false);
+});
