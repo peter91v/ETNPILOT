@@ -2,6 +2,8 @@
 
 ETNPilot is a GitLab-first, provider-neutral harness for auditable software-engineering agents. It combines isolated Git worktrees, explicit human approvals, content-addressed receipts, reusable agents, skills, prompts, plugins, and local [CodeGraph](https://github.com/colbymchenry/codegraph) code intelligence.
 
+Deutsche Kurzfassung: [README.de.md](README.de.md).
+
 ## Status
 
 The repository is in early development. The first runnable vertical slice provides:

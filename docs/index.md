@@ -13,6 +13,9 @@
 | understand what a run may do and who decides | [policy.md](policy.md), [approval-inbox.md](approval-inbox.md), [sandbox.md](sandbox.md) |
 | trust a record of what happened | [signed-receipts.md](signed-receipts.md), [content-provenance.md](content-provenance.md), [reproducibility.md](reproducibility.md) |
 | see which files are type-checked | [typecheck.md](typecheck.md) |
+| clear out old receipts | [maintenance.md](maintenance.md) |
+| cut a release | [releasing.md](releasing.md) |
+| why it is built this way | [adr/README.md](adr/README.md) |
 | add another provider (Gemini, Mistral, OpenRouter, Groq, Ollama) | [providers.md](providers.md) |
 | see what it cost | [observability.md](observability.md) (`etnpilot usage`) |
 | use the page or the terminal screen | [review-ui.md](review-ui.md), [tui.md](tui.md), [settings.md](settings.md) |
