@@ -1,4 +1,4 @@
-import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import YAML from "yaml";
 import { Harness } from "../core/harness.js";
@@ -43,6 +43,13 @@ Write what a team would want to have ready for this specific codebase:
 - instructions: lasting rules for working in this repository (conventions,
   layout, things not to touch). Give a 'scope' (a directory that exists in the
   digest) only when a rule applies to just that directory.
+
+Work that is already there:
+- The input lists the agents, skills and instructions the project already has,
+  each with what it is for. Add only what is MISSING. Do not write an agent
+  whose job an existing agent already does, a skill that repeats an existing
+  skill, or an instruction that restates an existing one, even under a new
+  name. An empty list is a good answer when nothing is missing.
 
 Rules for agents:
 - "tools" must be chosen from: read_file, list_files, search_files, write_file,
@@ -117,6 +124,10 @@ export async function forgeProject(root, {
     return report;
   }
   report.notes.push(...plan.notes);
+  if (plan.covered) {
+    report.notes.push("AgentsForge found nothing missing: the agents, skills and instructions this project has already cover what it saw. Nothing was written.");
+    return report;
+  }
   await writePlan(plan, { root, configDir, report, provider: report.provider });
   return report;
 }
@@ -277,7 +288,14 @@ export function validatePlan(raw, { root }) {
     }
     instructions.push({ name, scope, body });
   }
-  if (agents.length + skills.length + instructions.length === 0) throw new Error("it proposed nothing");
+  if (agents.length + skills.length + instructions.length === 0) {
+    // All three lists there and empty is an answer: the project has it covered.
+    // Anything else (nothing usable in what was proposed) is not.
+    const lists = [raw.agents, raw.skills, raw.instructions];
+    const answeredEmpty = lists.every((list) => Array.isArray(list) && list.length === 0);
+    if (!answeredEmpty) throw new Error("it proposed nothing");
+    return { agents, skills, instructions, notes, root, covered: true };
+  }
   return { agents, skills, instructions, notes, root };
 }
 
@@ -331,15 +349,31 @@ async function writePlan(plan, { root, configDir, report, provider }) {
 
 async function describeExisting(configDir) {
   const lines = [];
-  for (const [folder, label] of [["agents", "agent"], ["skills", "skill"]]) {
-    for (const entry of await readdir(join(configDir, folder), { withFileTypes: true }).catch(() => [])) {
-      lines.push(`${label}: ${entry.name.replace(/\.yaml$/, "")}`);
-    }
+  for (const entry of await readdir(join(configDir, "agents"), { withFileTypes: true }).catch(() => [])) {
+    if (!entry.isFile() || !/\.ya?ml$/.test(entry.name)) continue;
+    const name = entry.name.replace(/\.ya?ml$/, "");
+    const description = await readFile(join(configDir, "agents", entry.name), "utf8").then((text) => {
+      try { return String(YAML.parse(text)?.description ?? ""); } catch { return ""; }
+    }, () => "");
+    lines.push(`agent: ${name}${brief(description)}`);
+  }
+  for (const entry of await readdir(join(configDir, "skills"), { withFileTypes: true }).catch(() => [])) {
+    if (!entry.isDirectory()) continue;
+    const description = await readFile(join(configDir, "skills", entry.name, "SKILL.md"), "utf8").then(
+      (text) => /^description:\s*(.+)$/m.exec(text.split("\n---")[0])?.[1] ?? "",
+      () => "",
+    );
+    lines.push(`skill: ${entry.name}${brief(description)}`);
   }
   for (const file of await readdir(join(configDir, "instructions"), { recursive: true }).catch(() => [])) {
     if (String(file).endsWith(".md")) lines.push(`instruction: ${file}`);
   }
-  return lines.slice(0, 60).join("\n");
+  return lines.slice(0, 80).join("\n");
+}
+
+function brief(description) {
+  const one = description.replace(/\s+/g, " ").trim().slice(0, 110);
+  return one ? ` — ${one}` : "";
 }
 
 async function exists(path) {

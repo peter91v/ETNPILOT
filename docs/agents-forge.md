@@ -57,3 +57,14 @@ untouched starter orchestrator, it is given the forged and imported agents as `s
 `etnpilot content lock`; with `content.provenance.mode: enforce` a run refuses it before that. A failing
 model, a missing key or an unusable answer never fails `init`: the project is created and the report
 says what happened.
+
+## It adds what is missing, not what is there
+
+The model is told what the project already has: every agent and skill with its
+one-line description, and the instruction files. It is asked to add only what
+is missing and may answer with empty lists. Without the descriptions it only
+saw names and wrote near-duplicates of agents that were imported.
+
+When many agents exist that the orchestrator may not hand work to yet, the
+note is one sentence with a count, pointing to **Who may hand work to it** in
+the Agents view, instead of a list to type back.

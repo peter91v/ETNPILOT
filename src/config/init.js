@@ -520,7 +520,11 @@ export async function wireOrchestrator(configDir, report) {
     const listed = YAML.parse(current)?.subagents ?? [];
     const missing = names.filter((name) => !listed.includes(name));
     if (missing.length > 0) {
-      report.notes.push(`.etnpilot/agents/orchestrator.yaml was left as it is. To let it use ${missing.join(", ")}, add them under 'subagents' and 'spawn_subagent' under 'tools'.`);
+      // A long list is not something to type back: the Agents view has a switch
+      // per agent ('Who may hand work to it') that does exactly this edit.
+      report.notes.push(missing.length > 4
+        ? `.etnpilot/agents/orchestrator.yaml was left as it is. ${missing.length} agents are not under its 'subagents' yet (${missing.slice(0, 3).join(", ")}, …). Choose which it may hand work to in the Agents view ('Who may hand work to it'), or add them under 'subagents' and 'spawn_subagent' under 'tools'.`
+        : `.etnpilot/agents/orchestrator.yaml was left as it is. To let it use ${missing.join(", ")}, add them under 'subagents' and 'spawn_subagent' under 'tools'.`);
     }
   }
 }
