@@ -1,3 +1,4 @@
+// @ts-check
 import { accountRequest } from "./usage-meter.js";
 import { serviceForSecret } from "../auth/services.js";
 import { providerToolNames } from "./tool-names.js";

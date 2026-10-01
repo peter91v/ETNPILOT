@@ -1,3 +1,4 @@
+// @ts-check
 import { runChild } from "../runtime/child-process.js";
 
 const DEFAULT_OUTPUT_LIMIT = 1024 * 1024;

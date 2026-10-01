@@ -1,3 +1,4 @@
+// @ts-check
 import { readRegularFile } from "../runtime/bounded-io.js";
 import { randomBytes } from "node:crypto";
 import { appendFile, mkdir, readdir, rename, stat } from "node:fs/promises";
@@ -103,7 +104,7 @@ export class Telemetry {
     });
   }
 
-  recordProviderUsage({ workflowRunId, agentRunId, provider, model, usage = {}, invocationComplete = true }) {
+  recordProviderUsage({ workflowRunId, agentRunId, provider, model, usage = /** @type {any} */ ({}), invocationComplete = true }) {
     const normalized = normalizeUsage(usage);
     const key = workflowRunId ?? agentRunId;
     const rate = this.pricing.models[model]
@@ -308,7 +309,7 @@ function retroactive(attributes, summary, model, context) {
   }, rate);
 }
 
-function normalizeConfig(config = {}) {
+function normalizeConfig(config = /** @type {any} */ ({})) {
   if (!config || Array.isArray(config) || typeof config !== "object") {
     throw new TypeError("observability must be an object.");
   }
@@ -573,7 +574,7 @@ function emptySummary(currency) {
     cacheWriteTokens: 0,
     providerUnits: 0,
     requests: 0,
-    estimatedCost: undefined,
+    estimatedCost: /** @type {number | undefined} */ (undefined),
     currency,
     invocations: 0,
     pricedInvocations: 0,

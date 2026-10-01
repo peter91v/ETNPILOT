@@ -1,3 +1,4 @@
+// @ts-check
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";

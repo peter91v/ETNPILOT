@@ -1,3 +1,4 @@
+// @ts-check
 export class WorkflowEngine {
   constructor({ concurrency = 1, failFast = true, timeoutMs = 30 * 60_000, maxSteps = 100, events } = /** @type {any} */ ({})) {
     if (!Number.isInteger(concurrency) || concurrency < 1) throw new TypeError("concurrency must be a positive integer.");
@@ -10,6 +11,7 @@ export class WorkflowEngine {
 
   async run(steps, execute, { signal, context = {} } = /** @type {any} */ ({})) {
     const normalized = validateSteps(steps, this.maxSteps);
+    /** @type {Map<string, any>} */
     const states = new Map(normalized.map((step) => [step.id, {
       id: step.id,
       status: "pending",

@@ -1,3 +1,4 @@
+// @ts-check
 import { createInterface } from "node:readline/promises";
 import { sanitizeForDisplay } from "./text-safety.js";
 
@@ -5,7 +6,7 @@ export function createTerminalApprovalHandler({ input = process.stdin, output = 
   let pending = Promise.resolve();
   return (request, context) => {
     const operation = pending.then(() => askForApproval(request, context, { input, output }));
-    pending = operation.catch(() => {});
+    pending = operation.then(() => {}, () => {});
     return operation;
   };
 }

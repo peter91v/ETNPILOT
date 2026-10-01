@@ -1,3 +1,4 @@
+// @ts-check
 import { builtinModules } from "node:module";
 
 const SAFE_BUILTINS = new Set([

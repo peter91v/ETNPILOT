@@ -1,3 +1,4 @@
+// @ts-check
 import { invocationMeter } from "./usage-meter.js";
 import { telemetryProviderAttributes } from "../observability/telemetry.js";
 

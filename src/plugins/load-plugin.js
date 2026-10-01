@@ -1,3 +1,4 @@
+// @ts-check
 import { resolve } from "node:path";
 import { normalizePluginLimits } from "./protocol.js";
 import { validatePluginManifest } from "./sdk.js";

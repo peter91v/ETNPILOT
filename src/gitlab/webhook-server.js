@@ -218,7 +218,7 @@ export async function createGitLabWebhookServer({
         await new Promise((resolveClose, reject) => {
           server.close((error) => {
             if (error) return reject(error);
-            resolveClose();
+            resolveClose(undefined);
           });
         });
       }

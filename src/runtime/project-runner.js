@@ -1,3 +1,4 @@
+// @ts-check
 import { swallow } from "./swallow.js";
 import { acquireWorkspaceLease } from "./workspace-lease.js";
 import { commandEnvironment } from "./command-environment.js";

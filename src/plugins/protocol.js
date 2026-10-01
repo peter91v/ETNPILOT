@@ -42,7 +42,7 @@ export function normalizePluginLimits(value = {}, defaults = DEFAULT_PLUGIN_LIMI
   }
   const mode = value.memoryMonitoring ?? defaults.memoryMonitoring ?? "required";
   if (!["required", "heap-only"].includes(mode)) throw new TypeError("Plugin memoryMonitoring must be required or heap-only.");
-  const normalized = { memoryMonitoring: mode };
+  const normalized = /** @type {any} */ ({ memoryMonitoring: mode });
   for (const [name, [minimum, maximum]] of Object.entries(INTEGER_LIMITS)) {
     const candidate = value[name] ?? defaults[name];
     if (!Number.isSafeInteger(candidate) || candidate < minimum || candidate > maximum) {

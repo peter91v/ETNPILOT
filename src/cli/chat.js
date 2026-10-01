@@ -112,7 +112,7 @@ export async function runChat({
       if (/^(a|always)$/.test(answer)) return { kind: "approve-for-run" };
       return { kind: "reject", reason: "Rejected by the user." };
     });
-    queue = operation.catch(() => {});
+    queue = operation.then(() => {}, () => {});
     return operation;
   };
 

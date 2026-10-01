@@ -1,3 +1,4 @@
+// @ts-check
 export * from "./receipt-views.js";
 export * from "./project-reads.js";
 import { checkRunReadiness, readAgents, readMergeRequests, readUsage, readWorktrees, worktreeManager } from "./project-reads.js";
@@ -46,7 +47,7 @@ export async function openProjectState({ root = process.cwd(), env = process.env
   // the TUI and the page both need to say what is running, and closing either
   // one must stop what it started rather than stranding it.
   const running = new Set();
-  const runErrors = [];
+  const runErrors = /** @type {any[]} */ ([]);
   const self = {
     root: projectRoot,
     get config() { return current; },
@@ -105,7 +106,7 @@ export async function openProjectState({ root = process.cwd(), env = process.env
         if (!names.includes(chosen)) throw new TypeError(`Unknown agent '${chosen}'. This project has: ${names.join(", ")}.`);
         if (provider) {
           const verdict = new PolicyEngine(current.policy).evaluateProvider(provider, { agent: chosen });
-          if (verdict.allowed === false) throw new Error(verdict.reason ?? `The policy does not allow provider '${provider}'.`);
+          if (verdict.allowed === false) throw new Error(/** @type {any} */ (verdict).reason ?? `The policy does not allow provider '${provider}'.`);
           if (!current.providers?.[provider]) throw new TypeError(`No provider '${provider}' is configured.`);
         }
         const policy = new PolicyEngine(current.policy);
@@ -190,7 +191,7 @@ export async function openProjectState({ root = process.cwd(), env = process.env
       const all = await module.listModels({ baseUrl: providerConfig.baseUrl, apiKey });
       // Only ETNPilot's own judgment of which are chat-capable, for the
       // provider type whose listing endpoint does not separate them itself.
-      const models = type === "openai-compatible" ? all.filter((model) => module.looksLikeChatModel(model.id)) : all;
+      const models = type === "openai-compatible" ? all.filter((model) => /** @type {any} */ (module).looksLikeChatModel(model.id)) : all;
       return {
         available: true,
         models: models.map((model) => ({ ...model, knownPrice: knownPriceFor(type, model.id) })),
@@ -234,7 +235,7 @@ export async function openProjectState({ root = process.cwd(), env = process.env
         if (signal.aborted) controller.abort();
         else signal.addEventListener("abort", () => controller.abort(), { once: true });
       }
-      const record = { task, agent, startedAt: new Date().toISOString(), controller, done: 0, ...(session ? { session } : {}) };
+      const record = /** @type {any} */ ({ task, agent, startedAt: new Date().toISOString(), controller, done: 0, ...(session ? { session } : {}) });
       const execute = via ?? runProject;
       const started = execute({
         root: projectRoot,
@@ -401,7 +402,7 @@ export async function openProjectState({ root = process.cwd(), env = process.env
 }
 
 export async function collectState(
-  { inbox, queue, runsDirectory, root, env, running = new Set(), runErrors = [] },
+  { inbox, queue, runsDirectory, root, env, running = new Set(), runErrors = /** @type {any[]} */ ([]) },
   { runLimit = 20 } = /** @type {any} */ ({}),
 ) {
   return {

@@ -1,3 +1,4 @@
+// @ts-check
 import { createRssMeasurement } from "./process-memory.js";
 import { processGroupOptions, signalTree } from "../runtime/child-process.js";
 import { randomUUID } from "node:crypto";
@@ -81,7 +82,7 @@ export class PluginWorkerHost {
     }
   }
 
-  constructor({ projectRoot, entryPath, readRoots, limits = DEFAULT_PLUGIN_LIMITS, resources = {} }) {
+  constructor({ projectRoot, entryPath, readRoots, limits = DEFAULT_PLUGIN_LIMITS, resources = /** @type {any} */ ({}) }) {
     this.#limits = limits;
     this.#allowedNetworkPrefixes = normalizeNetworkPrefixes(resources.networkAllow ?? []);
     this.#allowedSecretNames = new Set(normalizeStringList(resources.secretInputs ?? [], "Plugin secretInputs"));

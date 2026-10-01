@@ -1,3 +1,4 @@
+// @ts-check
 import { ProviderError } from "./router.js";
 
 export function invocationMeter(context, provider) {

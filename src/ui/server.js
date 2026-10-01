@@ -1,3 +1,4 @@
+// @ts-check
 import { swallow } from "../runtime/swallow.js";
 import { timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
@@ -60,7 +61,7 @@ export async function createReviewServer({
       if (!hostAllowed(request.headers.host, namedHosts)) {
         return send(response, 421, { error: "unknown-host", message: "This server answers to its own address only. To use a name, start it with ETNPILOT_UI_HOSTS=<name>." });
       }
-      const url = new URL(request.url, "http://127.0.0.1");
+      const url = new URL(request.url ?? "/", "http://127.0.0.1");
       if (request.method === "OPTIONS") return send(response, 405, { error: "cross-origin-requests-are-not-served" });
       // Two ways in, and the second is the one an installed app has: a link
       // carries the token in its query, and opening it leaves a cookie behind
@@ -386,7 +387,7 @@ export async function createReviewServer({
         };
         const onListening = () => {
           server.off("error", onError);
-          const address = server.address();
+          const address = /** @type {import("node:net").AddressInfo} */ (server.address());
           // A link that only works on the machine that printed it is no help
           // on a tablet: when the port is open to the network, the address
           // given is one that can actually be reached from there.
@@ -410,7 +411,7 @@ export async function createReviewServer({
       // to are closed, rather than being left working for nobody.
       state?.stopRuns();
       if (server.listening) {
-        await new Promise((resolveClose, reject) => server.close((error) => (error ? reject(error) : resolveClose())));
+        await new Promise((resolveClose, reject) => server.close((error) => (error ? reject(error) : resolveClose(undefined))));
       }
       state?.close();
     },

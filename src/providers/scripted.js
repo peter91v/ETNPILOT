@@ -1,3 +1,4 @@
+// @ts-check
 import { ProviderError } from "./router.js";
 import { createWorkspaceTools, WORKSPACE_TOOL_DEFINITIONS } from "./workspace-tools.js";
 

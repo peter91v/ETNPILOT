@@ -1,3 +1,4 @@
+// @ts-check
 import { ProviderError } from "./router.js";
 
 // Retrying the same provider, before giving up on it.
@@ -66,7 +67,7 @@ function defaultSleep(ms, signal) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       signal?.removeEventListener?.("abort", onAbort);
-      resolve();
+      resolve(undefined);
     }, ms);
     const onAbort = () => {
       clearTimeout(timer);

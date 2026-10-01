@@ -1,3 +1,4 @@
+// @ts-check
 import { invocationMeter } from "../providers/usage-meter.js";
 import { normalizeHistory } from "./history.js";
 import { randomUUID } from "node:crypto";
@@ -173,7 +174,7 @@ export class Harness {
     return agent;
   }
 
-  async run({ agent: agentName, input, parentRunId, metadata = {}, signal, ancestry = [] }) {
+  async run({ agent: agentName, input, parentRunId, metadata = /** @type {any} */ ({}), signal, ancestry = /** @type {string[]} */ ([]) }) {
     signal?.throwIfAborted();
     const agent = this.agents.get(agentName);
     const runId = randomUUID();
@@ -297,7 +298,7 @@ export class Harness {
               operationKind: "grant-revoked",
               decision: "revoked",
               at: new Date().toISOString(),
-              evidence: { reason, grantsDropped: dropped.dropped },
+              evidence: { reason, grantsDropped: dropped?.dropped },
             });
           }
         },

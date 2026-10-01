@@ -1,3 +1,4 @@
+// @ts-check
 import { ApprovalInbox, createInboxApprovalHandler } from "../core/approval-inbox.js";
 import { WorkflowQueue } from "../workflow/queue.js";
 import { access } from "node:fs/promises";
@@ -109,7 +110,7 @@ export function defaultWaitForShutdown() {
     const shutdown = () => {
       process.off("SIGINT", shutdown);
       process.off("SIGTERM", shutdown);
-      resolveShutdown();
+      resolveShutdown(undefined);
     };
     process.once("SIGINT", shutdown);
     process.once("SIGTERM", shutdown);

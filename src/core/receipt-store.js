@@ -1,3 +1,4 @@
+// @ts-check
 import { readLastLine, readLines } from "../runtime/jsonl.js";
 import { createHash } from "node:crypto";
 import { mkdir, appendFile } from "node:fs/promises";
@@ -18,7 +19,7 @@ export class JsonlReceiptStore {
 
   async append(receipt) {
     const operation = this.pending.then(() => this.#append(receipt));
-    this.pending = operation.catch(() => {});
+    this.pending = operation.then(() => {}, () => {});
     return operation;
   }
 

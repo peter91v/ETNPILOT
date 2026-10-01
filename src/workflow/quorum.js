@@ -1,3 +1,4 @@
+// @ts-check
 // Tolerates the markdown a model tends to wrap the line in ("**VERDICT:**").
 const VERDICT_LINE = /^[\s>*_-]*VERDICT[\s*_]*[:=][\s*_]*(approve|reject)\b/im;
 
