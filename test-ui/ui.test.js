@@ -184,3 +184,28 @@ test("no view has an accessibility violation axe can find", async (t) => {
     await ui.close();
   }
 });
+
+test("a project with no runs shows what is left before the first one, and the list goes once there is a run", async (t) => {
+  if (skipReason) return t.skip(skipReason);
+  const setup = await project();
+  const ui = await open(setup);
+  try {
+    await ui.page.evaluate(() => show("overview"));
+    await ui.page.getByText("Getting started").first().waitFor();
+    await ui.page.getByText("Give ETNPilot a provider key").first().waitFor();
+    assert.deepEqual(ui.problems, []);
+  } finally {
+    await ui.close();
+  }
+  const runs = join(setup.root, ".etnpilot", "state", "runs");
+  await mkdir(runs, { recursive: true });
+  await writeFile(join(runs, "done.jsonl"), `${JSON.stringify({ mode: "execute", runId: "done", terminal: true, status: "succeeded", hash: "h".repeat(64) })}\n`);
+  const later = await open(setup);
+  try {
+    await later.page.evaluate(() => show("overview"));
+    await later.page.waitForTimeout(400);
+    assert.equal(await later.page.getByText("Getting started").count(), 0);
+  } finally {
+    await later.close();
+  }
+});

@@ -130,6 +130,7 @@ function renderOverview() {
     }),
   ]));
   host.append(el("div", { class: "summary-strip" }, usageCards()));
+  for (const card of gettingStarted()) host.append(card);
 
   // A run that is working says where it is, not just that it is.
   for (const run of state.active ?? []) host.append(runningPanel(run));
