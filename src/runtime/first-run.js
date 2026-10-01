@@ -1,3 +1,4 @@
+import { trustProject } from "../trust/trust.js";
 import { access, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import YAML from "yaml";
@@ -77,6 +78,8 @@ export async function createProject({ root = process.cwd(), template = "default"
     throw new TypeError(`Unknown project template '${template}'. Available: ${Object.keys(PROJECT_TEMPLATES).join(", ")}.`);
   }
   const created = await initializeProject(resolve(root), { template, importExisting, forge });
+  // Made by its owner, here: trusted (see src/trust/trust.js).
+  await trustProject(created.root ?? resolve(root)).catch(() => undefined);
   return {
     ...created,
     configFile: join(created.configDir, "etnpilot.yaml"),

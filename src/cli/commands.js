@@ -41,6 +41,8 @@ import { runProject } from "../runtime/project-runner.js";
 import { replayRun } from "../runtime/replay.js";
 import { WorkflowQueue } from "../workflow/queue.js";
 import { AUTH_USAGE, runAuthCommand } from "./auth.js";
+import { TRUST_USAGE, guardProject, runTrustCommand } from "./trust.js";
+import { trustProject } from "../trust/trust.js";
 import { createSecretResolver } from "../secrets/resolver.js";
 import { PolicyEngine } from "../policy/engine.js";
 import { loadPlugins } from "../plugins/load-plugin.js";
@@ -76,6 +78,8 @@ export const CLI_OPTIONS = Object.freeze({
   "rotate-token": { type: "boolean", default: false },
   host: { type: "string" },
   "client-id": { type: "string" },
+  trust: { type: "boolean", default: false },
+  revoke: { type: "boolean", default: false },
   "allow-host": { type: "string" },
   skip: { type: "string" },
   "key-stdin": { type: "boolean", default: false },
@@ -157,6 +161,7 @@ Usage:
     [--require-signatures | --allow-unsigned] [--require-terminal | --allow-incomplete]
   etnpilot secret check <name> [--root directory]
 ${AUTH_USAGE}
+${TRUST_USAGE}
   etnpilot policy check (--kind kind [--path path | --url url] | --provider name)
     [--agent name] [--root directory]
   etnpilot pipeline status [ref] [--root directory]
@@ -183,6 +188,9 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     return 0;
   }
 
+  if (command === "trust") return runTrustCommand(values);
+  await guardProject(command, subcommand, values);
+
   if (command === "init") {
     const result = await initializeProject(resolve(subcommand ?? "."), {
       template: values.template,
@@ -190,6 +198,8 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
       forge: values["no-forge"] ? false : "auto",
       onProgress: (line) => console.log(line),
     });
+    // A project its owner just made on this machine is one they trust.
+    await trustProject(result.root).catch(() => undefined);
     console.log(`Initialized ETNPilot in ${result.root} (template: ${result.template}).`);
     for (const line of result.imported ? summarizeImport(result.imported) : []) console.log(line);
     for (const line of result.forged ? summarizeForge(result.forged) : []) console.log(line);

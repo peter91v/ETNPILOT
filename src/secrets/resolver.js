@@ -41,18 +41,19 @@ export class SecretResolver {
   }
 
   // 'baseUrl' is where the value is about to be sent. A stored login is only
-  // handed to a host it was issued for.
-  async get(name, { fallback, required = false, baseUrl } = {}) {
+  // handed to a host it was issued for, and never to a plugin ('storedLogin:
+  // false'): a plugin reads what the project explicitly maps for it.
+  async get(name, { fallback, required = false, baseUrl, storedLogin = true } = {}) {
     const reference = this.values[name] ?? fallback;
     if (!reference) {
-      const stored = await this.stored(name, baseUrl);
+      const stored = storedLogin ? await this.stored(name, baseUrl) : undefined;
       if (stored !== undefined) return stored;
       if (required) throw this.missing(name, `Required secret '${name}' is not configured.`, { code: "not_configured" });
       return undefined;
     }
     const value = await this.resolve(reference, { name, required: false });
     if (value !== undefined) return value;
-    const stored = await this.stored(name, baseUrl);
+    const stored = storedLogin ? await this.stored(name, baseUrl) : undefined;
     if (stored !== undefined) return stored;
     if (required) {
       throw this.missing(name, `Required secret '${name}' is unavailable.`, { code: "unavailable", provider: reference.provider });
