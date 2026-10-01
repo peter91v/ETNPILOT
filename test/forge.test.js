@@ -210,3 +210,25 @@ test("OpenAI is asked for a JSON object; another server is not sent a field it m
   assert.deepEqual(bodies[0].response_format, { type: "json_object" });
   assert.equal(bodies[1].response_format, undefined);
 });
+
+test("what the project already has goes to the model with what each is for", async () => {
+  const root = await repository();
+  await put(root, {
+    ".etnpilot/agents/test-writer.yaml": "name: test-writer\ndescription: Writes unit tests for the cart\nprompt: x\n",
+    ".etnpilot/skills/run-tests/SKILL.md": "---\nname: run-tests\ndescription: Run the vitest suite headless\n---\nsteps\n",
+    ".etnpilot/instructions/style.md": "Use tabs.\n",
+  });
+  let seen;
+  await forgeProject(root, { config: {}, runModel: async ({ system, input }) => { seen = { system, input }; return { text: '{"agents":[],"skills":[],"instructions":[]}' }; } });
+  assert.match(seen.input, /agent: test-writer — Writes unit tests for the cart/);
+  assert.match(seen.input, /skill: run-tests — Run the vitest suite headless/);
+  assert.match(seen.input, /instruction: style\.md/);
+  assert.match(seen.system, /Add only what is MISSING/);
+});
+
+test("an answer with nothing to add is fine and writes nothing", async () => {
+  const root = await repository();
+  const report = await forgeProject(root, { config: {}, runModel: async () => ({ text: '{"agents":[],"skills":[],"instructions":[]}' }) });
+  assert.equal(report.agents.length + report.skills.length + report.instructions.length, 0);
+  assert.deepEqual(summarizeForge(report).filter((line) => /Forged/.test(line)), []);
+});

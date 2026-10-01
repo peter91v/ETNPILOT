@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import YAML from "yaml";
-import { initializeProject } from "../src/config/init.js";
+import { initializeProject, wireOrchestrator } from "../src/config/init.js";
 import { summarizeImport } from "../src/config/migrate.js";
 import { loadPinnedProjectContent, writeContentLock } from "../src/content/provenance.js";
 import { loadConfig } from "../src/config/load.js";
@@ -176,4 +176,18 @@ test("a re-run wires an orchestrator left untouched, and leaves an edited one al
   const result = await initializeProject(other);
   assert.match(await readFile(join(other, ".etnpilot/agents/orchestrator.yaml"), "utf8"), /subagents: \[\]/);
   assert.match(summarizeImport(result.imported).join("\n"), /left as it is/);
+});
+
+test("a long list of agents the orchestrator cannot yet use is one short note, not the whole list", async () => {
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-wire-"));
+  await mkdir(join(root, ".etnpilot", "agents"), { recursive: true });
+  const names = Array.from({ length: 9 }, (_, index) => `helper-${index}`);
+  for (const name of names) await writeFile(join(root, ".etnpilot/agents", `${name}.yaml`), `# Imported from .claude/agents/${name}.md\nname: ${name}\nprompt: x\n`);
+  await writeFile(join(root, ".etnpilot/agents/orchestrator.yaml"), "name: orchestrator\npromptRef: orchestrator\nsubagents: []\n");
+  const report = { notes: [] };
+  await wireOrchestrator(join(root, ".etnpilot"), report);
+  assert.equal(report.notes.length, 1);
+  assert.match(report.notes[0], /left as it is\. 9 agents are not under its 'subagents'/);
+  assert.match(report.notes[0], /Agents view/);
+  assert.equal(report.notes[0].includes("helper-8"), false);
 });
