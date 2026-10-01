@@ -67,6 +67,181 @@ export function createTuiApp({
   let stopped = false;
   let onExit;
 
+  // What each key does, tried in order: the first binding whose 'when' is true wins.
+  // The modes that own every key (typing a message, a field, a filter, a prompt) are
+  // handled before this table is reached.
+  const keyBindings = [
+  {
+    when: (key) => key === "t",
+    async run(key) {
+      // 'talk': straight to the conversation, with the cursor in the message.
+      show("chat");
+      await startCompose();
+    },
+  },
+  {
+    when: (key) => view === "chat" && (key === "\r" || key === "\n" || key === "i"),
+    async run(key) {
+      await startCompose();
+    },
+  },
+  {
+    when: (key) => view === "chat" && key === "s",
+    async run(key) {
+      stopTurn();
+    },
+  },
+  {
+    when: (key) => view === "chat" && key === "\u001B[5~",
+    async run(key) {
+      chat.scroll += 5;
+    },
+  },
+  {
+    when: (key) => view === "chat" && key === "\u001B[6~",
+    async run(key) {
+      chat.scroll = Math.max(0, chat.scroll - 5);
+    },
+  },
+  {
+    when: (key) => key === "\t",
+    async run(key) {
+      show(VIEWS[(VIEWS.indexOf(view) + 1) % VIEWS.length]);
+    },
+  },
+  {
+    when: (key) => /^[1-9]$/.test(key) && Number(key) <= VIEWS.length,
+    async run(key) {
+      show(VIEWS[Number(key) - 1]);
+    },
+  },
+  {
+    when: (key) => view === "checks" && key === "A",
+    async run(key) {
+      await runChecks(checks.map((check) => check.id));
+    },
+  },
+  {
+    when: (key) => key === "x" && view === "worktrees",
+    async run(key) {
+      await removeWorktree();
+    },
+  },
+  {
+    when: (key) => view === "settings" && key === "/",
+    async run(key) {
+      filtering = true;
+    },
+  },
+  {
+    when: (key) => view === "settings" && (key === "\r" || key === "\n"),
+    async run(key) {
+      openEditor();
+    },
+  },
+  {
+    when: (key) => view === "settings" && key === "d",
+    async run(key) {
+      await resetSetting();
+    },
+  },
+  {
+    when: (key) => view === "settings" && key === "s",
+    async run(key) {
+      scope = scope === "local" ? "global" : "local";
+      note(`Changes will be written ${scope === "global" ? "to ~/.config, for every project" : "to this project, locally"}.`);
+    },
+  },
+  {
+    when: (key) => key === "\u001B[B" || key === "j",
+    async run(key) {
+      if (agentText) agentTextOffset += 1;
+      else if (agentMode) agentCursor = clamp(agentCursor + 1, agentRows().length);
+      else if (worktreeDiff) diffOffset += 1;
+      else if (detail && view === "worktrees") changeCursor = clamp(changeCursor + 1, changeCount());
+      else cursor = clamp(cursor + 1, selection().length);
+    },
+  },
+  {
+    when: (key) => key === "\u001B[A" || key === "k",
+    async run(key) {
+      if (agentText) agentTextOffset = Math.max(0, agentTextOffset - 1);
+      else if (agentMode) agentCursor = clamp(agentCursor - 1, agentRows().length);
+      else if (worktreeDiff) diffOffset = Math.max(0, diffOffset - 1);
+      else if (detail && view === "worktrees") changeCursor = clamp(changeCursor - 1, changeCount());
+      else cursor = clamp(cursor - 1, selection().length);
+    },
+  },
+  {
+    when: (key) => key === "\r" || key === "\n",
+    async run(key) {
+      if (view === "checks") await runChecks([selection()[clamp(cursor, selection().length)]?.id]);
+      else if (agentMode && !agentText) openAgentText();
+      else if (view === "approvals" && selection().length > 0) detail = true;
+      else if (view === "runs" && !detail && selection().length > 0) await openRun();
+      else if (view === "worktrees" && detail && !worktreeDiff) await openFileDiff();
+      else if (view === "worktrees" && selection().length > 0) await openWorktree();
+    },
+  },
+  {
+    when: (key) => key === "\u001B",
+    async run(key) {
+      if (agentText) {
+        agentText = undefined;
+        agentTextOffset = 0;
+      } else if (agentMode) {
+        agentMode = false;
+      } else if (worktreeDiff) {
+        worktreeDiff = undefined;
+        diffOffset = 0;
+      } else {
+        detail = false;
+        worktreeChanges = undefined;
+      }
+    },
+  },
+  {
+    when: (key) => key === "v" && detail && view === "runs",
+    async run(key) {
+      await verifyOpenReceipt();
+    },
+  },
+  {
+    when: (key) => key === "a" && detail && view === "runs" && !agentMode && agentRows().length > 0,
+    async run(key) {
+      agentMode = true;
+      agentCursor = 0;
+    },
+  },
+  {
+    when: (key) => key === "a" || key === "r",
+    async run(key) {
+      await decide(key === "a" ? "approved" : "rejected");
+    },
+  },
+  {
+    when: (key) => key === "c" && view === "queue",
+    async run(key) {
+      await cancel();
+    },
+  },
+  {
+    when: (key) => key === "R" && view === "queue",
+    async run(key) {
+      await resume();
+    },
+  },
+  {
+    when: (key) => key === "g",
+    async run(key) {
+      // 'g' means 'ask again now', including the two views that are read on
+      // demand — the merge requests are never fetched behind your back.
+      if (view === "worktrees" || view === "merges") await load(view, { force: true });
+      await app.refresh();
+    },
+  },
+  ];
+
   const app = {
     get view() { return view; },
     get cursor() { return cursor; },
@@ -199,84 +374,8 @@ export function createTuiApp({
         app.paint();
         return true;
       }
-      if (key === "t") {
-        // 'talk': straight to the conversation, with the cursor in the message.
-        show("chat");
-        await startCompose();
-      } else if (view === "chat" && (key === "\r" || key === "\n" || key === "i")) {
-        await startCompose();
-      } else if (view === "chat" && key === "s") {
-        stopTurn();
-      } else if (view === "chat" && key === "\u001B[5~") {
-        chat.scroll += 5;
-      } else if (view === "chat" && key === "\u001B[6~") {
-        chat.scroll = Math.max(0, chat.scroll - 5);
-      } else if (key === "\t") {
-        show(VIEWS[(VIEWS.indexOf(view) + 1) % VIEWS.length]);
-      } else if (/^[1-9]$/.test(key) && Number(key) <= VIEWS.length) {
-        show(VIEWS[Number(key) - 1]);
-      } else if (view === "checks" && key === "A") {
-        await runChecks(checks.map((check) => check.id));
-      } else if (key === "x" && view === "worktrees") {
-        await removeWorktree();
-      } else if (view === "settings" && key === "/") {
-        filtering = true;
-      } else if (view === "settings" && (key === "\r" || key === "\n")) {
-        openEditor();
-      } else if (view === "settings" && key === "d") {
-        await resetSetting();
-      } else if (view === "settings" && key === "s") {
-        scope = scope === "local" ? "global" : "local";
-        note(`Changes will be written ${scope === "global" ? "to ~/.config, for every project" : "to this project, locally"}.`);
-      } else if (key === "\u001B[B" || key === "j") {
-        if (agentText) agentTextOffset += 1;
-        else if (agentMode) agentCursor = clamp(agentCursor + 1, agentRows().length);
-        else if (worktreeDiff) diffOffset += 1;
-        else if (detail && view === "worktrees") changeCursor = clamp(changeCursor + 1, changeCount());
-        else cursor = clamp(cursor + 1, selection().length);
-      } else if (key === "\u001B[A" || key === "k") {
-        if (agentText) agentTextOffset = Math.max(0, agentTextOffset - 1);
-        else if (agentMode) agentCursor = clamp(agentCursor - 1, agentRows().length);
-        else if (worktreeDiff) diffOffset = Math.max(0, diffOffset - 1);
-        else if (detail && view === "worktrees") changeCursor = clamp(changeCursor - 1, changeCount());
-        else cursor = clamp(cursor - 1, selection().length);
-      } else if (key === "\r" || key === "\n") {
-        if (view === "checks") await runChecks([selection()[clamp(cursor, selection().length)]?.id]);
-        else if (agentMode && !agentText) openAgentText();
-        else if (view === "approvals" && selection().length > 0) detail = true;
-        else if (view === "runs" && !detail && selection().length > 0) await openRun();
-        else if (view === "worktrees" && detail && !worktreeDiff) await openFileDiff();
-        else if (view === "worktrees" && selection().length > 0) await openWorktree();
-      } else if (key === "\u001B") {
-        if (agentText) {
-          agentText = undefined;
-          agentTextOffset = 0;
-        } else if (agentMode) {
-          agentMode = false;
-        } else if (worktreeDiff) {
-          worktreeDiff = undefined;
-          diffOffset = 0;
-        } else {
-          detail = false;
-          worktreeChanges = undefined;
-        }
-      } else if (key === "v" && detail && view === "runs") {
-        await verifyOpenReceipt();
-      } else if (key === "a" && detail && view === "runs" && !agentMode && agentRows().length > 0) {
-        agentMode = true;
-        agentCursor = 0;
-      } else if (key === "a" || key === "r") {
-        await decide(key === "a" ? "approved" : "rejected");
-      } else if (key === "c" && view === "queue") {
-        await cancel();
-      } else if (key === "R" && view === "queue") {
-        await resume();
-      } else if (key === "g") {
-        // 'g' means 'ask again now', including the two views that are read on
-        // demand — the merge requests are never fetched behind your back.
-        if (view === "worktrees" || view === "merges") await load(view, { force: true });
-        await app.refresh();
-      }
+      const binding = keyBindings.find((candidate) => candidate.when(key));
+      if (binding) await binding.run(key);
       app.paint();
       return true;
     },
