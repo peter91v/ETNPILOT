@@ -250,6 +250,15 @@ async function executeProject({
     await harness.events.emit("workflow.planned", {
       runId,
       steps: workflow.steps.map((step) => step.id),
+      // What each step will use, so a surface can name the agents of a workflow
+      // before any of them has started.
+      plan: workflow.steps.map((step) => ({
+        id: step.id,
+        type: step.type ?? "agent",
+        agents: step.type === "quorum" ? (step.agents ?? []) : (step.type ?? "agent") === "agent" && step.agent ? [step.agent] : [],
+        ...(step.type === "check" ? { command: (step.command ?? []).join(" ") } : {}),
+        ...(step.needs?.length ? { needs: step.needs } : {}),
+      })),
       ...(workflowName && !agent ? { workflow: workflowName } : {}),
     });
   } catch (error) {

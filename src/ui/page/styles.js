@@ -337,14 +337,16 @@ export const STYLES = `
   .scroll-pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
   .scroll-pre.tall { max-height: 60vh; }
   .modal.wide { width: min(640px, 100%); }
+  .live-agents { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  .live-agents li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; }
   .flow { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
   .flow-step {
     display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; padding: 6px 0 6px 16px; position: relative;
     border-left: 2px solid var(--md-outline-variant); margin-left: 6px;
   }
   .flow-step::before { content: ""; position: absolute; left: -7px; top: 12px; width: 12px; height: 12px; border-radius: 50%; background: var(--md-primary); }
-  .flow-step.gate::before { background: var(--md-warning); }
-  .flow-step.check::before { background: var(--md-secondary); }
+  .flow-step.type-gate::before { background: var(--md-warning); }
+  .flow-step.type-check::before { background: var(--md-secondary); }
   .flow-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
   .flow-id { font: var(--md-label-large); }
   .flow-type { color: var(--md-on-surface-variant); font: var(--md-label-medium); }

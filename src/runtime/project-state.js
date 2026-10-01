@@ -252,6 +252,21 @@ export async function openProjectState({ root = process.cwd(), env = process.env
           if (event.type === "workflow.planned") {
             record.runId = event.runId;
             record.steps = event.steps;
+            if (event.plan) record.plan = event.plan;
+            if (event.workflow) record.workflow = event.workflow;
+          }
+          // Every agent that has run in this run, with who started it — a step
+          // names one agent, and an orchestrator hands work to others below it.
+          if (event.type === "run.started") {
+            record.agents ??= [];
+            if (record.agents.length < 40) record.agents.push({ runId: event.runId, parentRunId: event.parentRunId, name: event.agent, status: "working", startedAt: new Date().toISOString(), step: record.step });
+          }
+          if (event.type === "run.completed" || event.type === "run.failed") {
+            const found = record.agents?.find((entry) => entry.runId === event.runId);
+            if (found) {
+              found.status = event.type === "run.completed" ? "done" : "failed";
+              found.finishedAt = new Date().toISOString();
+            }
           }
           if (event.type === "workflow.step.started") {
             record.step = event.step;
@@ -433,6 +448,9 @@ function presentRun(record) {
     startedAt: record.startedAt,
     ...(record.session ? { session: record.session } : {}),
     ...(record.steps ? { steps: record.steps, done: record.done } : {}),
+    ...(record.plan ? { plan: record.plan } : {}),
+    ...(record.workflow ? { workflow: record.workflow } : {}),
+    ...(record.agents ? { agents: record.agents } : {}),
     ...(record.step ? { step: record.step, stepSince: record.stepSince } : {}),
     ...(record.stepAgent ? { stepAgent: record.stepAgent } : {}),
     ...(record.failed ? { failedStep: record.failed, error: record.error } : {}),

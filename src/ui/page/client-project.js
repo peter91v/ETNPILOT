@@ -347,7 +347,7 @@ function flow(steps) {
     if (type === "check") what = (step.command ?? []).join(" ");
     if (type === "gate") what = step.prompt ?? "you decide whether it goes on";
     if (type === "quorum") what = (step.agents ?? []).join(", ");
-    list.append(el("li", { class: "flow-step " + type }, [
+    list.append(el("li", { class: "flow-step type-" + type }, [
       el("span", { class: "flow-head" }, [
         el("span", { class: "flow-id", text: step.id }),
         el("span", { class: "flow-type", text: STEP_LABELS[type] ?? type }),
