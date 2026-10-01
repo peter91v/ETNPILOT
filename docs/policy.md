@@ -56,6 +56,36 @@ cannot match any path rule and therefore reaches the section's default effect.
 All matching rules are evaluated. The safest effect wins: `deny`, then `human`, then `allow`. This
 means the credential-protection rule still wins when a later broad read rule also matches.
 
+## Command rules
+
+For `shell` operations a rule can name the command with `commands`. The command is a list of arguments (never a
+shell string), joined by single spaces, and the **whole** line must match: `*` is one word (no spaces), `**` is
+anything.
+
+```yaml
+- id: shell-with-review      # every shell command asks...
+  effect: human
+  kinds: [shell]
+- id: routine-commands       # ...except these, which the repository's owner would run anyway
+  effect: allow
+  kinds: [shell]
+  commands: ["npm test", "npm run *", "git status", "git diff **"]
+- id: never-these
+  effect: deny
+  kinds: [shell]
+  commands: ["rm **", "git push **--force**"]
+```
+
+Resolution: a `deny` that matches always stands. Otherwise a rule that names the command beats one that does not,
+which is what lets the example above mean "ask, except for these". Among rules of the same kind the stricter wins
+(`deny` over `human` over `allow`) as before.
+
+What this does and does not do: `npm test; rm -rf /` is one argument and matches nothing; `sh -c "npm test"` is not
+`npm test`. But the command you allow still *runs code from the repository*: `npm test` runs whatever the
+`test` script says, which a steered model may have edited. Allow what you would run on that repository anyway, and
+turn the [sandbox](sandbox.md) on where you can. Try a rule without running anything:
+`etnpilot policy check --kind shell --command "npm test"`.
+
 ## Provider rules
 
 ```yaml

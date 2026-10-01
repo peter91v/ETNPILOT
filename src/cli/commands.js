@@ -65,6 +65,7 @@ export const CLI_OPTIONS = Object.freeze({
   "no-verify": { type: "boolean", default: false },
   preview: { type: "boolean", default: false },
   gitlab: { type: "boolean", default: false },
+  command: { type: "string" },
   port: { type: "string" },
   status: { type: "string" },
   limit: { type: "string" },
@@ -142,7 +143,7 @@ Usage:
   etnpilot secret check <name> [--root directory]
 ${AUTH_USAGE}
 ${TRUST_USAGE}
-  etnpilot policy check (--kind kind [--path path | --url url] | --provider name)
+  etnpilot policy check (--kind kind [--path path | --url url | --command "npm test"] | --provider name)
     [--agent name] [--root directory]
   etnpilot pipeline status [ref] [--root directory]
   etnpilot deps check [--root directory]

@@ -247,6 +247,18 @@ policy:
       - id: shell-with-review
         effect: human
         kinds: [shell]
+      # Commands you would run in this repository anyway need no question. A rule that
+      # names the command beats the general one above; a deny still beats everything.
+      # The whole command must match: '*' is one word, '**' is anything.
+      #
+      #   - id: routine-commands
+      #     effect: allow
+      #     kinds: [shell]
+      #     commands: ["npm test", "npm run lint", "git status", "git diff **"]
+      #   - id: never-these
+      #     effect: deny
+      #     kinds: [shell]
+      #     commands: ["rm **", "git push **--force**"]
       # A tool from an MCP server is code this project did not write, so it
       # gets its own kind rather than passing as a file read. There is no rule
       # for it below, and 'default: deny' means an MCP tool is refused until a
