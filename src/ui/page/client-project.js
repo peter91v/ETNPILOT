@@ -56,6 +56,27 @@ function present(nodes) {
   return nodes.filter(Boolean);
 }
 
+// Who may hand work to this agent, as switches on the other agents: choosing
+// one edits that agent's own list, which also gives it the tool to do it.
+function handOverControls(agent) {
+  const others = (agentData?.agents ?? []).filter((other) => !other.error && other.name !== agent.name);
+  if (others.length === 0) return [];
+  return [
+    el("h5", { class: "card-h", text: "Who may hand work to it" }),
+    ...others.map((other) => checkField("hand-" + agent.name + "-" + other.name, other.name, (other.subagents ?? []).includes(agent.name), async (on) => {
+      const next = new Set(other.subagents ?? []);
+      if (on) next.add(agent.name); else next.delete(agent.name);
+      try {
+        await api("/api/agents/" + encodeURIComponent(other.name), { method: "PUT", body: JSON.stringify({ subagents: [...next] }) });
+        toast(on ? other.name + " may now hand work to " + agent.name + ". Unreviewed: lock it under Content." : other.name + " no longer hands work to " + agent.name + ".");
+      } catch (error) {
+        toast(error.message, "bad");
+      }
+      await loadProjectViews();
+    })),
+  ];
+}
+
 // A question that has to be answered before something is removed. Resolves to
 // true or false; closing it any other way is a no.
 function askConfirm({ title, text, yes }) {
@@ -158,6 +179,7 @@ function agentCard(agent) {
     ...(agent.skills.length > 0 ? [el("h5", { class: "card-h", text: "Skills" }), el("div", { class: "chips" }, agent.skills.map((skill) => pill(skill)))] : []),
     ...(agent.subagents.length > 0 ? [el("h5", { class: "card-h", text: "Can hand work to" }), el("div", { class: "chips" }, agent.subagents.map((name) => pill(name)))] : []),
     ...(agent.usedBy.length > 0 ? [el("h5", { class: "card-h", text: "Handed work by" }), el("div", { class: "chips" }, agent.usedBy.map((name) => pill(name)))] : []),
+    ...handOverControls(agent),
     el("h5", { class: "card-h", text: "What it is told" }),
     agent.prompt === undefined
       ? el("p", { class: "muted", text: "No prompt file found for " + (agent.promptRef ?? "this agent") + "." })

@@ -50,6 +50,9 @@ unknown name is refused with the names that exist.
   afterwards. **Remove** asks first, deletes the file (and an agent's prompt when nothing else reads it), and is
   refused while something still points at it: a workflow with a step for the agent, an agent that hands work to
   it, the project's default agent.
+- Under an agent's details, **Who may hand work to it** lists the other agents as switches. A switch edits that
+  agent's own `subagents` and adds `spawn_subagent` to its tools if it lacks it; the edge that would close a
+  circle is refused.
 - **Content** lists everything a run may use, grouped by type, with `locked`, `not reviewed yet` or `changed
   since the lock` on each and where it came from. Tapping one shows its text. **Lock what I reviewed** shows
   what will be locked and, on confirmation, locks exactly the content that was on screen: the request carries
