@@ -32,3 +32,35 @@ jobs:
           NODE_OPTIONS: "--import=${{ github.workspace }}/test/helpers/offline-network.mjs"
       - run: node bin/etnpilot.js scan secrets
       - run: node bin/etnpilot.js deps check
+
+  # The page, in a real browser at a phone's width. Separate from the matrix
+  # because it needs a browser, and one Node version is enough for it.
+  ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:ui
+
+  # What the tests do not reach, as a number in the job summary. Informational:
+  # it does not fail the build, it shows where the tests are thin.
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run test:coverage > coverage.txt 2>&1 || true
+      - run: |
+          echo '### Test coverage' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          sed -n '/start of coverage report/,/end of coverage report/p' coverage.txt | cut -c1-140 >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

@@ -20,8 +20,6 @@ import { Harness } from "../core/harness.js";
 import { verifyReceiptFile } from "../core/receipt-store.js";
 import { generateReceiptKeyPair, loadReceiptVerifiers } from "../core/receipt-signing.js";
 import { createTerminalApprovalHandler } from "../core/terminal-approval.js";
-import { copilotSdkAdvice, copilotSdkPlatformSupported } from "../providers/copilot.js";
-import { routeFor } from "../providers/router.js";
 import { WorktreeManager } from "../git/worktrees.js";
 import { GitLabClient } from "../gitlab/client.js";
 import { latestPipeline } from "../gitlab/pipelines.js";
@@ -108,7 +106,6 @@ export const CLI_OPTIONS = Object.freeze({
   template: { type: "string", short: "t" },
   "no-import": { type: "boolean" },
   "no-forge": { type: "boolean" },
-  "dry-run": { type: "boolean" },
   global: { type: "boolean", default: false },
   changed: { type: "boolean", default: false },
   "record-fixtures": { type: "string" },

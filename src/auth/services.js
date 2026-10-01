@@ -1,3 +1,4 @@
+// @ts-check
 // The four places a person signs in to. Each one is addressed by the secret
 // name the project already uses for it, so a stored login is found by the same
 // code that would have read the environment variable.

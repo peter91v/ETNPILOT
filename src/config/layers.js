@@ -137,7 +137,7 @@ export function mergeLayers(layers) {
   const project = layers.find((layer) => layer.source === "project");
   if (!project) throw new TypeError("A project layer is required.");
   const modes = readModes(project.data);
-  let config = clone(project.data);
+  const config = clone(project.data);
   const overrides = [];
   const sources = new Map();
   const refusals = [];

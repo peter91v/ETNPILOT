@@ -1,3 +1,4 @@
+// @ts-check
 import { join, resolve } from "node:path";
 import { allowHost, authStatus, loginWithDevice, logout, saveKey } from "../auth/login.js";
 import { SERVICE_IDS, serviceFor } from "../auth/services.js";
@@ -11,7 +12,7 @@ export const AUTH_USAGE = `  etnpilot login <anthropic|openai|github|gitlab> [--
   etnpilot logout <anthropic|openai|github|gitlab>
   etnpilot auth status`;
 
-export async function runAuthCommand(command, subcommand, values, { stdin = process.stdin, stdout = process.stdout, env = process.env, fetchImpl, sleep } = {}) {
+export async function runAuthCommand(command, subcommand, values, { stdin = process.stdin, stdout = process.stdout, env = process.env, fetchImpl, sleep } = /** @type {any} */ ({})) {
   const say = (line = "") => stdout.write(`${line}\n`);
 
   if (command === "auth" || (command === "login" && !subcommand)) {
@@ -107,7 +108,7 @@ async function projectGitLabHost(root) {
 }
 
 // A key is typed without echo on a terminal and read whole from a pipe.
-export async function readSecret(prompt, { stdin = process.stdin, stdout = process.stdout, hint } = {}) {
+export async function readSecret(prompt, { stdin = process.stdin, stdout = process.stdout, hint } = /** @type {any} */ ({})) {
   if (!stdin.isTTY) {
     const chunks = [];
     for await (const chunk of stdin) chunks.push(chunk);

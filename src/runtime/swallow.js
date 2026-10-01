@@ -1,3 +1,4 @@
+// @ts-check
 // Some failures are expected and ignoring them is right: a file that is not
 // there yet, a best-effort cleanup. Ignoring them silently is a different
 // matter when the thing that failed is why something looks empty or wrong.

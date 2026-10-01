@@ -148,7 +148,7 @@ test("browser sign-in needs a client id, then remembers it", async () => {
 
 test("an expiring login is renewed when it is read", async () => {
   const { directory } = await home();
-  let now = 1_000_000;
+  const now = 1_000_000;
   const store = new CredentialStore({
     path: join(directory, "credentials.json"),
     now: () => now,

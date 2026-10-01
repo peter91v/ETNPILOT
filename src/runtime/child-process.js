@@ -37,6 +37,7 @@ export async function runChild(command, { cwd, env, signal, input, timeoutMs = 1
   signal?.addEventListener("abort", abort, { once: true });
   child.stdin.on("error", () => {});
   child.stdin.end(input);
+  let primary;
   try {
     const result = await new Promise((resolve, reject) => {
       for (const target of ["stdout", "stderr"]) child[target].on("data", (chunk) => {
@@ -51,6 +52,9 @@ export async function runChild(command, { cwd, env, signal, input, timeoutMs = 1
     });
     signal?.throwIfAborted();
     return { ...result, stdout: utf8Prefix(Buffer.concat(chunks.stdout)), stderr: utf8Prefix(Buffer.concat(chunks.stderr)) };
+  } catch (error) {
+    primary = error;
+    throw error;
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener("abort", abort);
@@ -60,7 +64,12 @@ export async function runChild(command, { cwd, env, signal, input, timeoutMs = 1
     if (["docker", "podman"].includes(command[0]) && command[1] === "run" && nameIndex > 1
       && /^etnpilot-command-[a-f0-9-]{36}$/.test(name) && command.includes(`etnpilot.command=${name}`)) {
       const cleanup = await runChild([command[0], "rm", "--force", name], { env, timeoutMs: 5000, outputLimit: 16 * 1024 }).catch((error) => ({ exitCode: -1, stderr: error.message }));
-      if (cleanup.exitCode !== 0 && !/no such container|does not exist/i.test(cleanup.stderr)) throw new Error(`Sandbox container cleanup failed: ${cleanup.stderr}`);
+      if (cleanup.exitCode !== 0 && !/no such container|does not exist/i.test(cleanup.stderr)) {
+        // A container left running matters more than how the command ended; what
+        // went wrong with the command rides along as the cause.
+        // eslint-disable-next-line no-unsafe-finally
+        throw new Error(`Sandbox container cleanup failed: ${cleanup.stderr}`, { cause: primary });
+      }
     }
   }
 }

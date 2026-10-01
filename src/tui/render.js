@@ -53,7 +53,7 @@ export function renderApp(state, options = {}) {
     agentMode: options.agentMode, agentCursor: options.agentCursor,
     checks: options.checks ?? [], results: options.checkResults ?? {}, running: options.checksRunning ?? new Set(),
     verification: options.verification,
-    chat: options.chat, cursor,
+    chat: options.chat,
   };
   const rendered = help
     ? renderHelp({ style, width, height: body, offset: helpOffset })

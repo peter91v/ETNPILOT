@@ -1,3 +1,4 @@
+// @ts-check
 import { createInterface } from "node:readline/promises";
 import { access } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -33,7 +34,7 @@ function askYesNo(stdin, stdout) {
   };
 }
 
-export async function guardProject(command, subcommand, values, { env = process.env, stdin = process.stdin, stdout = process.stdout } = {}) {
+export async function guardProject(command, subcommand, values, { env = process.env, stdin = process.stdin, stdout = process.stdout } = /** @type {any} */ ({})) {
   if (!needsTrust(command, subcommand)) return;
   const root = resolve(values.root ?? ".");
   if (!(await projectExists(root))) return;
@@ -45,7 +46,7 @@ export async function guardProject(command, subcommand, values, { env = process.
   });
 }
 
-export async function runTrustCommand(values, { env = process.env, stdin = process.stdin, stdout = process.stdout } = {}) {
+export async function runTrustCommand(values, { env = process.env, stdin = process.stdin, stdout = process.stdout } = /** @type {any} */ ({})) {
   const say = (line = "") => stdout.write(`${line}\n`);
   const root = resolve(values.root ?? ".");
   if (!(await projectExists(root))) throw new Error(`No project at ${root} (no .etnpilot/etnpilot.yaml).`);
@@ -58,7 +59,8 @@ export async function runTrustCommand(values, { env = process.env, stdin = proce
   for (const line of state.authority.summary) say(`  - ${line}`);
   say(`  (${state.authority.files.length} configuration/plugin file(s) under .etnpilot/ are part of this)`);
   if (state.trusted) return 0;
-  const accepted = values.trust === true || (askYesNo(stdin, stdout) ? await askYesNo(stdin, stdout)("Trust this project? [y/N] ") : false);
+  const ask = askYesNo(stdin, stdout);
+  const accepted = values.trust === true || (ask ? await ask("Trust this project? [y/N] ") : false);
   if (!accepted) {
     say("Not trusted. (Run again on a terminal, or pass --trust.)");
     return 1;

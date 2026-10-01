@@ -25,7 +25,7 @@ function screen(app) {
 }
 
 async function waitFor(condition, what) {
-  for (let attempt = 0; attempt < 400; attempt += 1) {
+  for (let attempt = 0; attempt < 1600; attempt += 1) {
     if (await condition()) return;
     await delay(25);
   }

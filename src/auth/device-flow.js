@@ -1,3 +1,4 @@
+// @ts-check
 // OAuth 2.0 device authorization (RFC 8628): the tool shows a short code, the
 // person confirms it in a browser on any device, and the tool is handed a
 // token. No redirect URL, no secret held by the tool — which is why it suits a
@@ -41,7 +42,7 @@ export async function startDeviceFlow({ service, host, clientId, scope, fetchImp
 
 // One check: still waiting, or done. The caller decides how often — the
 // terminal loops, the page asks again every few seconds.
-export async function checkDeviceFlow(flow, { fetchImpl = globalThis.fetch, now = Date.now } = {}) {
+export async function checkDeviceFlow(flow, { fetchImpl = globalThis.fetch, now = Date.now } = /** @type {any} */ ({})) {
   if (now() >= flow.expiresAt) return { status: "expired" };
   const endpoints = ENDPOINTS[flow.service];
   const body = await post(fetchImpl, `${flow.host}${endpoints.token}`, {
@@ -70,7 +71,7 @@ export async function checkDeviceFlow(flow, { fetchImpl = globalThis.fetch, now 
 }
 
 // The terminal's loop: waits for the person, honouring the service's pace.
-export async function awaitDeviceFlow(flow, { fetchImpl, sleep = defaultSleep, signal, now = Date.now, onWait } = {}) {
+export async function awaitDeviceFlow(flow, { fetchImpl, sleep = defaultSleep, signal, now = Date.now, onWait } = /** @type {any} */ ({})) {
   let interval = flow.interval;
   for (;;) {
     signal?.throwIfAborted();
@@ -87,7 +88,7 @@ export async function awaitDeviceFlow(flow, { fetchImpl, sleep = defaultSleep, s
 
 // Renews an expiring token. GitLab's last two hours; GitHub's do not expire
 // unless the application opted in, and then they come with a refresh token too.
-export async function refreshToken(entry, { fetchImpl = globalThis.fetch, now = Date.now } = {}) {
+export async function refreshToken(entry, { fetchImpl = globalThis.fetch, now = Date.now } = /** @type {any} */ ({})) {
   if (!entry.refreshToken || !entry.clientId || !entry.host || !ENDPOINTS[entry.service]) return undefined;
   const body = await post(fetchImpl, `${entry.host}${ENDPOINTS[entry.service].token}`, {
     client_id: entry.clientId,

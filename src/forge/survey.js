@@ -1,3 +1,4 @@
+// @ts-check
 import { lstat, readFile, readdir } from "node:fs/promises";
 import { basename, extname, join, relative } from "node:path";
 import { git } from "../git/command.js";
@@ -83,7 +84,7 @@ export function redactSecrets(text) {
   return out;
 }
 
-export async function surveyRepository(root, { limits = {} } = {}) {
+export async function surveyRepository(root, { limits = {} } = /** @type {any} */ ({})) {
   const bounds = { ...LIMITS, ...limits };
   const paths = await listFiles(root, bounds);
   const sensitive = paths.filter(isSensitivePath);
@@ -143,7 +144,7 @@ export async function surveyRepository(root, { limits = {} } = {}) {
 // ---------------------------------------------------------------------- listing
 
 async function listFiles(root, bounds) {
-  const tracked = await git(["ls-files", "-z", "--cached", "--others", "--exclude-standard"], { cwd: root, trim: false }).then(
+  const tracked = await git(["ls-files", "-z", "--cached", "--others", "--exclude-standard"], /** @type {any} */ ({ cwd: root, trim: false })).then(
     (result) => result.stdout.split("\0").filter(Boolean),
     () => undefined,
   );

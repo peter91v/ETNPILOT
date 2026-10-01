@@ -1,3 +1,4 @@
+// @ts-check
 import { createHash } from "node:crypto";
 import { lstat, mkdir, readFile, readdir, readlink, realpath, rename, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
@@ -119,7 +120,7 @@ async function keyOf(root) {
   return realpath(resolve(root)).catch(() => resolve(root));
 }
 
-export async function trustState(root, { env = process.env } = {}) {
+export async function trustState(root, { env = process.env } = /** @type {any} */ ({})) {
   const [{ projects }, authority, key] = await Promise.all([readTrusted(env), projectAuthority(root), keyOf(root)]);
   const known = projects[key];
   return {
@@ -131,7 +132,7 @@ export async function trustState(root, { env = process.env } = {}) {
   };
 }
 
-export async function trustProject(root, { env = process.env } = {}) {
+export async function trustProject(root, { env = process.env } = /** @type {any} */ ({})) {
   const { path, projects } = await readTrusted(env);
   if (!path) throw new Error("No home directory to remember trust in. Set ETNPILOT_HOME to a directory.");
   const authority = await projectAuthority(root);
@@ -144,7 +145,7 @@ export async function trustProject(root, { env = process.env } = {}) {
   return { key, fingerprint: authority.fingerprint };
 }
 
-export async function revokeTrust(root, { env = process.env } = {}) {
+export async function revokeTrust(root, { env = process.env } = /** @type {any} */ ({})) {
   const { path, projects } = await readTrusted(env);
   const key = await keyOf(root);
   const had = key in projects;
@@ -165,7 +166,7 @@ export async function requireTrust(root, {
   accept = false,
   ask,
   say = () => {},
-} = {}) {
+} = /** @type {any} */ ({})) {
   // The test runner and an explicit variable are the two ways to skip the
   // question; a pipeline that checks out its own repository sets the variable.
   if (env.ETNPILOT_TRUST === "all") return { skipped: "ETNPILOT_TRUST" };

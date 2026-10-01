@@ -102,7 +102,7 @@ test("the approval carries the change, not its size", async () => {
   const request = requests.find((entry) => entry.kind === "write");
   assert.equal(request.kind, "write");
   assert.equal(request.toolName, "edit_file");
-  assert.match(request.diff, /\+  if \(token === "letmein"\) return true;/);
+  assert.match(request.diff, /\+ {2}if \(token === "letmein"\) return true;/);
   assert.match(request.diff, /^@@ /m);
 
   // And it survives the trip into the inbox, where every surface reads it.

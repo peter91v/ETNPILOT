@@ -1,3 +1,4 @@
+// @ts-check
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,7 +16,8 @@ import { createSecretResolver } from "../secrets/resolver.js";
 export const SMOKE_STEPS = Object.freeze(["key", "reply", "tools", "stream", "toolstream", "forge"]);
 const MARKER = "etnpilot-smoke-7421";
 
-export async function runSmoke(root, { config, env = process.env, provider: wanted, model, skip = [], fetchImpl, factories, onStep = () => {} } = {}) {
+export async function runSmoke(root, { config, env = process.env, provider: wanted, model, skip = [], fetchImpl, factories, onStep = () => {} } = /** @type {any} */ ({})) {
+  /** @type {{ provider: string | undefined, model: string | undefined, steps: any[], tokens: { input: number, output: number } }} */
   const report = { provider: undefined, model, steps: [], tokens: { input: 0, output: 0 } };
   const chosen = wanted
     ? (config?.providers?.[wanted] ? { name: wanted, config: config.providers[wanted] } : undefined)
@@ -56,7 +58,7 @@ export async function runSmoke(root, { config, env = process.env, provider: want
     }, { workingDirectory: scratch, env, secretResolver: resolver, ...(factories ? { factories } : {}) });
     return harness.providers.get("smoke");
   };
-  const ask = async (provider, input, { tools, emitDelta } = {}) => provider.invoke({
+  const ask = async (provider, input, { tools, emitDelta } = /** @type {any} */ ({})) => provider.invoke({
     runId: "smoke",
     agent: { name: "smoke", prompt: "You are a terse test responder.", ...(model ? { model } : {}), tools: tools ?? [] },
     input,
@@ -119,8 +121,9 @@ export async function runSmoke(root, { config, env = process.env, provider: want
       return `${result.toolCalls.length} tool call(s) while streaming ${pieces.length} pieces, ${account(result)}`;
     },
     forge: async () => {
-      const dry = await forgeProject(root, { config, env, dryRun: true });
-      return `digest of ${dry.sent.files} files (${Math.round(dry.sent.bytes / 1024)} KiB), ${dry.sent.leftOut} credential files left out; nothing sent`;
+      const dry = await forgeProject(root, /** @type {any} */ ({ config, env, dryRun: true }));
+      const sent = dry.sent ?? { files: 0, bytes: 0, leftOut: 0 };
+      return `digest of ${sent.files} files (${Math.round(sent.bytes / 1024)} KiB), ${sent.leftOut} credential files left out; nothing sent`;
     },
   };
 

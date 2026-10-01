@@ -10,7 +10,6 @@ import {
   mergeLayers,
   modeFor,
   readLayers,
-  setIn,
 } from "./layers.js";
 
 // Reading and changing settings, kept out of the CLI so the terminal, the TUI,

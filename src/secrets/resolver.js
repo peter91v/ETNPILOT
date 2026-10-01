@@ -1,9 +1,10 @@
+// @ts-check
 import { BUILTIN_SECRET_PROVIDER_FACTORIES, createEnvironmentSecretProvider } from "./builtins.js";
 import { defineSecretProvider } from "./provider.js";
 import { openCredentialStore } from "../auth/credential-store.js";
 
 export class SecretResolver {
-  constructor({ values = {}, store } = {}) {
+  constructor({ values = {}, store } = /** @type {any} */ ({})) {
     if (!values || Array.isArray(values) || typeof values !== "object") {
       throw new TypeError("Secret values configuration must be an object.");
     }
@@ -43,7 +44,7 @@ export class SecretResolver {
   // 'baseUrl' is where the value is about to be sent. A stored login is only
   // handed to a host it was issued for, and never to a plugin ('storedLogin:
   // false'): a plugin reads what the project explicitly maps for it.
-  async get(name, { fallback, required = false, baseUrl, storedLogin = true } = {}) {
+  async get(name, { fallback, required = false, baseUrl, storedLogin = true } = /** @type {any} */ ({})) {
     const reference = this.values[name] ?? fallback;
     if (!reference) {
       const stored = storedLogin ? await this.stored(name, baseUrl) : undefined;
@@ -84,7 +85,7 @@ export class SecretResolver {
     }
   }
 
-  async resolve(reference, { name = "secret", required = true } = {}) {
+  async resolve(reference, { name = "secret", required = true } = /** @type {any} */ ({})) {
     validateReference(reference, name);
     const provider = this.providers.get(reference.provider);
     if (!provider) {
@@ -117,7 +118,7 @@ export class SecretResolver {
     return value;
   }
 
-  async check(name, { baseUrl } = {}) {
+  async check(name, { baseUrl } = /** @type {any} */ ({})) {
     const reference = this.values[name];
     if (!reference) {
       const stored = await this.stored(name, baseUrl);
@@ -141,7 +142,7 @@ export class SecretResolver {
   }
 }
 
-export function createSecretResolver({ root = process.cwd(), config = {}, env = process.env, factories = {} } = {}) {
+export function createSecretResolver({ root = process.cwd(), config = {}, env = process.env, factories = {} } = /** @type {any} */ ({})) {
   const secretConfig = config.secrets ?? {};
   const resolver = new SecretResolver({ values: secretConfig.values ?? {}, store: openCredentialStore({ env }) });
   const configuredProviders = secretConfig.providers ?? {};
@@ -159,7 +160,7 @@ export function createSecretResolver({ root = process.cwd(), config = {}, env = 
 }
 
 export class SecretResolutionError extends Error {
-  constructor(message, { code, provider } = {}) {
+  constructor(message, { code, provider } = /** @type {any} */ ({})) {
     super(message);
     this.name = "SecretResolutionError";
     this.code = code;

@@ -1,3 +1,4 @@
+// @ts-check
 import { randomBytes } from "node:crypto";
 import { checkDeviceFlow, DeviceFlowError } from "../auth/device-flow.js";
 import { authStatus, beginDeviceLogin, finishDeviceLogin, logout, saveKey } from "../auth/login.js";
@@ -10,7 +11,7 @@ import { serviceFor } from "../auth/services.js";
 
 const MAX_FLOWS = 6;
 
-export function createAccountRoutes({ env = process.env, fetchImpl, gitlabHost = () => undefined } = {}) {
+export function createAccountRoutes({ env = process.env, fetchImpl, gitlabHost = () => undefined } = /** @type {any} */ ({})) {
   const flows = new Map();
 
   function prune() {

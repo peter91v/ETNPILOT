@@ -1,3 +1,4 @@
+// @ts-check
 import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { hostAllowed, serviceForSecret } from "./services.js";
@@ -30,7 +31,7 @@ export function credentialStorePath(env = process.env) {
 }
 
 export class CredentialStore {
-  constructor({ path, now = () => Date.now(), refresher, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = {}) {
+  constructor({ path, now = () => Date.now(), refresher, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = /** @type {any} */ ({})) {
     if (!path) throw new TypeError("A credential store needs a file path.");
     this.path = path;
     this.now = now;
@@ -92,7 +93,7 @@ export class CredentialStore {
   // The value for a secret name, renewed first if it is about to expire.
   // 'baseUrl' is where it is about to be sent; a login is only handed to a host
   // it was issued for. Returns { value } or { refused } or undefined.
-  async resolve(name, { baseUrl } = {}) {
+  async resolve(name, { baseUrl } = /** @type {any} */ ({})) {
     if (!serviceForSecret(name)) return undefined;
     let entry = (await this.read()).credentials[name];
     if (!entry || typeof entry.value !== "string" || entry.value === "") return undefined;
@@ -218,7 +219,7 @@ export class CredentialStore {
   }
 }
 
-export function openCredentialStore({ env = process.env, refresher, now } = {}) {
+export function openCredentialStore({ env = process.env, refresher, now } = /** @type {any} */ ({})) {
   const path = credentialStorePath(env);
   return path ? new CredentialStore({ path, refresher, now }) : undefined;
 }

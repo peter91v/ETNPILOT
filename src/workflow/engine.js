@@ -105,7 +105,7 @@ function validateSteps(steps, maxSteps) {
     if (!step?.id || typeof step.id !== "string") throw new TypeError("Every workflow step requires an id.");
     if (ids.has(step.id)) throw new Error(`Duplicate workflow step: '${step.id}'.`);
     ids.add(step.id);
-    return { retries: 0, needs: [], ...step, needs: [...(step.needs ?? [])] };
+    return { retries: 0, ...step, needs: [...(step.needs ?? [])] };
   });
   for (const step of normalized) {
     for (const dependency of step.needs) {
