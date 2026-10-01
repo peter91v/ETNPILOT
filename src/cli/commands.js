@@ -135,7 +135,7 @@ Usage:
   etnpilot config set <path> <value> [--global] [--root directory]
   etnpilot config unset <path> [--global] [--root directory]
   etnpilot config diff [--root directory]
-  etnpilot smoke [--provider name] [--model id] [--skip key,reply,tools,stream,forge] [--json]
+  etnpilot smoke [--provider name] [--model id] [--skip key,reply,tools,stream,toolstream,forge] [--json]
   etnpilot forge [--root directory] [--dry-run]
   etnpilot content lock [--root directory]
   etnpilot content verify [--root directory]

@@ -12,7 +12,7 @@ import { createSecretResolver } from "../secrets/resolver.js";
 // pass or fail with the reason, ending in a block that can be pasted back as it
 // is. It spends a few cents at most and never writes to the project.
 
-export const SMOKE_STEPS = Object.freeze(["key", "reply", "tools", "stream", "forge"]);
+export const SMOKE_STEPS = Object.freeze(["key", "reply", "tools", "stream", "toolstream", "forge"]);
 const MARKER = "etnpilot-smoke-7421";
 
 export async function runSmoke(root, { config, env = process.env, provider: wanted, model, skip = [], fetchImpl, factories, onStep = () => {} } = {}) {
@@ -88,6 +88,19 @@ export async function runSmoke(root, { config, env = process.env, provider: want
       if (pieces.length < 2) throw new Error(`the text arrived in ${pieces.length} piece(s), not as a stream`);
       if (!/\b12\b/.test(result.text ?? "")) throw new Error(`unexpected answer: "${String(result.text ?? "").slice(0, 80)}"`);
       return `${pieces.length} pieces, ${account(result)}`;
+    },
+    // The combination that matters in daily use: text arriving in pieces while
+    // a tool is called, on whichever API the model needs. Alone, neither the
+    // tool step (no stream) nor the stream step (no tools) reaches it.
+    toolstream: async () => {
+      const pieces = [];
+      const result = await ask(await build({ tools: true, stream: true }), "Use the read_file tool to read hello.txt, then tell me the exact text inside it.", { tools: ["read_file", "list_files"], emitDelta: (piece) => pieces.push(piece) });
+      if ((result.toolCalls ?? []).length === 0) throw new Error("the model answered without calling a tool");
+      const failed = result.toolCalls.find((call) => call.ok === false);
+      if (failed) throw new Error(`a tool call failed: ${failed.error ?? failed.name}`);
+      if (!String(result.text ?? "").includes(MARKER)) throw new Error(`the answer did not contain the file's text: "${String(result.text ?? "").slice(0, 80)}"`);
+      if (pieces.length < 2) throw new Error(`the text arrived in ${pieces.length} piece(s), not as a stream`);
+      return `${result.toolCalls.length} tool call(s) while streaming ${pieces.length} pieces, ${account(result)}`;
     },
     forge: async () => {
       const dry = await forgeProject(root, { config, env, dryRun: true });

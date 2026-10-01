@@ -280,7 +280,7 @@ reasoning items are never reassembled from fragments.
 ```
 etnpilot smoke                       # the project's default provider
 etnpilot smoke --provider openai --model gpt-5.6-sol
-etnpilot smoke --skip tools,stream   # fewer requests
+etnpilot smoke --skip tools,stream,toolstream   # fewer requests
 etnpilot smoke --json
 ```
 
@@ -292,8 +292,9 @@ be pasted as it is:
 ✓ reply  gpt-5 via responses, 12 in / 3 out                          1.1 s
 ✓ tools  1 tool call(s), gpt-5 via responses, 160 in / 24 out        3.9 s
 ✓ stream 9 pieces, gpt-5 via responses, 31 in / 36 out               1.8 s
+✓ toolstream 1 tool call(s) while streaming 6 pieces, gpt-5 via responses   4.2 s
 ✓ forge  digest of 40 files (6 KiB), 0 credential files left out; nothing sent
-5/5 passed against 'openai'; 203 tokens in, 63 out.
+6/6 passed against 'openai'; 363 tokens in, 90 out.
 ```
 
 | Step | Checks |
@@ -302,6 +303,7 @@ be pasted as it is:
 | `reply` | a plain answer ("pong"), and which API answered (`chat` or `responses`) |
 | `tools` | a read-only tool call in a scratch directory: the model must call it and use what it read |
 | `stream` | the answer arrives in several pieces (the setting `stream` is switched on for this step only) |
+| `toolstream` | the same tool call while the answer streams, on whichever API the model needs — the combination used day to day |
 | `forge` | the repository digest is built; it is not sent |
 
 It never writes to the project, and the tool step runs in a temporary

@@ -18,6 +18,18 @@ function goodApi(calls = []) {
   return async (url, options) => {
     const body = JSON.parse(options.body);
     calls.push({ url: String(url), body });
+    const finished = body.input.find((item) => item.type === "function_call_output");
+    const wantsTool = JSON.stringify(body.input).includes("read_file tool");
+    if (body.stream && wantsTool) {
+      // The tool loop while streaming: the call comes in the final event, the answer in pieces.
+      return finished
+        ? streamOf(sse([
+          ["response.output_text.delta", { type: "response.output_text.delta", delta: "The file says: " }],
+          ["response.output_text.delta", { type: "response.output_text.delta", delta: finished.output }],
+          ["response.completed", { type: "response.completed", response: message(`The file says: ${finished.output}`) }],
+        ]))
+        : streamOf(sse([["response.completed", { type: "response.completed", response: { model: "gpt-x", output: [{ type: "function_call", call_id: "c1", name: "read_file", arguments: JSON.stringify({ path: "hello.txt" }) }], usage: { input_tokens: 12, output_tokens: 4 } } }]]));
+    }
     if (body.stream) {
       return streamOf(sse([
         ["response.output_text.delta", { type: "response.output_text.delta", delta: "1 2 3 4 5 6 " }],
@@ -48,7 +60,7 @@ test("on a good day every step passes, over the API that was asked for", async (
   const { root, config, env } = await project();
   const calls = [];
   const report = await runSmoke(root, { config, env, fetchImpl: goodApi(calls) });
-  assert.deepEqual(report.steps.map((step) => [step.id, step.status]), [["key", "pass"], ["reply", "pass"], ["tools", "pass"], ["stream", "pass"], ["forge", "pass"]]);
+  assert.deepEqual(report.steps.map((step) => [step.id, step.status]), [["key", "pass"], ["reply", "pass"], ["tools", "pass"], ["stream", "pass"], ["toolstream", "pass"], ["forge", "pass"]]);
   assert.match(report.steps[1].detail, /gpt-x via responses/);
   assert.match(report.steps[2].detail, /1 tool call/);
   assert.match(report.steps[3].detail, /2 pieces/);
@@ -56,14 +68,14 @@ test("on a good day every step passes, over the API that was asked for", async (
   assert.ok(report.tokens.input > 0);
   const text = formatSmoke(report).join("\n");
   assert.match(text, /✓ reply/);
-  assert.match(text, /5\/5 passed against 'openai'/);
+  assert.match(text, /6\/6 passed against 'openai'/);
 });
 
 test("it writes nothing into the project and sends nothing in the forge step", async () => {
   const { root, config, env } = await project();
   const before = await readdir(root);
   const calls = [];
-  await runSmoke(root, { config, env, skip: ["reply", "tools", "stream"], fetchImpl: goodApi(calls) });
+  await runSmoke(root, { config, env, skip: ["reply", "tools", "stream", "toolstream"], fetchImpl: goodApi(calls) });
   assert.deepEqual((await readdir(root)).sort(), before.sort());
   assert.equal(calls.length, 0);
 });
@@ -102,6 +114,8 @@ test("a model that never calls the tool, or never streams, is reported as that",
   assert.match(byId.tools.detail, /without calling a tool/);
   assert.equal(byId.stream.status, "fail");
   assert.match(byId.stream.detail, /not as a stream/);
+  assert.equal(byId.toolstream.status, "fail");
+  assert.match(byId.toolstream.detail, /without calling a tool/);
 });
 
 test("an unknown provider is named", async () => {
