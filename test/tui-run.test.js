@@ -475,3 +475,30 @@ test("a receipt name from a surface cannot reach outside the runs directory", as
     state.close();
   }
 });
+
+test("the Runs view names every step, its agents, and who is working", async () => {
+  const { activeRunLines } = await import("../src/tui/render.js");
+  const { createStyle } = await import("../src/tui/ansi.js");
+  const style = createStyle({ color: false });
+  const lines = activeRunLines([{
+    task: "Überarbeite den UI", steps: ["plan", "approve", "build", "tests"], done: 1, step: "approve",
+    plan: [
+      { id: "plan", type: "agent", agents: ["planner"] },
+      { id: "approve", type: "gate", agents: [] },
+      { id: "build", type: "agent", agents: ["builder"] },
+      { id: "tests", type: "check", agents: [], command: "npm test" },
+    ],
+    agents: [
+      { runId: "1", name: "orchestrator", status: "working", step: "plan" },
+      { runId: "2", parentRunId: "1", name: "planner", status: "done", step: "plan" },
+      { runId: "3", parentRunId: "1", name: "angular-dev", status: "working", step: "plan" },
+    ],
+  }], { style, width: 80, now: Date.now() }).join("\n");
+  assert.match(lines, /RUNNING .*Überarbeite den UI.*step 2 of 4/);
+  assert.match(lines, /✓ plan\s+agent\s+planner/);
+  assert.match(lines, /▶ approve\s+gate\s+waits for you/);
+  assert.match(lines, /· tests\s+check\s+npm test/);
+  assert.match(lines, /working\s+orchestrator in plan/);
+  assert.match(lines, /^ {6}done\s+planner/m); // indented under its parent
+  assert.match(lines, /angular-dev/);
+});
