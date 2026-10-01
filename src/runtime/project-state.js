@@ -15,6 +15,7 @@ import { join, resolve } from "node:path";
 import { loadConfig } from "../config/load.js";
 import { describeSettings, setSetting, unsetSetting } from "../config/settings.js";
 import { ApprovalInbox, createInboxApprovalHandler } from "../core/approval-inbox.js";
+import { createApprovalNotifier } from "../core/approval-notify.js";
 import { listChecks, runProjectCheck } from "./project-checks.js";
 import { runProject } from "./project-runner.js";
 import { createSecretResolver } from "../secrets/resolver.js";
@@ -293,6 +294,7 @@ export async function openProjectState({ root = process.cwd(), env = process.env
           inbox,
           timeoutMs: inboxConfig.timeoutMs ?? 24 * 60 * 60_000,
           pollIntervalMs: inboxConfig.pollIntervalMs ?? 500,
+          notifier: createApprovalNotifier(current.approval?.notify),
           signal: controller.signal,
         }),
       });

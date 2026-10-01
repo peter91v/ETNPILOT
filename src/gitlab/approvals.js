@@ -20,6 +20,7 @@ export function createGitLabApprovalHandler({
   serviceInstanceId,
   signal,
   onPending = () => {},
+  notifier,
   onResolved = () => {},
   onError = () => {},
 } = /** @type {any} */ ({})) {
@@ -38,6 +39,7 @@ export function createGitLabApprovalHandler({
   return async (request, context) => {
     const pending = inbox.create(request, context, { timeoutMs, serviceInstanceId });
     await onPending(pending);
+    await notifier?.(pending);
     const requestedAt = Date.parse(pending.createdAt);
     await client.addIssueNote(project, issueIid, requestNote(pending)).catch(onError);
 

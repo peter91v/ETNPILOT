@@ -151,6 +151,7 @@ export function createInboxApprovalHandler({
   serviceInstanceId = randomUUID(),
   signal,
   onPending = () => {},
+  notifier,
   onResolved = () => {},
 } = /** @type {any} */ ({})) {
   if (!inbox) throw new TypeError("An approval inbox is required.");
@@ -160,6 +161,8 @@ export function createInboxApprovalHandler({
   return async (request, context) => {
     const pending = inbox.create(request, context, { timeoutMs, serviceInstanceId });
     await onPending(pending);
+    // Tells a person away from the screen; never throws (see approval-notify.js).
+    await notifier?.(pending);
     let record;
     let aborted = false;
     try {

@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { join, resolve } from "node:path";
 import { loadConfig } from "../config/load.js";
 import { ApprovalInbox, createInboxApprovalHandler } from "../core/approval-inbox.js";
+import { createApprovalNotifier } from "../core/approval-notify.js";
 import { WorkflowQueue } from "../workflow/queue.js";
 import { WorkflowQueueWorkerPool } from "../workflow/queue-worker.js";
 import { createSecretResolver } from "../secrets/resolver.js";
@@ -96,6 +97,7 @@ export async function createGitLabWebhookServer({
       const approvalOptions = {
         inbox: approvalInbox,
         timeoutMs: inboxConfig.timeoutMs ?? 24 * 60 * 60_000,
+        notifier: createApprovalNotifier(config.approval?.notify),
         signal: execution.signal,
         onPending: (approval) => execution.checkpoint({
           phase: "waiting-approval",

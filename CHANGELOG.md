@@ -8,6 +8,9 @@ pre-1.0, so breaking changes may appear in any release.
 
 ### Checks and hygiene (follow-up to the review)
 
+- **Notification when an approval is pending** (`approval.notify`, see docs/approval-inbox.md): one POST per
+  request to an https address (ntfy-style or JSON). Only the kind, agent and ids are sent unless `includeDetails`
+  is set; a failed delivery never holds the run.
 - The type check covers 102 of the files in `src/` (was 12); the rest are listed in `docs/typecheck.md`.
 - `etnpilot doctor` warns when a key from the environment would go to a host that is not the vendor's own.
 - Seeded random-input tests for the policy's path handling and the diff parser (`test/fuzz.test.js`).

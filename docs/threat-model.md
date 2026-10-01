@@ -50,6 +50,10 @@ game.
 
 ## Accepted risks
 
+- **An approval notification is an outbound call.** With `approval.notify.url` set, a pending request is announced
+  to that address. By default only the kind of operation, the agent and ids are sent; the command, path or URL
+  go only with `includeDetails: true`. The address must be https (or this machine), redirects are refused, and a
+  failure never holds a run. With ntfy the topic name is the secret.
 - **Approved commands execute code.** Policy path rules do not mediate filesystem
   accesses inside them. Commands receive an allowlisted environment and run with
   the operator's privileges unless the existing Docker/Podman sandbox is enabled.
