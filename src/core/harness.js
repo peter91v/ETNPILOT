@@ -210,6 +210,10 @@ export class Harness {
         // subscriber returns changes the call.
         notifyToolCompleted: (info) => this.events.emit("tool.completed", { runId, agent: agentName, ...info }),
         skills: agent.skills.map((name) => this.skills.get(name)),
+        // Who this agent may hand work to, with what each is for, so a provider
+        // can put the names and descriptions in front of the model: a list the
+        // model has to guess is a list it does not use.
+        subagents: agent.subagents.map((name) => ({ name, description: this.agents.has(name) ? this.agents.get(name).description : undefined })),
         spawn: (subagent, subInput) => {
           if (!agent.subagents.includes(subagent)) {
             throw new Error(`Agent '${agentName}' may not spawn '${subagent}'.`);

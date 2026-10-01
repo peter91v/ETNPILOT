@@ -91,6 +91,7 @@ export function createAnthropicProvider({
           // got all of them.
           allowed: context.agent.tools,
           canSpawn: (context.agent.subagents ?? []).length > 0,
+          subagents: context.subagents ?? [],
           extraTools: context.extraTools ?? extraTools,
           scopedInstructions: context.scopedInstructions,
           skills: skillsOf(context),

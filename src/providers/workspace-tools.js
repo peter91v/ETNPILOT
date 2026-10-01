@@ -195,6 +195,23 @@ export const WORKSPACE_TOOL_DEFINITIONS = Object.freeze([
 // every agent had before: the tools hung on the provider, so a reviewer given
 // a tool-capable provider could write the code it was reviewing.
 //
+// The model is told which agents exist and what each is for; the name is
+// restricted to those, and 'invoke' still refuses anything else.
+function describeSpawn(definition, subagents) {
+  const list = subagents.map(({ name, description }) => `- ${name}${description ? `: ${String(description).split("\n")[0]}` : ""}`).join("\n");
+  return {
+    ...definition,
+    description: `${definition.description}\nAgents you may hand work to:\n${list}`,
+    parameters: {
+      ...definition.parameters,
+      properties: {
+        ...definition.parameters.properties,
+        agent: { ...definition.parameters.properties.agent, enum: subagents.map(({ name }) => name) },
+      },
+    },
+  };
+}
+
 // Enforced twice on purpose. The filtered list is what the model is offered,
 // and 'invoke' refuses anything outside it — a model can name a tool nobody
 // showed it, and an offer is not a boundary.
@@ -217,6 +234,9 @@ export function createWorkspaceTools({
   sandbox,
   allowed,
   canSpawn = true,
+  // Who it may spawn, [{name, description}]: shown to the model as the only
+  // values 'agent' can take.
+  subagents = [],
   // The agent's skills: [{name, content}]. Listed by name in the prompt and
   // opened here on request, instead of all being sent every time.
   skills = [],
@@ -235,7 +255,9 @@ export function createWorkspaceTools({
   const bounds = { ...DEFAULT_LIMITS, ...limits };
   const extra = new Map(extraTools.map((tool) => [tool.definition.name, tool]));
   const definitions = [
-    ...allowedDefinitions(allowed, { canSpawn, hasSkills: skills.length > 0 }),
+    ...allowedDefinitions(allowed, { canSpawn, hasSkills: skills.length > 0 }).map((definition) => (
+      definition.name === "spawn_subagent" && subagents.length > 0 ? describeSpawn(definition, subagents) : definition
+    )),
     ...extraTools
       .filter((tool) => allowed === undefined || allowed.includes(tool.definition.name))
       .map((tool) => tool.definition),

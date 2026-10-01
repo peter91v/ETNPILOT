@@ -174,16 +174,23 @@ async function importAgents(root, configDir, report, names) {
       const skills = [data?.skills].flat().filter((skill) => typeof skill === "string").map(slug).filter(Boolean);
       const lines = [
         `# Imported from ${path} by 'etnpilot init' (${tool}). Review it, then run 'etnpilot content lock'.`,
-        ...(data?.description ? [`# Description in the source: ${String(data.description).split("\n")[0]}`] : []),
+
         ...(data?.model ? [`# Model in the source: ${data.model}. Not copied: model names differ between providers. Set 'model' or 'provider' here if you want one.`] : []),
-        YAML.stringify({ name, promptRef: name, skills, requires: ["chat"], subagents: [] }).trimEnd(),
+        YAML.stringify({
+          name,
+          ...(data?.description ? { description: String(data.description).split("\n")[0].slice(0, 300) } : {}),
+          promptRef: name,
+          skills,
+          requires: ["chat"],
+          subagents: [],
+        }).trimEnd(),
         ...(mapped.tools === undefined
           ? ["# The source did not restrict this agent's tools, so neither does this file. Name them with 'tools: [...]' to make it read-only, for example."]
           : [YAML.stringify({ tools: mapped.tools }, { flowCollectionPadding: false }).trimEnd()]),
       ];
       await writeNew(promptPath, body.trim() + "\n");
       await writeNew(manifestPath, lines.join("\n") + "\n");
-      report.agents.push({ from: path, to: `.etnpilot/agents/${name}.yaml` });
+      report.agents.push({ from: path, to: `.etnpilot/agents/${name}.yaml`, name });
     }
   }
 }
@@ -350,4 +357,16 @@ async function writeNew(path, content) {
     if (error.code === "EEXIST") return false;
     throw error;
   });
+}
+
+// Every agent in the project that an import made, including by an earlier run:
+// the manifest says so on its first line.
+export async function importedAgentNames(configDir) {
+  const directory = join(configDir, "agents");
+  const names = [];
+  for (const file of await listFiles(directory, [".yaml"])) {
+    const head = await readFile(join(directory, file), "utf8").then((text) => text.split("\n", 1)[0], () => "");
+    if (head.startsWith("# Imported from ")) names.push(file.replace(/\.yaml$/, ""));
+  }
+  return names;
 }

@@ -1,5 +1,5 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { importExistingProject } from "./migrate.js";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { importExistingProject, importedAgentNames } from "./migrate.js";
 import { join } from "node:path";
 import YAML from "yaml";
 
@@ -449,7 +449,33 @@ export async function initializeProject(root, { template = "default", importExis
   // A project that already has instructions, agents or skills for another
   // coding agent keeps them: they are copied in, never over anything here.
   const imported = importExisting ? await importExistingProject(root, { configDir }) : undefined;
+  if (imported) await wireOrchestrator(configDir, imported);
   return { root, configDir, template, ...(imported ? { imported } : {}) };
+}
+
+// Imported agents are only reachable if some agent may hand work to them, and
+// the starter orchestrator lists none. When that file is still exactly what
+// 'init' wrote it, it is ours to complete: it gets the imported agents as
+// subagents and the tool to call them. A file anyone has touched is theirs;
+// the summary says what to add instead.
+async function wireOrchestrator(configDir, report) {
+  const names = await importedAgentNames(configDir);
+  if (names.length === 0) return;
+  const path = join(configDir, "agents", "orchestrator.yaml");
+  const current = await readFile(path, "utf8").catch(() => undefined);
+  if (current === STARTER_AGENT) {
+    const wired = STARTER_AGENT
+      .replace("subagents: []", `subagents: [${names.join(", ")}]`)
+      .replace("write_file, edit_file, run_command]", "write_file, edit_file, run_command, spawn_subagent]");
+    await writeFile(path, wired, "utf8");
+    report.notes.push(`The starter orchestrator can now hand work to: ${names.join(", ")}.`);
+  } else if (current !== undefined) {
+    const listed = YAML.parse(current)?.subagents ?? [];
+    const missing = names.filter((name) => !listed.includes(name));
+    if (missing.length > 0) {
+      report.notes.push(`.etnpilot/agents/orchestrator.yaml was left as it is. To let it use ${missing.join(", ")}, add them under 'subagents' and 'spawn_subagent' under 'tools'.`);
+    }
+  }
 }
 
 async function writeIfAbsent(path, content) {

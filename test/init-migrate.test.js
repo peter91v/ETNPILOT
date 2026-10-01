@@ -129,3 +129,51 @@ test("the first-run screens say what they found, and what was brought along", as
   assert.equal(created.imported, undefined);
   assert.deepEqual(await readdir(join(root, ".etnpilot/instructions")), []);
 });
+
+test("the orchestrator can reach what was imported, and the model is told who they are", async () => {
+  const { Harness } = await import("../src/core/harness.js");
+  const { createWorkspaceTools } = await import("../src/providers/workspace-tools.js");
+  const root = await existingProject();
+  const { imported } = await initializeProject(root);
+
+  // The untouched starter is completed...
+  const orchestrator = YAML.parse(await readFile(join(root, ".etnpilot/agents/orchestrator.yaml"), "utf8"));
+  assert.deepEqual([...orchestrator.subagents].sort(), ["code-reviewer", "docs", "free"]);
+  assert.ok(orchestrator.tools.includes("spawn_subagent"));
+  assert.match(summarizeImport(imported).join("\n"), /can now hand work to/);
+
+  // ...the description travels in the manifest, and the spawn tool lists names with it.
+  const reviewer = YAML.parse(await readFile(join(root, ".etnpilot/agents/code-reviewer.yaml"), "utf8"));
+  assert.equal(reviewer.description, "Reviews diffs");
+  const tools = createWorkspaceTools({
+    workingDirectory: root,
+    allowed: orchestrator.tools,
+    subagents: [{ name: "code-reviewer", description: reviewer.description }, { name: "free" }],
+  });
+  const spawn = tools.definitions.find((definition) => definition.name === "spawn_subagent");
+  assert.match(spawn.description, /code-reviewer: Reviews diffs/);
+  assert.deepEqual(spawn.parameters.properties.agent.enum, ["code-reviewer", "free"]);
+
+  // The harness hands a provider the same list.
+  const harness = new Harness({});
+  let seen;
+  harness.registerProvider({ name: "p", async invoke(context) { seen = context.subagents; return { text: "ok" }; } });
+  harness.registerAgent({ name: "worker", provider: "p", prompt: "x", description: "Does the work" });
+  harness.registerAgent({ name: "lead", provider: "p", prompt: "x", subagents: ["worker"] });
+  await harness.run({ agent: "lead", input: "go" });
+  assert.deepEqual(seen, [{ name: "worker", description: "Does the work" }]);
+});
+
+test("a re-run wires an orchestrator left untouched, and leaves an edited one alone", async () => {
+  const root = await existingProject();
+  await initializeProject(root, { importExisting: false });
+  await initializeProject(root); // the import comes later: the starter is still exactly the starter
+  assert.match(await readFile(join(root, ".etnpilot/agents/orchestrator.yaml"), "utf8"), /subagents: \[.*docs/);
+
+  const other = await existingProject();
+  await initializeProject(other, { importExisting: false });
+  await writeFile(join(other, ".etnpilot/agents/orchestrator.yaml"), "name: orchestrator\npromptRef: orchestrator\nsubagents: []\n");
+  const result = await initializeProject(other);
+  assert.match(await readFile(join(other, ".etnpilot/agents/orchestrator.yaml"), "utf8"), /subagents: \[\]/);
+  assert.match(summarizeImport(result.imported).join("\n"), /left as it is/);
+});
