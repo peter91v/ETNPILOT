@@ -1,7 +1,7 @@
 import { readRegularFile } from "../runtime/bounded-io.js";
 import { randomBytes } from "node:crypto";
-import { appendFile, mkdir } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { appendFile, mkdir, readdir, rename, stat } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
 import { knownPriceForModel } from "./known-pricing.js";
 
 const TELEMETRY_VERSION = 1;
@@ -44,7 +44,9 @@ export class Telemetry {
     budgets = {},
     fetchImpl = globalThis.fetch,
     now = () => Date.now(),
+    rotateBytes = DEFAULT_ROTATE_BYTES,
   } = {}) {
+    this.rotateBytes = rotateBytes;
     this.root = root;
     this.file = file;
     this.serviceName = serviceName;
@@ -151,6 +153,7 @@ export class Telemetry {
     const operation = async () => {
       if (this.file) {
         await mkdir(dirname(this.file), { recursive: true });
+        await rotateIfLarge(this.file, this.rotateBytes, this.now());
         await appendFile(this.file, `${JSON.stringify(payload)}\n`, "utf8");
       }
       if (this.otlp?.enabled) await exportOtlp(payload, this.otlp, this.fetchImpl);
@@ -171,11 +174,37 @@ export class Telemetry {
   }
 }
 
+// The file is moved aside when it gets large, so no single file grows without
+// bound and the reader's per-file limit is never reached. Totals still cover
+// every file: the moved ones are named '<file>.<time>' and are read with it.
+const DEFAULT_ROTATE_BYTES = 16 * 1024 * 1024;
+
+async function rotateIfLarge(file, limit, now) {
+  if (!limit) return;
+  const details = await stat(file).catch(() => undefined);
+  if (!details || details.size < limit) return;
+  await rename(file, `${file}.${now}`).catch(() => {});
+}
+
+async function telemetryParts(path) {
+  const file = resolve(path);
+  const base = basename(file);
+  const archives = (await readdir(dirname(file)).catch(() => []))
+    .filter((name) => name.startsWith(`${base}.`) && /^\d+$/.test(name.slice(base.length + 1)))
+    .sort((a, b) => Number(a.slice(base.length + 1)) - Number(b.slice(base.length + 1)))
+    .map((name) => join(dirname(file), name));
+  return [...archives, file];
+}
+
 export async function summarizeTelemetryFile(path, { workflowRunId, root = "", config = {} } = {}) {
-  const content = await readRegularFile(resolve(path), 64 * 1024 * 1024).then((bytes) => bytes.toString("utf8")).catch((error) => {
-    if (error.code === "ENOENT") return "";
-    throw error;
-  });
+  const pieces = [];
+  for (const part of await telemetryParts(path)) {
+    pieces.push(await readRegularFile(part, 64 * 1024 * 1024).then((bytes) => bytes.toString("utf8")).catch((error) => {
+      if (error.code === "ENOENT") return "";
+      throw error;
+    }));
+  }
+  const content = pieces.join("\n");
   const summary = emptySummary();
   // Which models went without a rate. 'not priced' with no model named leaves
   // someone setting a rate for a model the runs never used, and the card says
@@ -264,7 +293,7 @@ function normalizeConfig(config = {}) {
   if (!config || Array.isArray(config) || typeof config !== "object") {
     throw new TypeError("observability must be an object.");
   }
-  rejectUnknown(config, ["enabled", "file", "serviceName", "environment", "failureMode", "otlp", "pricing", "budgets"], "observability");
+  rejectUnknown(config, ["enabled", "file", "serviceName", "environment", "failureMode", "otlp", "pricing", "budgets", "rotateBytes"], "observability");
   const enabled = config.enabled === true;
   const failureMode = config.failureMode ?? "ignore";
   if (!["ignore", "fail"].includes(failureMode)) throw new TypeError("observability.failureMode must be ignore or fail.");
@@ -287,6 +316,7 @@ function normalizeConfig(config = {}) {
     otlp,
     pricing: config.pricing ?? {},
     budgets: config.budgets ?? {},
+    ...(config.rotateBytes !== undefined ? { rotateBytes: config.rotateBytes === false ? 0 : positiveInteger(config.rotateBytes, "observability.rotateBytes") } : {}),
   };
 }
 

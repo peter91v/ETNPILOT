@@ -1,3 +1,4 @@
+import { swallow } from "../runtime/swallow.js";
 import { timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { networkInterfaces } from "node:os";
@@ -113,7 +114,7 @@ export async function createReviewServer({
         state = await openProjectState({ root, env });
         // Now there is somewhere to keep it, so the link survives a restart
         // and the app this project can install is not locked out.
-        if (!token) await writeToken(root, resolvedToken).catch(() => {});
+        if (!token) await writeToken(root, resolvedToken).catch(swallow("keeping the link token", undefined));
         return send(response, 201, created);
       }
       if (!state) return send(response, 409, { error: "no-project-here", root });

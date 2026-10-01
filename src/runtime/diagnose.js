@@ -1,3 +1,4 @@
+import { swallow } from "./swallow.js";
 import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { loadConfig } from "../config/load.js";
@@ -51,7 +52,7 @@ export async function diagnose(root) {
 // logins are protected, whether this project was looked at.
 async function diagnoseWarnings(root) {
   const warnings = [];
-  const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml")).catch(() => undefined);
+  const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml")).catch(swallow("reading the configuration", undefined));
   if (!config) return warnings;
   if (config.receipts?.signing?.enabled !== true) {
     warnings.push("Receipts are not signed. Their hash chain shows accidental edits, but anyone who can write the files can rewrite the whole chain. Enable receipts.signing (see docs/signed-receipts.md) if the receipts are meant as proof.");
@@ -73,9 +74,9 @@ async function diagnoseWarnings(root) {
 // The provider a run would reach, and whether it can run here. Everything it
 // reports is read the same way the run reads it.
 async function diagnoseRoute(root, checks) {
-  const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml")).catch(() => undefined);
+  const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml")).catch(swallow("reading the configuration", undefined));
   if (!config) return { error: "The project configuration could not be read.", route: [], usable: null, hints: [] };
-  const state = await openProjectState({ root }).catch(() => undefined);
+  const state = await openProjectState({ root }).catch(swallow("opening project state", undefined));
   const described = await state?.agents().catch(() => undefined);
   state?.close?.();
   // The same agent a run would take: 'defaultAgent', or 'orchestrator', which

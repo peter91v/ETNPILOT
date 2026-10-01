@@ -1,3 +1,4 @@
+import { swallow } from "./swallow.js";
 import { acquireWorkspaceLease } from "./workspace-lease.js";
 import { commandEnvironment } from "./command-environment.js";
 import { randomUUID } from "node:crypto";
@@ -128,7 +129,7 @@ async function executeProject({
     if (publish) assertPublishable(useWorktree, bootstrapConfig, gitLabToken);
     // Prices for models the built-in table does not know, so a run is costed
     // without anyone typing a rate. Never fails the run.
-    await refreshPricing({ root: repositoryRoot, config: bootstrapConfig, fetchImpl }).catch(() => undefined);
+    await refreshPricing({ root: repositoryRoot, config: bootstrapConfig, fetchImpl }).catch(swallow("price refresh", undefined));
     telemetry = await createTelemetry({
       root: repositoryRoot,
       config: bootstrapConfig,

@@ -1,3 +1,4 @@
+import { swallow } from "./swallow.js";
 import { readRegularFile } from "./bounded-io.js";
 import { acquireWorkspaceLease } from "./workspace-lease.js";
 import { compactSession, compactionCheck, createSessionId, listSessions, readSession, runChatTurn, undoLastTurn, verifySession } from "./chat-session.js";
@@ -617,7 +618,10 @@ export function describeOutcome(receipt, { running = false } = {}) {
       : {
         kind: "incomplete",
         text: "the receipt has no terminal record: the run stopped before it could finish,"
-          + " or it is still going somewhere this surface did not start it",
+          + " or it is still going somewhere this surface did not start it."
+          + " A run started from the page or the terminal screen stops with the app: if it was closed"
+          + " or the phone ended it in the background, start the task again. The work it did is in its"
+          + " worktree (see Worktrees), which is kept until you remove it",
       });
   }
   return {
@@ -767,7 +771,7 @@ export async function verifyProjectReceipt(directory, file, { root, config } = {
   assertReceiptName(file);
   const configured = config?.receipts?.signing?.publicKeyFile;
   const verifiers = configured
-    ? await loadReceiptVerifiers([resolve(root, configured)]).catch(() => undefined)
+    ? await loadReceiptVerifiers([resolve(root, configured)]).catch(swallow("receipt verifier keys", undefined))
     : undefined;
   const report = await verifyReceiptFile(join(directory, file), { ...(verifiers ? { verifiers } : {}) });
   return {
@@ -832,9 +836,9 @@ function assertReceiptName(file) {
 export async function withCurrentPricing(receipt, { root, config, runId }) {
   const usage = receipt.outcome?.usage;
   if (!usage || !(usage.unpricedInvocations > 0) || usage.estimatedCost !== undefined) return receipt;
-  await refreshPricing({ root, config }).catch(() => undefined);
+  await refreshPricing({ root, config }).catch(swallow("price refresh", undefined));
   const file = resolve(root, config?.observability?.file ?? ".etnpilot/state/telemetry.jsonl");
-  const fresh = await summarizeTelemetryFile(file, { workflowRunId: receipt.terminal?.runId ?? runId, root, config }).catch(() => undefined);
+  const fresh = await summarizeTelemetryFile(file, { workflowRunId: receipt.terminal?.runId ?? runId, root, config }).catch(swallow("telemetry summary of a run", undefined));
   if (!fresh || fresh.estimatedCost === undefined) return receipt;
   const merged = { ...usage, ...fresh, retrospective: true };
   if (!fresh.unpricedModels) delete merged.unpricedModels;
@@ -970,7 +974,7 @@ export async function readAgents({ root, config }) {
 // surface that never shows this leaves a budget nobody can see.
 let usageCache;
 export async function readUsage({ root, config }) {
-  await refreshPricing({ root, config }).catch(() => undefined);
+  await refreshPricing({ root, config }).catch(swallow("price refresh", undefined));
   const file = resolve(root, config?.observability?.file ?? ".etnpilot/state/telemetry.jsonl");
   const stats = await stat(file).catch(() => undefined);
   if (!stats) {

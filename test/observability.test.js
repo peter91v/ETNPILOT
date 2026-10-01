@@ -234,3 +234,36 @@ test("a rate reaches the dated snapshot a provider actually served", async () =>
   });
   assert.equal(other.estimatedCost, undefined);
 });
+
+test("a growing telemetry file is moved aside, and the totals still cover every file", async () => {
+  const { mkdtemp, readdir } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-rotate-"));
+  const file = join(root, "telemetry.jsonl");
+  let clock = 1_000;
+  const telemetry = new Telemetry({
+    file, now: () => (clock += 7), rotateBytes: 1200,
+    pricing: { currency: "USD", models: { m: { inputPerMillion: 1, outputPerMillion: 1 } } },
+  });
+  for (let index = 0; index < 12; index += 1) {
+    const accounting = telemetry.recordProviderUsage({ workflowRunId: `w${index}`, agentRunId: `a${index}`, provider: "p", model: "m", usage: { inputTokens: 100, outputTokens: 10 } });
+    const span = telemetry.startSpan("gen_ai.invoke_agent", { attributes: { "etnpilot.workflow.run_id": `w${index}`, "etnpilot.provider.name": "p" } });
+    await span.end({ attributes: telemetryProviderAttributes(accounting) });
+  }
+  const files = (await readdir(root)).filter((name) => name.startsWith("telemetry.jsonl"));
+  assert.ok(files.length > 2, `expected archives, saw ${files.join(", ")}`);
+  const summary = await summarizeTelemetryFile(file);
+  assert.equal(summary.inputTokens, 1200);
+  assert.equal(summary.outputTokens, 120);
+  assert.equal((await summarizeTelemetryFile(file, { workflowRunId: "w0" })).inputTokens, 100);
+});
+
+test("rotation can be set or switched off", async () => {
+  const { createTelemetry } = await import("../src/observability/telemetry.js");
+  const on = await createTelemetry({ root: "/tmp/x", config: { observability: { enabled: true, rotateBytes: 5000 } } });
+  assert.equal(on.rotateBytes, 5000);
+  const off = await createTelemetry({ root: "/tmp/x", config: { observability: { enabled: true, rotateBytes: false } } });
+  assert.equal(off.rotateBytes, 0);
+  await assert.rejects(createTelemetry({ root: "/tmp/x", config: { observability: { enabled: true, rotateBytes: -1 } } }), /positive/);
+});
