@@ -442,6 +442,10 @@ export const STYLES = `
   /* Text fields — outlined, with the label sitting on the outline. Every
      field on this page always shows its label, so the label is drawn in the
      notch rather than animating into it. */
+  .device-box { display: grid; gap: 12px; padding: 12px; border-radius: 12px; background: var(--md-surface-container-high, var(--md-surface-variant)); }
+  .device-code { font-size: 28px; letter-spacing: 0.14em; font-weight: 600; margin: 0; user-select: all; }
+  .fold { margin-top: 8px; }
+  .fold > summary { cursor: pointer; padding: 10px 0; }
   .field { position: relative; display: grid; gap: 0; padding-top: 8px; }
   .field > label {
     position: absolute; top: 0; left: 12px; z-index: 1; padding: 0 4px;

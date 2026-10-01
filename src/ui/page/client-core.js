@@ -89,6 +89,13 @@ const VIEWS = [
     icon: "M6 2h9l5 5v15H6zM14 2v6h6M9 13h6M9 17h6",
   },
   {
+    id: "accounts",
+    label: "Accounts",
+    title: "Accounts",
+    description: "Who ETNPilot is signed in as. Sign in once instead of exporting keys every session.",
+    icon: "M12 12a4 4 0 100-8 4 4 0 000 8zM3 21c0-4 4-6 9-6s9 2 9 6M16 17l2 2 3-4",
+  },
+  {
     id: "worktrees",
     label: "Worktrees",
     title: "Worktrees",
@@ -424,6 +431,7 @@ function show(next) {
   if (view === "merges" && merges === undefined) void loadMerges();
   // Read from disk each time it is opened: it is the files that are being reviewed.
   if (view === "agents" || view === "content") void loadProjectViews();
+  if (view === "accounts") void loadAccounts();
 }
 
 function renderPageActions() {
@@ -431,6 +439,7 @@ function renderPageActions() {
   host.replaceChildren();
   if (view === "worktrees") host.append(button("Read again", { class: "btn", onClick: () => loadWorktrees({ notify: true }) }));
   if (view === "agents" || view === "content") host.append(button("Read again", { class: "btn", onClick: () => loadProjectViews({ notify: true }) }));
+  if (view === "accounts") host.append(button("Read again", { class: "btn", onClick: () => loadAccounts({ notify: true }) }));
   if (view === "merges") host.append(button("Ask GitLab", { class: "btn", onClick: () => loadMerges({ notify: true }) }));
   if (view === "runs" && openRun) host.append(button("Close the receipt", { class: "btn", onClick: () => { openRun = undefined; expandedAgents = new Set(); render(); } }));
   host.append(button("Refresh", { class: "btn", onClick: () => refresh({ force: true }) }));
@@ -543,5 +552,6 @@ function draw() {
   if (view === "settings") renderSettings();
   if (view === "agents") renderAgents();
   if (view === "content") renderContent();
+  if (view === "accounts") renderAccounts();
 }
 `;

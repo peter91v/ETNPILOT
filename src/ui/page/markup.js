@@ -59,6 +59,7 @@ export const MARKUP = `</head>
       <section id="view-queue" class="view" hidden></section>
       <section id="view-runs" class="view" hidden></section>
       <section id="view-content" class="view" hidden></section>
+      <section id="view-accounts" class="view" hidden></section>
       <section id="view-worktrees" class="view" hidden></section>
       <section id="view-merges" class="view" hidden></section>
       <section id="view-checks" class="view" hidden></section>

@@ -94,7 +94,7 @@ export async function forgeProject(root, {
   } else {
     const chosen = provider ?? await chooseProvider(config, root, env);
     if (!chosen) {
-      report.notes.push("AgentsForge found no API key (ANTHROPIC_API_KEY or OPENAI_API_KEY), so it did not run. Set one and run 'etnpilot forge'.");
+      report.notes.push("AgentsForge found no API key (ANTHROPIC_API_KEY or OPENAI_API_KEY), so it did not run. Set one, or sign in with 'etnpilot login anthropic' / 'etnpilot login openai', and run 'etnpilot forge'.");
       return report;
     }
     report.provider = { name: chosen.name, model: chosen.config.model };

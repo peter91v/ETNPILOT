@@ -1,4 +1,5 @@
 import { accountRequest } from "./usage-meter.js";
+import { serviceForSecret } from "../auth/services.js";
 import { providerToolNames } from "./tool-names.js";
 import { ProviderError } from "./router.js";
 import { retryAfterMs, withRetry } from "./retry.js";
@@ -381,13 +382,15 @@ export async function listModels({ baseUrl, apiKey, fetchImpl = globalThis.fetch
 
 export function missingApiKey(name, source, fallbackEnv) {
   const secret = source?.secret;
+  const login = serviceForSecret(secret);
+  const loginHint = login ? ` Or sign in once with 'etnpilot login ${login.id}'.` : "";
   // A named secret with nothing behind it is a different problem from an
   // unset variable, and sending someone to the wrong file costs an hour.
   if (source && !source.env) {
     return new ProviderError(
       `Provider '${name}' has no API key: its secret '${secret}' is not mapped under 'secrets.values'.`
       + ` Map it to an environment variable there, or remove`
-      + ` 'providers.${name}.apiKeySecret' to use the default.`,
+      + ` 'providers.${name}.apiKeySecret' to use the default.${loginHint}`,
       { code: "missing_api_key", retryable: false, safeToRetry: false },
     );
   }
@@ -395,7 +398,7 @@ export function missingApiKey(name, source, fallbackEnv) {
   return new ProviderError(
     `Provider '${name}' has no API key. Set ${variable} in the environment`
     + (secret ? ` (secret '${secret}', allowed under 'secrets.providers.env.allow')` : "")
-    + `, or point 'providers.${name}.apiKeySecret' at a configured secret.`,
+    + `, or point 'providers.${name}.apiKeySecret' at a configured secret.${loginHint}`,
     { code: "missing_api_key", retryable: false, safeToRetry: false },
   );
 }
