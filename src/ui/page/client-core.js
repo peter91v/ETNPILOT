@@ -113,7 +113,13 @@ async function api(path, options = {}) {
     headers: { "x-etnpilot-token": TOKEN, ...(options.body ? { "content-type": "application/json" } : {}) },
   });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error ?? ("request failed (" + response.status + ")"));
+  if (!response.ok) {
+    // What the server said besides the sentence (a code, the ways out) stays
+    // on the error, so a view can offer them instead of only printing it.
+    const failure = new Error(payload.error ?? ("request failed (" + response.status + ")"));
+    failure.details = payload;
+    throw failure;
+  }
   return payload;
 }
 

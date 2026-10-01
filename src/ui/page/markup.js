@@ -84,6 +84,22 @@ export const MARKUP = `</head>
           <select id="run-agent"></select>
         </div>
         <p class="muted" id="run-hint"></p>
+        <div class="banner" id="run-banner" role="alert" hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l10 18H2z"/><path d="M12 10v4M12 17.5v.01"/></svg>
+          <div class="banner-text">
+            <p class="banner-title" id="run-banner-title"></p>
+            <p id="run-banner-text"></p>
+            <pre class="banner-code" id="run-banner-commands" tabindex="0"></pre>
+          </div>
+          <div class="banner-actions">
+            <button type="button" class="btn link state" id="run-copy">Copy commands</button>
+            <button type="button" class="btn tonal state" id="run-inplace">Work in this directory instead</button>
+          </div>
+        </div>
+        <label class="check" id="run-inplace-row" hidden>
+          <input type="checkbox" id="run-inplace-box">
+          <span>Work directly in this directory, without a worktree. Changes land in your checkout; every write and command still asks first.</span>
+        </label>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn link state" data-close="run-modal">Cancel</button>

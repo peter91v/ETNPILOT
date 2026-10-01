@@ -163,14 +163,42 @@ function renderOverview() {
 
   host.append(decisions, runs);
 
-  for (const failure of state.recentRunErrors ?? []) {
-    host.append(el("p", { class: "notice bad", text: failure.task + " — " + failure.error }));
-  }
+  for (const failure of state.recentRunErrors ?? []) host.append(runFailureBanner(failure));
   if ((state.settings?.refusals ?? []).length > 0) {
     host.append(el("p", { class: "notice bad", text: (state.settings.refusals.length === 1
       ? "1 local setting is refused; a run will not start until it is gone."
       : state.settings.refusals.length + " local settings are refused; a run will not start until they are gone.") }));
   }
+}
+
+// A run that failed after it was accepted, said plainly: what it was, why, and
+// — when the reason is one with a known way out — the button for it.
+function runFailureBanner(failure) {
+  const fixable = failure.code === "etnpilot_content_not_committed";
+  const actions = [];
+  if (fixable) {
+    actions.push(button("Run again in this directory", {
+      class: "btn tonal",
+      onClick: async () => {
+        try {
+          await api("/api/runs/start", { method: "POST", body: JSON.stringify({ task: failure.task, ...(failure.agent ? { agent: failure.agent } : {}), worktree: false }) });
+          toast("Started again in this directory. Whatever it needs approved appears under Approvals.");
+          await refresh({ force: true });
+        } catch (error) {
+          toast(error.message, "bad");
+        }
+      },
+    }));
+  }
+  return el("div", { class: "banner", attrs: { role: "alert" } }, [
+    icon("M12 3l10 18H2z M12 10v4 M12 17.5v.01"),
+    el("div", { class: "banner-text" }, [
+      el("p", { class: "banner-title", text: fixable ? "The run could not start: the project is not committed" : "A run failed" }),
+      el("p", { text: "“" + failure.task + "” — " + failure.error }),
+      ...(fixable ? [el("pre", { class: "banner-code", text: "git add .etnpilot && git commit -m \\\"Add ETNPilot configuration\\\"" })] : []),
+    ]),
+    ...(actions.length > 0 ? [el("div", { class: "banner-actions" }, actions)] : []),
+  ]);
 }
 
 function usageCards() {

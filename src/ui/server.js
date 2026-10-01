@@ -247,13 +247,27 @@ export async function createReviewServer({
       }
       // A run is not awaited: the answer says it started, and everything the
       // run then needs appears in this same page's approvals.
+      if (request.method === "GET" && url.pathname === "/api/runs/readiness") {
+        return send(response, 200, await state.readiness());
+      }
       if (request.method === "POST" && url.pathname === "/api/runs/start") {
         const body = await readJsonBody(request);
         const task = typeof body.task === "string" ? body.task.trim() : "";
         if (task === "") throw badRequest("A run needs a task to work on.");
         const agent = typeof body.agent === "string" && body.agent.trim() !== "" ? body.agent.trim() : undefined;
-        state.startRun({ input: task, agent });
-        return send(response, 202, { started: true, task, ...(agent ? { agent } : {}) });
+        const inPlace = body.worktree === false;
+        // Refuse here, with a way out, what would only fail after the 202.
+        if (!inPlace) {
+          const readiness = await state.readiness();
+          if (!readiness.ready) {
+            const refusal = new Error(readiness.message);
+            refusal.statusCode = 409;
+            refusal.details = { code: readiness.code, fixes: readiness.fixes, commands: readiness.commands };
+            throw refusal;
+          }
+        }
+        state.startRun({ input: task, agent, ...(inPlace ? { worktree: false } : {}) });
+        return send(response, 202, { started: true, task, ...(agent ? { agent } : {}), ...(inPlace ? { inPlace: true } : {}) });
       }
       // Whether a receipt is what it claims. It rereads and rehashes the whole
       // file, so it is a route of its own that the page's poll never calls —
@@ -379,6 +393,7 @@ function errorBody(error) {
     error: error.message,
     ...(error.path ? { path: error.path } : {}),
     ...(error.reason ? { reason: error.reason } : {}),
+    ...(error.details ?? {}),
   };
 }
 

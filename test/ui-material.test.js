@@ -113,8 +113,10 @@ test("the window size classes are Material's, and each one changes the navigatio
 
 test("touch targets, reduced motion and the theme colour follow the scheme", () => {
   const coarse = style.slice(style.indexOf("@media (pointer: coarse)"));
-  assert.match(coarse, /\.btn \{ min-height: 48px; \}/);
-  assert.match(coarse, /\.btn\.icon \{ width: 48px; min-height: 48px; \}/);
+  // Every size of button, not only the default: 48dp is the target, not the look.
+  assert.match(coarse, /\.btn, \.btn\.small, \.btn\.link \{ min-height: 48px; \}/);
+  assert.match(coarse, /\.btn\.icon, #open-palette, #menu \{ width: 48px; min-height: 48px; \}/);
+  assert.match(coarse, /summary, \.composer-options summary \{ min-height: 48px;/);
   assert.match(style, /@media \(prefers-reduced-motion: reduce\)/);
   // The browser's own chrome matches the scheme it is showing.
   assert.match(page, /<meta name="theme-color" content="#f5fbf8" media="\(prefers-color-scheme: light\)">/);

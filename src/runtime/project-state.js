@@ -206,7 +206,12 @@ export async function openProjectState({ root = process.cwd(), env = process.env
     // A run started from a live surface asks that surface for its approvals:
     // the requests land in the same inbox the screen is already showing, so
     // nobody has to open a second window to answer their own run.
-    startRun({ input, agent, signal, dryRun, providerFactories, via, session } = {}) {
+    // Whether a run started now would get past its first step. A worktree is made
+    // from the committed base ref, so a project whose '.etnpilot/' was never
+    // committed fails there, after the run has already been accepted. Asking
+    // first lets a surface offer the way out while the person is still choosing.
+    readiness: () => checkRunReadiness({ root: projectRoot, config: current }),
+    startRun({ input, agent, signal, dryRun, providerFactories, via, session, worktree } = {}) {
       if (!input || !String(input).trim()) throw new TypeError("A task is required to start a run.");
       const inboxConfig = current.approval?.inbox ?? {};
       if (inboxConfig.enabled === false) {
@@ -257,6 +262,7 @@ export async function openProjectState({ root = process.cwd(), env = process.env
         },
         dryRun,
         providerFactories,
+        ...(worktree === undefined ? {} : { worktree }),
         approvalHandler: createInboxApprovalHandler({
           inbox,
           timeoutMs: inboxConfig.timeoutMs ?? 24 * 60 * 60_000,
@@ -271,7 +277,7 @@ export async function openProjectState({ root = process.cwd(), env = process.env
         () => running.delete(record),
         (error) => {
           running.delete(record);
-          runErrors.unshift({ task, at: new Date().toISOString(), error: error.message });
+          runErrors.unshift({ task, at: new Date().toISOString(), error: error.message, ...(error.code ? { code: error.code } : {}), ...(agent ? { agent } : {}) });
           runErrors.length = Math.min(runErrors.length, 5);
         },
       );
@@ -1042,5 +1048,30 @@ function presentMergeRequest(mergeRequest) {
     // Ours is decided by the branch a run publishes from, not by a name in the
     // title, which anyone could copy.
     own: sourceBranch.startsWith(RUN_BRANCH_PREFIX),
+  };
+}
+
+export async function checkRunReadiness({ root, config }) {
+  if (config?.workspace?.mode === "in-place") return { ready: true, workspace: "in-place" };
+  const baseRef = config?.git?.baseRef ?? "HEAD";
+  const inside = await git(["rev-parse", "--is-inside-work-tree"], { cwd: root }).then((result) => result.stdout === "true", () => false);
+  if (!inside) {
+    return {
+      ready: false,
+      code: "not-a-checkout",
+      message: "This directory is not a git checkout, and a run works in a git worktree.",
+      fixes: ["in-place"],
+      commands: ["git init", "git add .etnpilot && git commit -m \"Add ETNPilot configuration\""],
+    };
+  }
+  const committed = await git(["cat-file", "-e", `${baseRef}:.etnpilot/etnpilot.yaml`], { cwd: root }).then(() => true, () => false);
+  if (committed) return { ready: true, workspace: "worktree", baseRef };
+  return {
+    ready: false,
+    code: "project-not-committed",
+    baseRef,
+    message: `A run works in its own worktree, made from ${baseRef}, and ${baseRef} has no '.etnpilot/etnpilot.yaml' yet.`,
+    fixes: ["in-place"],
+    commands: ["git add .etnpilot && git commit -m \"Add ETNPilot configuration\""],
   };
 }

@@ -261,6 +261,9 @@ export const STYLES = `
   /* A display declaration overrides the hidden attribute, so the views that
      are not on screen have to be told again. */
   .view[hidden] { display: none; }
+  /* The floating button sits over the corner; the last thing on a page has to
+     be able to scroll clear of it, or a button there cannot be pressed. */
+  @media (max-width: 900px) { .view:not(#view-chat) { padding-bottom: 88px; } }
   /* Filled card. */
   .summary-card {
     min-height: 96px; padding: 16px; position: relative; overflow: hidden;
@@ -314,6 +317,24 @@ export const STYLES = `
     background: var(--md-warning-container); color: var(--md-on-warning-container);
     font: var(--md-body-medium); letter-spacing: .25px;
   }
+  .banner {
+    display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 4px 16px; align-items: start;
+    padding: 16px; border-radius: var(--md-shape-md); background: var(--md-error-container); color: var(--md-on-error-container);
+  }
+  .banner.info { background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
+  .banner[hidden] { display: none; }
+  .banner > svg { width: 24px; height: 24px; margin-top: 2px; }
+  .banner-title { margin: 0 0 4px; font: var(--md-title-small); font-weight: 600; }
+  .banner-text > p { margin: 0 0 6px; font: var(--md-body-medium); overflow-wrap: anywhere; }
+  .banner-code {
+    margin: 4px 0 0; padding: 8px 12px; border-radius: var(--md-shape-sm); white-space: pre-wrap; overflow-wrap: anywhere;
+    font: 12px/1.6 var(--mono); background: color-mix(in srgb, currentColor 10%, transparent);
+  }
+  .banner-code:empty { display: none; }
+  .banner-actions { grid-column: 2; display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+  .check { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 12px; align-items: start; font: var(--md-body-medium); cursor: pointer; min-height: 48px; }
+  .check[hidden] { display: none; }
+  .check input { width: 20px; height: 20px; margin: 2px; accent-color: var(--md-primary); }
   .notice.bad { background: var(--md-error-container); color: var(--md-on-error-container); }
   pre {
     margin: 0; padding: 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-word;
@@ -626,10 +647,11 @@ export const STYLES = `
   /* A finger is not a pointer: Material asks for 48dp of target, whatever
      the control looks like. */
   @media (pointer: coarse) {
-    .btn { min-height: 48px; }
-    .btn.small { min-height: 40px; }
-    .btn.icon { width: 48px; min-height: 48px; }
-    .btn.link { min-height: 40px; }
+    .btn, .btn.small, .btn.link { min-height: 48px; }
+    .btn.icon, #open-palette, #menu { width: 48px; min-height: 48px; }
+    .btn { min-width: 48px; }
+    summary, .composer-options summary { min-height: 48px; display: flex; align-items: center; }
+    label:has(> input[type="checkbox"]) { min-height: 48px; display: inline-flex; align-items: center; gap: 8px; }
     select.inline, input.inline { min-height: 48px; }
     th, td { height: 56px; }
     input[type="checkbox"] { width: 22px; height: 22px; }
