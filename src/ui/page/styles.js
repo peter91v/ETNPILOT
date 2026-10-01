@@ -317,6 +317,41 @@ export const STYLES = `
     background: var(--md-warning-container); color: var(--md-on-warning-container);
     font: var(--md-body-medium); letter-spacing: .25px;
   }
+  .card { display: grid; gap: 8px; padding: 12px 16px; border: 1px solid var(--md-outline-variant); border-radius: var(--md-shape-md); background: var(--md-surface); min-width: 0; }
+  .card.open { background: var(--md-surface-container-low); }
+  .card-head, .content-row {
+    display: flex; align-items: center; gap: 12px; width: 100%; min-height: 48px; padding: 0; border: 0; background: transparent;
+    text-align: left; cursor: pointer; color: inherit;
+  }
+  .content-row { padding: 8px 4px; border-bottom: 1px solid var(--md-outline-variant); }
+  .content-row:last-child { border-bottom: 0; }
+  .card-main { display: grid; gap: 4px; min-width: 0; flex: 1; }
+  .card-title { margin: 0; font: var(--md-title-medium); overflow-wrap: anywhere; }
+  .card-sub { color: var(--md-on-surface-variant); font: var(--md-body-medium); overflow-wrap: anywhere; }
+  .card-chev { color: var(--md-on-surface-variant); font-size: 18px; }
+  .card-h { margin: 8px 0 0; font: var(--md-label-large); color: var(--md-on-surface-variant); text-transform: uppercase; letter-spacing: .5px; }
+  .card-detail { display: grid; gap: 8px; min-width: 0; }
+  .card-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+  .filters .btn[aria-pressed="true"] { font-weight: 600; }
+  .scroll-pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .scroll-pre.tall { max-height: 60vh; }
+  .modal.wide { width: min(640px, 100%); }
+  .flow { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+  .flow-step {
+    display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; padding: 6px 0 6px 16px; position: relative;
+    border-left: 2px solid var(--md-outline-variant); margin-left: 6px;
+  }
+  .flow-step::before { content: ""; position: absolute; left: -7px; top: 12px; width: 12px; height: 12px; border-radius: 50%; background: var(--md-primary); }
+  .flow-step.gate::before { background: var(--md-warning); }
+  .flow-step.check::before { background: var(--md-secondary); }
+  .flow-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+  .flow-id { font: var(--md-label-large); }
+  .flow-type { color: var(--md-on-surface-variant); font: var(--md-label-medium); }
+  .flow-what, .flow-needs { color: var(--md-on-surface-variant); font: var(--md-body-small); overflow-wrap: anywhere; }
+  .builder-step { display: grid; gap: 12px; padding: 12px; border: 1px solid var(--md-outline-variant); border-radius: var(--md-shape-md); }
+  .builder-head { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; gap: 8px; align-items: end; }
+  .builder-num { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--md-primary-container); color: var(--md-on-primary-container); font: var(--md-label-large); }
   .banner {
     display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 4px 16px; align-items: start;
     padding: 16px; border-radius: var(--md-shape-md); background: var(--md-error-container); color: var(--md-on-error-container);

@@ -55,6 +55,7 @@ export const CLI_OPTIONS = Object.freeze({
   depth: { type: "string" },
   root: { type: "string", short: "r", default: "." },
   agent: { type: "string", short: "a" },
+  workflow: { type: "string", short: "w" },
   "in-place": { type: "boolean", default: false },
   worktree: { type: "boolean", default: false },
   "no-worktree": { type: "boolean", default: false },
@@ -108,7 +109,7 @@ export const USAGE = `ETNPilot
 
 Usage:
   etnpilot init [directory] [--template default|minimal|regulated] [--no-import] [--no-forge]
-  etnpilot run <task> [--agent name] [--root directory] [--approvals terminal|inbox]
+  etnpilot run <task> [--agent name | --workflow name] [--root directory] [--approvals terminal|inbox]
     [--events jsonl]
     [--worktree | --no-worktree] [--cleanup-worktree] [--publish] [--dry-run]
     [--record-fixtures file | --fixtures file]
@@ -207,6 +208,7 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
       root: resolve(values.root),
       input: task,
       agent: values.agent,
+      ...(values.workflow ? { workflow: values.workflow } : {}),
       ...(streaming
         ? { onEvent: (event) => console.log(JSON.stringify(event)) }
         : {}),

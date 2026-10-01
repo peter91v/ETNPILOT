@@ -247,6 +247,30 @@ export async function createReviewServer({
       }
       // A run is not awaited: the answer says it started, and everything the
       // run then needs appears in this same page's approvals.
+      if (request.method === "GET" && url.pathname === "/api/content") {
+        return send(response, 200, await state.content());
+      }
+      if (request.method === "GET" && url.pathname === "/api/content/file") {
+        const found = await state.contentFile(url.searchParams.get("path") ?? "");
+        if (!found) return send(response, 404, { error: "That is not a file of the project content." });
+        return send(response, 200, found);
+      }
+      // Locks what the person saw: the digest comes back with the request, and
+      // content that is not the same any more is refused rather than locked.
+      if (request.method === "POST" && url.pathname === "/api/content/lock") {
+        const body = await readJsonBody(request);
+        return send(response, 200, await state.lockContent(String(body.manifestDigest ?? "")));
+      }
+      if (request.method === "GET" && url.pathname === "/api/agents/detail") {
+        return send(response, 200, await state.agentDetails());
+      }
+      if (request.method === "GET" && url.pathname === "/api/workflows") {
+        return send(response, 200, await state.workflows());
+      }
+      if (request.method === "POST" && url.pathname === "/api/workflows") {
+        const body = await readJsonBody(request);
+        return send(response, 201, await state.createWorkflow(body));
+      }
       if (request.method === "GET" && url.pathname === "/api/runs/readiness") {
         return send(response, 200, await state.readiness());
       }
@@ -266,8 +290,9 @@ export async function createReviewServer({
             throw refusal;
           }
         }
-        state.startRun({ input: task, agent, ...(inPlace ? { worktree: false } : {}) });
-        return send(response, 202, { started: true, task, ...(agent ? { agent } : {}), ...(inPlace ? { inPlace: true } : {}) });
+        const workflow = typeof body.workflow === "string" && body.workflow.trim() !== "" ? body.workflow.trim() : undefined;
+        state.startRun({ input: task, agent, ...(workflow && !agent ? { workflow } : {}), ...(inPlace ? { worktree: false } : {}) });
+        return send(response, 202, { started: true, task, ...(agent ? { agent } : {}), ...(workflow && !agent ? { workflow } : {}), ...(inPlace ? { inPlace: true } : {}) });
       }
       // Whether a receipt is what it claims. It rereads and rehashes the whole
       // file, so it is a route of its own that the page's poll never calls —

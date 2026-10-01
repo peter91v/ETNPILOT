@@ -55,8 +55,10 @@ export const MARKUP = `</head>
       <section id="view-overview" class="view"></section>
       <section id="view-chat" class="view" hidden></section>
       <section id="view-approvals" class="view" hidden></section>
+      <section id="view-agents" class="view" hidden></section>
       <section id="view-queue" class="view" hidden></section>
       <section id="view-runs" class="view" hidden></section>
+      <section id="view-content" class="view" hidden></section>
       <section id="view-worktrees" class="view" hidden></section>
       <section id="view-merges" class="view" hidden></section>
       <section id="view-checks" class="view" hidden></section>
@@ -83,6 +85,10 @@ export const MARKUP = `</head>
           <label for="run-agent">Agent</label>
           <select id="run-agent"></select>
         </div>
+        <div class="field" id="run-workflow-field" hidden>
+          <label for="run-workflow">Workflow</label>
+          <select id="run-workflow"></select>
+        </div>
         <p class="muted" id="run-hint"></p>
         <div class="banner" id="run-banner" role="alert" hidden>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l10 18H2z"/><path d="M12 10v4M12 17.5v.01"/></svg>
@@ -106,6 +112,51 @@ export const MARKUP = `</head>
         <button type="submit" class="btn primary state" id="run-submit">Start</button>
       </div>
     </form>
+  </div>
+</div>
+
+<div class="backdrop" id="workflow-modal" role="dialog" aria-modal="true" aria-labelledby="workflow-modal-title">
+  <div class="modal wide">
+    <div class="modal-head">
+      <h2 class="modal-title" id="workflow-modal-title">New workflow</h2>
+      <button class="btn icon state" style="margin-left:auto" data-close="workflow-modal" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body" id="workflow-body"></div>
+    <div class="modal-footer">
+      <button type="button" class="btn link state" data-close="workflow-modal">Cancel</button>
+      <button type="button" class="btn primary state" id="workflow-save">Save workflow</button>
+    </div>
+  </div>
+</div>
+
+<div class="backdrop" id="file-modal" role="dialog" aria-modal="true" aria-labelledby="file-title">
+  <div class="modal wide">
+    <div class="modal-head">
+      <h2 class="modal-title mono" id="file-title"></h2>
+      <button class="btn icon state" style="margin-left:auto" data-close="file-modal" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="chips" id="file-status"></div>
+      <pre class="scroll-pre tall" id="file-body" tabindex="0"></pre>
+    </div>
+  </div>
+</div>
+
+<div class="backdrop" id="lock-modal" role="dialog" aria-modal="true" aria-labelledby="lock-modal-title">
+  <div class="modal">
+    <div class="modal-head"><h2 class="modal-title" id="lock-modal-title">Lock this content?</h2></div>
+    <div class="modal-body">
+      <p>You are saying you have read this. From now on a run uses exactly this content, and refuses it if it changes.</p>
+      <ul id="lock-summary"></ul>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn link state" data-close="lock-modal">Not yet</button>
+      <button type="button" class="btn primary state" id="lock-confirm">Lock it</button>
+    </div>
   </div>
 </div>
 

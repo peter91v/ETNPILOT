@@ -91,10 +91,18 @@ async function prepareRunModal() {
       attrs: { value: agent.name, ...(agent.error ? { disabled: "disabled" } : {}) },
     }));
   }
+  // Named workflows the project has, when it has any; choosing an agent
+  // instead makes the choice of workflow moot, so the field steps aside.
+  const named = (workflowData ?? (await api("/api/workflows").catch(() => ({ workflows: [] })))).workflows.filter((workflow) => (workflow.errors ?? []).length === 0);
+  const flows = $("run-workflow");
+  flows.replaceChildren(el("option", { text: "the project's own workflow", attrs: { value: "" } }));
+  for (const workflow of named) flows.append(el("option", { text: workflow.name, attrs: { value: workflow.name } }));
+  $("run-workflow-field").hidden = named.length === 0;
   describeRunChoice();
 }
 
 function describeRunChoice() {
+  $("run-workflow").disabled = $("run-agent").value !== "";
   const chosen = $("run-agent").value;
   const agent = (agents?.agents ?? []).find((candidate) => candidate.name === chosen);
   const steps = agents?.steps ?? [];
@@ -129,7 +137,7 @@ async function startRun(event) {
   try {
     const started = await api("/api/runs/start", {
       method: "POST",
-      body: JSON.stringify({ task, agent: $("run-agent").value, ...($("run-inplace-box").checked ? { worktree: false } : {}) }),
+      body: JSON.stringify({ task, agent: $("run-agent").value, ...($("run-agent").value === "" && $("run-workflow").value !== "" ? { workflow: $("run-workflow").value } : {}), ...($("run-inplace-box").checked ? { worktree: false } : {}) }),
     });
     $("run-task").value = "";
     clearError();
@@ -257,6 +265,11 @@ async function refresh({ force = false } = {}) {
       usageSignature = finished;
       void loadUsage();
     }
+    // Once at the start, so the overview can say content waits to be reviewed.
+    if (contentData === undefined && !projectLoading) {
+      projectLoading = true;
+      void loadProjectViews().finally(() => { projectLoading = false; });
+    }
   } catch (error) {
     fail(error);
   }
@@ -264,6 +277,7 @@ async function refresh({ force = false } = {}) {
 
 let usageSignature;
 let lastStateSignature;
+let projectLoading = false;
 // How many receipts the list asks for; 'Show more' raises it.
 let runLimit = 20;
 
@@ -324,9 +338,11 @@ $("menu").addEventListener("click", toggleSidebar);
 $("scrim").addEventListener("click", closeSidebar);
 $("fab-run").addEventListener("click", () => { openModal("run-modal"); void prepareRunModal(); });
 $("open-run").addEventListener("click", () => { openModal("run-modal"); void prepareRunModal(); });
-$("run-agent").addEventListener("change", describeRunChoice);
 $("run-form").addEventListener("submit", startRun);
 $("run-inplace").addEventListener("click", chooseInPlace);
+$("workflow-save").addEventListener("click", () => { void saveWorkflow(); });
+$("lock-confirm").addEventListener("click", () => { void confirmLock(); });
+$("run-agent").addEventListener("change", describeRunChoice);
 $("run-copy").addEventListener("click", () => { void copyRunCommands(); });
 $("open-palette").addEventListener("click", () => {
   $("palette-input").value = "";

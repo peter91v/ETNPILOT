@@ -162,6 +162,16 @@ function renderOverview() {
   });
 
   host.append(decisions, runs);
+  if (contentData && contentData.mode === "enforce" && (contentData.unreviewed ?? 0) > 0) {
+    host.append(el("div", { class: "banner" }, [
+      icon("M12 3l10 18H2z M12 10v4 M12 17.5v.01"),
+      el("div", { class: "banner-text" }, [
+        el("p", { class: "banner-title", text: contentData.unreviewed + (contentData.unreviewed === 1 ? " item of project content is not locked" : " items of project content are not locked") }),
+        el("p", { text: "A run refuses content nobody has locked. Read it, then lock it." }),
+      ]),
+      el("div", { class: "banner-actions" }, [button("Review content", { class: "btn tonal", onClick: () => show("content") })]),
+    ]));
+  }
 
   for (const failure of state.recentRunErrors ?? []) host.append(runFailureBanner(failure));
   if ((state.settings?.refusals ?? []).length > 0) {

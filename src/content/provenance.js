@@ -41,6 +41,7 @@ export async function captureProjectContent(root, options = {}) {
     ...await captureFlatDirectory(etnRoot, "prompts", ".md", "prompt", limits),
     ...await captureSkills(etnRoot, limits),
     ...await captureFlatDirectory(etnRoot, "agents", ".yaml", "agent", limits),
+    ...await captureFlatDirectory(etnRoot, "workflows", ".yaml", "workflow", limits),
   ].sort(compareItems);
 
   if (items.length > limits.maxEntries) {

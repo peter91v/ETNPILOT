@@ -61,6 +61,13 @@ const VIEWS = [
     icon: "M9 12l2 2 4-4M12 3l7 4v5c0 4.4-3 8.3-7 9-4-0.7-7-4.6-7-9V7z",
   },
   {
+    id: "agents",
+    label: "Agents",
+    title: "Agents and workflows",
+    description: "Who can do what in this project, what each is told, and the workflows that put them in order.",
+    icon: "M12 12a4 4 0 100-8 4 4 0 000 8zM4 21a8 8 0 0116 0",
+  },
+  {
     id: "queue",
     label: "Queue",
     title: "Workflow queue",
@@ -73,6 +80,13 @@ const VIEWS = [
     title: "Runs",
     description: "Read from their receipt files, so this is what was sealed rather than a summary kept somewhere else.",
     icon: "M5 12l4 4L19 6M5 20h14",
+  },
+  {
+    id: "content",
+    label: "Content",
+    title: "Project content",
+    description: "What a run is allowed to use. Read what is new or changed, then lock it: a run refuses what is not locked.",
+    icon: "M6 2h9l5 5v15H6zM14 2v6h6M9 13h6M9 17h6",
   },
   {
     id: "worktrees",
@@ -408,12 +422,15 @@ function show(next) {
   if (view === "chat") void syncChat();
   if (view === "worktrees" && worktrees === undefined) void loadWorktrees();
   if (view === "merges" && merges === undefined) void loadMerges();
+  // Read from disk each time it is opened: it is the files that are being reviewed.
+  if (view === "agents" || view === "content") void loadProjectViews();
 }
 
 function renderPageActions() {
   const host = $("page-actions");
   host.replaceChildren();
   if (view === "worktrees") host.append(button("Read again", { class: "btn", onClick: () => loadWorktrees({ notify: true }) }));
+  if (view === "agents" || view === "content") host.append(button("Read again", { class: "btn", onClick: () => loadProjectViews({ notify: true }) }));
   if (view === "merges") host.append(button("Ask GitLab", { class: "btn", onClick: () => loadMerges({ notify: true }) }));
   if (view === "runs" && openRun) host.append(button("Close the receipt", { class: "btn", onClick: () => { openRun = undefined; expandedAgents = new Set(); render(); } }));
   host.append(button("Refresh", { class: "btn", onClick: () => refresh({ force: true }) }));
@@ -524,5 +541,7 @@ function draw() {
   if (view === "merges") renderMerges();
   if (view === "checks") renderChecks();
   if (view === "settings") renderSettings();
+  if (view === "agents") renderAgents();
+  if (view === "content") renderContent();
 }
 `;
