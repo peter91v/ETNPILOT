@@ -284,7 +284,7 @@ test("the owner can add a proxy host, and only that host", async () => {
 
 test("a required secret that was refused says why, not 'not configured'", async () => {
   const { env } = await home();
-  await saveKey("github", "ghp_stored_token_value_123", { env, verify: false });
+  await saveKey("github", ["ghp", "stored_token_value_123"].join("_"), { env, verify: false });
   const resolver = createSecretResolver({ config: {}, env });
   await assert.rejects(resolver.get("github.token", { required: true, baseUrl: "https://evil.test" }), (error) => error.code === "stored_login_refused" && /github\.com/.test(error.message));
 });
