@@ -1,8 +1,9 @@
 import { BUILTIN_SECRET_PROVIDER_FACTORIES, createEnvironmentSecretProvider } from "./builtins.js";
 import { defineSecretProvider } from "./provider.js";
+import { openCredentialStore } from "../auth/credential-store.js";
 
 export class SecretResolver {
-  constructor({ values = {} } = {}) {
+  constructor({ values = {}, store } = {}) {
     if (!values || Array.isArray(values) || typeof values !== "object") {
       throw new TypeError("Secret values configuration must be an object.");
     }
@@ -11,6 +12,10 @@ export class SecretResolver {
     }
     this.values = Object.freeze({ ...values });
     this.providers = new Map();
+    // A login kept by 'etnpilot login'. Consulted only when the configured
+    // source has nothing: a variable somebody set is a decision, a stored login
+    // is a convenience, so the variable wins.
+    this.store = store;
   }
 
   register(provider) {
@@ -35,10 +40,28 @@ export class SecretResolver {
   async get(name, { fallback, required = false } = {}) {
     const reference = this.values[name] ?? fallback;
     if (!reference) {
+      const stored = await this.stored(name);
+      if (stored !== undefined) return stored;
       if (required) throw new SecretResolutionError(`Required secret '${name}' is not configured.`, { code: "not_configured" });
       return undefined;
     }
-    return this.resolve(reference, { name, required });
+    const value = await this.resolve(reference, { name, required: false });
+    if (value !== undefined) return value;
+    const stored = await this.stored(name);
+    if (stored !== undefined) return stored;
+    if (required) {
+      throw new SecretResolutionError(`Required secret '${name}' is unavailable.`, { code: "unavailable", provider: reference.provider });
+    }
+    return undefined;
+  }
+
+  async stored(name) {
+    if (!this.store) return undefined;
+    try {
+      return await this.store.get(name);
+    } catch {
+      return undefined;
+    }
   }
 
   async resolve(reference, { name = "secret", required = true } = {}) {
@@ -76,9 +99,15 @@ export class SecretResolver {
 
   async check(name) {
     const reference = this.values[name];
-    if (!reference) return { name, configured: false, available: false };
+    if (!reference) {
+      const stored = await this.stored(name);
+      return { name, configured: stored !== undefined, available: stored !== undefined, ...(stored !== undefined ? { provider: "stored-login" } : {}) };
+    }
     try {
       const value = await this.resolve(reference, { name, required: false });
+      if (value === undefined && (await this.stored(name)) !== undefined) {
+        return { name, configured: true, available: true, provider: "stored-login" };
+      }
       return { name, configured: true, available: value !== undefined, provider: reference.provider };
     } catch (error) {
       return {
@@ -94,7 +123,7 @@ export class SecretResolver {
 
 export function createSecretResolver({ root = process.cwd(), config = {}, env = process.env, factories = {} } = {}) {
   const secretConfig = config.secrets ?? {};
-  const resolver = new SecretResolver({ values: secretConfig.values ?? {} });
+  const resolver = new SecretResolver({ values: secretConfig.values ?? {}, store: openCredentialStore({ env }) });
   const configuredProviders = secretConfig.providers ?? {};
   const availableFactories = { ...BUILTIN_SECRET_PROVIDER_FACTORIES, ...factories };
   for (const [name, providerConfig] of Object.entries(configuredProviders)) {

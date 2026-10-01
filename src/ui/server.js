@@ -6,6 +6,7 @@ import { parseSettingValue, SettingsRefused } from "../config/settings.js";
 import { openProjectState } from "../runtime/project-state.js";
 import { WorkflowQueueStateError } from "../workflow/queue.js";
 import { createProject, describeProject } from "../runtime/first-run.js";
+import { createAccountRoutes } from "./accounts.js";
 import { renderReviewPage } from "./page.js";
 import { renderIcon, renderManifest, renderServiceWorker } from "./app.js";
 import { renderSetupPage } from "./setup-page.js";
@@ -28,6 +29,7 @@ export async function createReviewServer({
   token,
   rotateToken = false,
   getNetworkInterfaces = networkInterfaces,
+  fetchImpl,
 } = {}) {
   // Kept between starts, because an installed app holds a link: a token minted
   // per start locks that icon out at the next restart. A caller may still pass
@@ -40,6 +42,8 @@ export async function createReviewServer({
   let state = project.exists ? await openProjectState({ root, env }) : undefined;
   const resolvedToken = token
     ?? (await readOrCreateToken(root, { rotate: rotateToken, persist: project.exists })).token;
+
+  const accounts = createAccountRoutes({ env, fetchImpl, gitlabHost: () => state?.config?.git?.baseUrl });
 
   const server = createServer(async (request, response) => {
     try {
@@ -101,6 +105,11 @@ export async function createReviewServer({
         return send(response, 201, created);
       }
       if (!state) return send(response, 409, { error: "no-project-here", root });
+      if (url.pathname.startsWith("/api/auth")) {
+        const body = request.method === "POST" ? await readJsonBody(request) : undefined;
+        const handled = await accounts(request.method, url.pathname, body);
+        if (handled) return send(response, handled.status, handled.body);
+      }
       if (request.method === "GET" && url.pathname === "/api/state") {
         const wanted = Number(url.searchParams.get("runs"));
         return send(response, 200, await state.collect(Number.isFinite(wanted) && wanted > 0 ? { runLimit: wanted } : undefined));

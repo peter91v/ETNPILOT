@@ -40,6 +40,7 @@ export { diagnose } from "../runtime/diagnose.js";
 import { runProject } from "../runtime/project-runner.js";
 import { replayRun } from "../runtime/replay.js";
 import { WorkflowQueue } from "../workflow/queue.js";
+import { AUTH_USAGE, runAuthCommand } from "./auth.js";
 import { createSecretResolver } from "../secrets/resolver.js";
 import { PolicyEngine } from "../policy/engine.js";
 import { loadPlugins } from "../plugins/load-plugin.js";
@@ -74,6 +75,9 @@ export const CLI_OPTIONS = Object.freeze({
   json: { type: "boolean", default: false },
   "rotate-token": { type: "boolean", default: false },
   host: { type: "string" },
+  "client-id": { type: "string" },
+  "key-stdin": { type: "boolean", default: false },
+  "no-verify": { type: "boolean", default: false },
   port: { type: "string" },
   status: { type: "string" },
   limit: { type: "string" },
@@ -148,6 +152,7 @@ Usage:
   etnpilot receipt verify <file> [--public-key path]
     [--require-signatures | --allow-unsigned] [--require-terminal | --allow-incomplete]
   etnpilot secret check <name> [--root directory]
+${AUTH_USAGE}
   etnpilot policy check (--kind kind [--path path | --url url] | --provider name)
     [--agent name] [--root directory]
   etnpilot pipeline status [ref] [--root directory]
@@ -582,6 +587,8 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     });
     console.log(JSON.stringify(result, null, 2));
     return result.valid ? 0 : 1;
+  } else if (command === "login" || command === "logout" || command === "auth") {
+    return await runAuthCommand(command, subcommand, values);
   } else if (command === "secret" && subcommand === "check") {
     if (!rest[0]) throw new Error("A configured secret name is required.");
     const root = resolve(values.root);

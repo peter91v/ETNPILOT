@@ -12,6 +12,7 @@
 // does not follow is the draft's screens for things that do not exist yet: a
 // surface that shows an empty 'Plugins' page teaches the wrong thing.
 import { renderChatMarkdown } from "./markdown.js";
+import { CLIENT_ACCOUNTS } from "./page/client-accounts.js";
 import { CLIENT_CHAT } from "./page/client-chat.js";
 import { CLIENT_CORE } from "./page/client-core.js";
 import { CLIENT_PROJECT } from "./page/client-project.js";
@@ -46,6 +47,7 @@ ${CLIENT_CHAT}
 ${CLIENT_RUNS}
 ${CLIENT_WORKTREES}
 ${CLIENT_PROJECT}
+${CLIENT_ACCOUNTS}
 ${CLIENT_SHELL}
 </script>
 </body>

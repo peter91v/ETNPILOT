@@ -491,7 +491,7 @@ async function runForge(root, configDir, { forge, env, onProgress }) {
     const config = await loadConfig(join(configDir, "etnpilot.yaml"), env);
     const options = typeof forge === "object" && forge !== null ? forge : {};
     if (!options.runModel && !(await chooseProvider(config, root, env))) {
-      return { agents: [], skills: [], instructions: [], skipped: [], notes: ["AgentsForge did not run: no API key found (ANTHROPIC_API_KEY or OPENAI_API_KEY). Set one and run 'etnpilot forge'."] };
+      return { agents: [], skills: [], instructions: [], skipped: [], notes: ["AgentsForge did not run: no API key found (ANTHROPIC_API_KEY or OPENAI_API_KEY). Set one, or sign in with 'etnpilot login anthropic' / 'etnpilot login openai', and run 'etnpilot forge'."] };
     }
     return await forgeProject(root, { config, env, configDir, onProgress, ...options });
   } catch (error) {
