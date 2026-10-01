@@ -59,6 +59,11 @@ providers:
     model: gpt-5
     apiKeySecret: openai.apiKey
     tools: true
+    # Which OpenAI API is spoken. 'auto' starts on /chat/completions and switches
+    # by itself, once, when a model says it needs /responses for tools (newer
+    # models do). 'responses' always speaks it; 'chat' never does. Answers are
+    # not streamed on /responses yet.
+    # api: auto
     # Uncomment for a reasoning model that refuses function tools on
     # /v1/chat/completions ("set reasoning_effort to 'none'"). It turns that
     # model's reasoning off, which is why it is not on by default.

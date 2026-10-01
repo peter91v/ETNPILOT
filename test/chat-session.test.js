@@ -208,7 +208,7 @@ test("the reasoning-effort conflict is explained whichever way the effort got th
   const { createOpenAICompatibleProvider } = await import("../src/providers/openai-compatible.js");
   const refusal = () => new Response(JSON.stringify({ error: { message: "Function tools with reasoning_effort are not supported for gpt-6-luna in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'." } }), { status: 400, headers: { "content-type": "application/json" } });
   const run = (agent) => createOpenAICompatibleProvider({
-    name: "openai", apiKey: "k", baseUrl: "https://example.test/v1", model: "gpt-6-luna", tools: true, workingDirectory: tmpdir(), fetchImpl: async () => refusal(),
+    name: "openai", apiKey: "k", baseUrl: "https://example.test/v1", model: "gpt-6-luna", tools: true, api: "chat", workingDirectory: tmpdir(), fetchImpl: async () => refusal(),
   }).invoke({ runId: "r", agent: { name: "a", prompt: "P", ...agent }, input: "hi", instructions: [], skills: [], approve: async () => ({ kind: "approve-once" }) });
   // An effort chosen for the agent (or with /effort in a conversation).
   await assert.rejects(run({ effort: "high" }), /sent reasoning_effort 'high'.*\/effort reset/s);

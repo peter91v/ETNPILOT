@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -457,13 +457,16 @@ test("a reasoning model that refuses function tools names the setting that fixes
     apiKey: "sk-test",
     model: "gpt-5.6-luna",
     tools: true,
+    // Explicitly the chat API: with "auto" this refusal is answered by switching
+    // to /responses (tested below), and the advice is for who chose not to.
+    api: "chat",
     workingDirectory: root,
     fetchImpl: async () => refusal(),
   };
   const invoke = (provider) => provider.invoke({ agent: { prompt: "System" }, input: "hello", instructions: [] });
 
   await assert.rejects(() => invoke(createOpenAICompatibleProvider(options)), (error) => {
-    assert.equal(error.code, "http_400");
+    assert.equal(error.code, "use_responses_api");
     // The server's own words stay first; the advice is added, not substituted.
     assert.match(error.message, /set reasoning_effort to 'none'/);
     assert.match(error.message, /this provider sends no reasoning_effort/i);
@@ -490,4 +493,82 @@ test("a reasoning model that refuses function tools names the setting that fixes
       return true;
     },
   );
+});
+
+test("a model that wants /v1/responses is switched to it, once, and its tool loop works there", async () => {
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-openai-responses-"));
+  await writeFile(join(root, "note.txt"), "hello from the file\n");
+  const calls = [];
+  const refusal = () => new Response(JSON.stringify({ error: { message:
+    "Function tools with reasoning_effort are not supported for gpt-5.6-sol in /v1/chat/completions."
+    + " To use function tools, use /v1/responses or set reasoning_effort to 'none'.",
+  } }), { status: 400 });
+  const fetchImpl = async (url, options) => {
+    const body = JSON.parse(options.body);
+    calls.push({ url: String(url), body });
+    if (String(url).endsWith("/chat/completions")) return refusal();
+    const answered = body.input.some((item) => item.type === "function_call_output");
+    if (!answered) {
+      return Response.json({
+        model: "gpt-5.6-sol",
+        output: [
+          { type: "reasoning", id: "rs_1", encrypted_content: "opaque" },
+          { type: "function_call", call_id: "call_1", name: "read_file", arguments: JSON.stringify({ path: "note.txt" }) },
+        ],
+        usage: { input_tokens: 100, output_tokens: 20, input_tokens_details: { cached_tokens: 40 } },
+      });
+    }
+    return Response.json({
+      model: "gpt-5.6-sol",
+      output: [{ type: "message", content: [{ type: "output_text", text: "The file says hello." }] }],
+      usage: { input_tokens: 150, output_tokens: 10 },
+    });
+  };
+  const provider = createOpenAICompatibleProvider({
+    name: "openai", baseUrl: "https://api.openai.example/v1", apiKey: "sk-test", model: "gpt-5.6-sol", tools: true, workingDirectory: root, fetchImpl,
+  });
+  const context = () => ({ runId: "r", agent: { name: "a", prompt: "System", effort: "high" }, input: "read it", instructions: [], skills: [], approve: async () => ({ kind: "approve-once" }) });
+
+  const result = await provider.invoke(context());
+  assert.equal(result.text, "The file says hello.");
+  assert.equal(result.toolCalls[0].tool, "read_file");
+  assert.equal(result.toolCalls[0].ok, true);
+  assert.equal(result.usage.inputTokens, 250);
+  assert.equal(result.usage.cacheReadTokens, 40);
+  assert.equal(result.usage.requests, 2);
+
+  const responses = calls.filter((call) => call.url.endsWith("/responses"));
+  assert.equal(responses.length, 2);
+  // The request is the Responses shape: instructions, flat function tools, effort as `reasoning`, nothing stored.
+  const first = responses[0].body;
+  assert.match(first.instructions, /System/);
+  assert.equal(first.store, false);
+  assert.deepEqual(first.reasoning, { effort: "high" });
+  assert.equal(first.tools[0].type, "function");
+  assert.equal(first.tools[0].name, "read_file");
+  assert.equal(first.tools[0].function, undefined);
+  // The model's own items go back with the tool result, reasoning included.
+  const second = responses[1].body;
+  assert.ok(second.input.some((item) => item.type === "reasoning" && item.encrypted_content === "opaque"));
+  const output = second.input.find((item) => item.type === "function_call_output");
+  assert.equal(output.call_id, "call_1");
+  assert.match(output.output, /hello from the file/);
+
+  // Once switched, the next turn goes straight there.
+  calls.length = 0;
+  await provider.invoke(context());
+  assert.equal(calls.some((call) => call.url.endsWith("/chat/completions")), false);
+});
+
+test("api: responses speaks it from the first request, and a bad value is refused", async () => {
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-openai-responses-"));
+  const urls = [];
+  const provider = createOpenAICompatibleProvider({
+    name: "openai", baseUrl: "https://api.openai.example/v1", apiKey: "sk-test", model: "m", tools: false, api: "responses", workingDirectory: root,
+    fetchImpl: async (url) => { urls.push(String(url)); return Response.json({ output_text: "plain answer", output: [], usage: { input_tokens: 1, output_tokens: 1 } }); },
+  });
+  const result = await provider.invoke({ runId: "r", agent: { name: "a", prompt: "P" }, input: "hi", instructions: [], skills: [] });
+  assert.equal(result.text, "plain answer");
+  assert.deepEqual(urls, ["https://api.openai.example/v1/responses"]);
+  assert.throws(() => createOpenAICompatibleProvider({ name: "x", baseUrl: "https://a.b/v1", apiKey: "k", model: "m", api: "soap" }), /api must be/);
 });
