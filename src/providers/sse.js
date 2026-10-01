@@ -204,3 +204,36 @@ export async function collectChatStream(response, { onDelta, onUsage, signal } =
   }
   return { id, model, choices: [{ index: 0, message, finish_reason: finish }], usage };
 }
+
+// OpenAI /responses: typed events. The text arrives as 'response.output_text.delta'
+// pieces, and the finished response — the same object a non-streaming call
+// returns, output items and usage included — arrives whole in
+// 'response.completed'. So the pieces are only for showing, and what is returned
+// is that final object: tool calls and reasoning items never have to be
+// reassembled from fragments.
+export async function collectResponsesStream(response, { onDelta, onUsage, signal } = {}) {
+  let final;
+  for await (const { event, data } of readEvents(response, { signal })) {
+    if (!data || data === "[DONE]") continue;
+    const payload = parseJson(data, `a '${event}' event`);
+    const type = payload.type ?? event;
+    if (type === "response.output_text.delta") {
+      if (typeof payload.delta === "string" && payload.delta !== "") onDelta?.(payload.delta);
+    } else if (type === "response.completed" || type === "response.incomplete") {
+      final = payload.response;
+      if (final?.usage) onUsage?.(final.usage, final.model);
+    } else if (type === "response.failed" || type === "error") {
+      const failure = payload.response?.error ?? payload.error ?? payload;
+      const retryable = failure.code === "server_error" || failure.code === "rate_limit_exceeded";
+      throw new ProviderError(`Provider stream failed${failure.code ? ` (${failure.code})` : ""}: ${failure.message ?? "no message"}`, {
+        code: "stream_error",
+        retryable,
+        safeToRetry: retryable,
+      });
+    }
+  }
+  if (!final) {
+    throw new ProviderError("The provider's stream ended before it finished.", { code: "stream_truncated", retryable: true, safeToRetry: true });
+  }
+  return final;
+}

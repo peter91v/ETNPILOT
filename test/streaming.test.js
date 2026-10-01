@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import test from "node:test";
 import { createAnthropicProvider } from "../src/providers/anthropic.js";
 import { createOpenAICompatibleProvider } from "../src/providers/openai-compatible.js";
-import { collectAnthropicStream, collectChatStream, readEvents } from "../src/providers/sse.js";
+import { collectAnthropicStream, collectChatStream, collectResponsesStream, readEvents } from "../src/providers/sse.js";
 
 // P2.4: a stream is read to its end and becomes the payload the adapter
 // already understood, so nothing downstream learns a second shape.
@@ -165,4 +165,73 @@ test("the pieces of an answer are heard as they arrive, in order, and the whole 
   ])), { onDelta: (piece) => said.push(piece) });
   assert.deepEqual(said, ["hel", "lo"]);
   assert.equal(payload.choices[0].message.content, "hello");
+});
+
+
+// /v1/responses: pieces of text for showing, and the whole final response in one event.
+const finalResponse = {
+  id: "resp_1",
+  model: "gpt-x",
+  output: [{ type: "message", content: [{ type: "output_text", text: "Reading it." }] }],
+  usage: { input_tokens: 12, output_tokens: 5, input_tokens_details: { cached_tokens: 2 } },
+};
+
+test("a responses stream shows its text as it comes and returns the final response whole", async () => {
+  const heard = [];
+  const usages = [];
+  const result = await collectResponsesStream(streamOf(sse([
+    ["response.created", { type: "response.created", response: { id: "resp_1" } }],
+    ["response.output_text.delta", { type: "response.output_text.delta", delta: "Reading " }],
+    ["response.output_text.delta", { type: "response.output_text.delta", delta: "it." }],
+    ["response.completed", { type: "response.completed", response: finalResponse }],
+  ])), { onDelta: (text) => heard.push(text), onUsage: (usage) => usages.push(usage) });
+  assert.deepEqual(heard, ["Reading ", "it."]);
+  assert.deepEqual(result, finalResponse);
+  assert.equal(usages[0].input_tokens, 12);
+});
+
+test("a responses stream that fails or stops early is an error, not a half answer", async () => {
+  await assert.rejects(
+    collectResponsesStream(streamOf(sse([["response.failed", { type: "response.failed", response: { error: { code: "server_error", message: "overloaded" } } }]]))),
+    (error) => error.retryable === true && /overloaded/.test(error.message),
+  );
+  await assert.rejects(
+    collectResponsesStream(streamOf(sse([["response.output_text.delta", { type: "response.output_text.delta", delta: "half" }]]))),
+    (error) => error.code === "stream_truncated" && error.retryable === true,
+  );
+});
+
+test("streaming works through the whole responses tool loop", async () => {
+  const { mkdtemp, writeFile } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-responses-stream-"));
+  await writeFile(join(root, "a.txt"), "file text\n");
+  const bodies = [];
+  const fetchImpl = async (url, options) => {
+    const body = JSON.parse(options.body);
+    bodies.push(body);
+    const answered = body.input.some((item) => item.type === "function_call_output");
+    return answered
+      ? streamOf(sse([
+        ["response.output_text.delta", { type: "response.output_text.delta", delta: "It says " }],
+        ["response.output_text.delta", { type: "response.output_text.delta", delta: "file text." }],
+        ["response.completed", { type: "response.completed", response: { model: "gpt-x", output: [{ type: "message", content: [{ type: "output_text", text: "It says file text." }] }], usage: { input_tokens: 30, output_tokens: 6 } } }],
+      ]))
+      : streamOf(sse([
+        ["response.completed", { type: "response.completed", response: { model: "gpt-x", output: [{ type: "function_call", call_id: "c1", name: "read_file", arguments: "{\"path\":\"a.txt\"}" }], usage: { input_tokens: 20, output_tokens: 4 } } }],
+      ]));
+  };
+  const deltas = [];
+  const provider = createOpenAICompatibleProvider({
+    name: "openai", baseUrl: "https://api.example/v1", apiKey: "k", model: "gpt-x", tools: true, api: "responses", stream: true, workingDirectory: root, fetchImpl,
+  });
+  const result = await provider.invoke({
+    runId: "r", agent: { name: "a", prompt: "P" }, input: "read", instructions: [], skills: [],
+    emitDelta: (text) => deltas.push(text), approve: async () => ({ kind: "approve-once" }),
+  });
+  assert.equal(bodies[0].stream, true);
+  assert.equal(result.text, "It says file text.");
+  assert.deepEqual(deltas, ["It says ", "file text."]);
+  assert.equal(result.toolCalls[0].ok, true);
+  assert.equal(result.usage.inputTokens, 50);
 });

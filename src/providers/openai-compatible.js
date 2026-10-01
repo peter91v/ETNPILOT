@@ -3,7 +3,7 @@ import { providerToolNames } from "./tool-names.js";
 import { ProviderError } from "./router.js";
 import { retryAfterMs, withRetry } from "./retry.js";
 import { createWorkspaceTools, describeCall, lazySkills, skillsOf } from "./workspace-tools.js";
-import { collectChatStream } from "./sse.js";
+import { collectChatStream, collectResponsesStream } from "./sse.js";
 import { createResultEnvelope } from "./tool-results.js";
 import { compactConversation } from "./compaction.js";
 import { runResponsesTurn } from "./openai-responses.js";
@@ -102,7 +102,8 @@ export function createOpenAICompatibleProvider({
       contextTokens,
       extraBody,
       addUsage,
-      post: (body, requestContext) => request({ endpoint: responsesEndpoint, apiKey, fetchImpl, context: requestContext, body, name, reasoningEffortConfigured: false, stream: false }),
+      stream,
+      post: (body, requestContext) => request({ endpoint: responsesEndpoint, apiKey, fetchImpl, context: requestContext, body, name, reasoningEffortConfigured: false, stream, collect: collectResponsesStream }),
     });
   }
 
@@ -253,7 +254,7 @@ function normalizeExtraBody(requestBody, reasoningEffort) {
   return body;
 }
 
-async function request({ endpoint, apiKey, fetchImpl, context, body, name, reasoningEffortConfigured, stream }) {
+async function request({ endpoint, apiKey, fetchImpl, context, body, name, reasoningEffortConfigured, stream, collect = collectChatStream }) {
   let response;
   try {
     response = await fetchImpl(endpoint, {
@@ -301,7 +302,7 @@ async function request({ endpoint, apiKey, fetchImpl, context, body, name, reaso
   }
   if (!stream) return response.json();
   try {
-    return await collectChatStream(response, { onDelta: context.emitDelta, onUsage: context.onStreamUsage, signal: context.signal });
+    return await collect(response, { onDelta: context.emitDelta, onUsage: context.onStreamUsage, signal: context.signal });
   } catch (error) {
     // Same rule as a failed status: what already ran tools is not replayed blindly.
     if (error instanceof ProviderError && bodyHasToolResults(body)) error.safeToRetry = false;

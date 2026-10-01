@@ -36,7 +36,7 @@ export function responseText(payload) {
 
 // Chat-shaped history ({role, content}) is valid input here as it stands.
 export async function runResponsesTurn({
-  context, workspaceTools, envelope, wireTools, system, model, maxToolIterations, retry, contextTokens, extraBody = {}, post, addUsage,
+  context, workspaceTools, envelope, wireTools, system, model, maxToolIterations, retry, contextTokens, extraBody = {}, post, addUsage, stream = false,
 }) {
   const input = [
     ...(context.history ?? []).map((entry) => ({ role: entry.role, content: entry.content })),
@@ -60,6 +60,7 @@ export async function runResponsesTurn({
         input,
         store: false,
         include: ["reasoning.encrypted_content"],
+        ...(stream ? { stream: true } : {}),
         ...(effort ? { reasoning: { effort } } : {}),
         ...(wireTools && wireTools.definitions.length > 0 ? { tools: responsesToolSchema(wireTools.definitions), tool_choice: "auto" } : {}),
       };
