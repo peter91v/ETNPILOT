@@ -30,7 +30,8 @@ async function repository() {
     "src/cart/cart.test.ts": "test('x', () => {});\n",
     "src/api/server.ts": 'const key = "sk-abcdefghijklmnopqrstuvwxyz0123456789";\nexport {};\n',
     ".env": "DATABASE_PASSWORD=hunter2hunter2\n",
-    "deploy/id_rsa": "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----\n",
+    // Built at run time: this repository's own secret scan reads test files too.
+    "deploy/id_rsa": ["-----BEGIN", "OPENSSH PRIVATE KEY-----\nabc\n-----END", "OPENSSH PRIVATE KEY-----\n"].join(" "),
     "certs/server.pem": "pem\n",
     "node_modules/dep/index.js": "ignored\n",
   });
