@@ -172,3 +172,46 @@ test("the chat providers put earlier turns before the new message", async () => 
   }).invoke(context);
   assert.deepEqual(openaiBody.messages.map((m) => m.role), ["system", "user", "assistant", "user"]);
 });
+
+test("what the agent did is in the record, including what policy refused, whatever the reply says", async () => {
+  const { callsOf } = await import("../src/runtime/chat-session.js");
+  const outcome = {
+    summary: {
+      steps: {
+        agent: {
+          result: {
+            result: {
+              text: "I cannot change files here.",
+              toolCalls: [
+                { tool: "read_file", label: "read_file README.md", ok: true },
+                { tool: "write_file", label: "write_file .etnpilot/etnpilot.yaml", ok: false, error: "Operation is denied by policy rule 'protect-etnpilot-governance'." },
+              ],
+            },
+          },
+        },
+      },
+    },
+  };
+  assert.deepEqual(callsOf(outcome), [
+    { label: "read_file README.md", ok: true },
+    { label: "write_file .etnpilot/etnpilot.yaml", ok: false, error: "Operation is denied by policy rule 'protect-etnpilot-governance'." },
+  ]);
+  assert.deepEqual(callsOf(undefined), []);
+
+  const { describeCall } = await import("../src/providers/workspace-tools.js");
+  assert.equal(describeCall("run_command", { command: ["npm", "test"] }), "run_command npm test");
+  assert.equal(describeCall("search_files", "{\"pattern\":\"a\\u001b[31mb\"}"), "search_files a [31mb");
+  assert.equal(describeCall("list_files", "not json"), "list_files");
+});
+
+test("the reasoning-effort conflict is explained whichever way the effort got there", async () => {
+  const { createOpenAICompatibleProvider } = await import("../src/providers/openai-compatible.js");
+  const refusal = () => new Response(JSON.stringify({ error: { message: "Function tools with reasoning_effort are not supported for gpt-6-luna in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'." } }), { status: 400, headers: { "content-type": "application/json" } });
+  const run = (agent) => createOpenAICompatibleProvider({
+    name: "openai", apiKey: "k", baseUrl: "https://example.test/v1", model: "gpt-6-luna", tools: true, workingDirectory: tmpdir(), fetchImpl: async () => refusal(),
+  }).invoke({ runId: "r", agent: { name: "a", prompt: "P", ...agent }, input: "hi", instructions: [], skills: [], approve: async () => ({ kind: "approve-once" }) });
+  // An effort chosen for the agent (or with /effort in a conversation).
+  await assert.rejects(run({ effort: "high" }), /sent reasoning_effort 'high'.*\/effort reset/s);
+  // Nothing chosen: the server's own default is the cause.
+  await assert.rejects(run({}), /sends no reasoning_effort, so that is the server's own default/);
+});

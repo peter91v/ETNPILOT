@@ -47,7 +47,7 @@ test("the Anthropic provider speaks the Messages API and counts its tokens", asy
 
   assert.equal(result.text, "done");
   assert.equal(result.model, "claude-opus-5");
-  assert.deepEqual(result.usage, { inputTokens: 40, outputTokens: 12, cacheReadTokens: 8, cacheWriteTokens: 3 });
+  assert.deepEqual(result.usage, { inputTokens: 40, outputTokens: 12, cacheReadTokens: 8, cacheWriteTokens: 3, requests: 1 });
 
   const [request] = requests;
   assert.equal(request.url, "https://api.anthropic.com/v1/messages");
@@ -102,8 +102,9 @@ test("the Anthropic provider runs an approved tool loop", async () => {
   assert.equal(result.text, "wrote it");
   assert.equal(await readFile(join(root, "out.txt"), "utf8"), "generated");
   assert.deepEqual(approvals, ["write"]);
-  assert.deepEqual(result.toolCalls, [{ tool: "write_file", ok: true }]);
-  assert.deepEqual(result.usage, { inputTokens: 22, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 });
+  // The record says what was asked of the tool, not only that it ran.
+  assert.deepEqual(result.toolCalls, [{ tool: "write_file", label: "write_file out.txt", ok: true }]);
+  assert.deepEqual(result.usage, { inputTokens: 22, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0, requests: 2 });
   // The tools are declared in the API's own shape, and the result goes back as
   // a tool_result block the model can read.
   // Every tool this agent may use. It declares no subagents, so it is not

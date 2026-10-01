@@ -177,6 +177,10 @@ observability:
     timeoutMs: 5000
   pricing:
     currency: USD
+    # Rates come from a built-in table and, for newer models, from the public
+    # OpenRouter catalog (a plain GET, refreshed daily; nothing of the project
+    # is sent). 'models' below always wins over both.
+    autoUpdate: true
     models: {}
   # A ceiling per workflow run, so a loop that goes wrong costs this much and
   # no more. Raise it for real work; the point of a default is that there is

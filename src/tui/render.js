@@ -255,7 +255,11 @@ function renderRuns(state, { style, width, height, cursor, now }) {
     { label: "APPR", width: 5, value: (run) => String(run.approvals ?? 0) },
     { label: "TOOK", width: 9, value: (run) => duration(run.durationMs) },
   ];
-  return table(runs, columns, { style, width, height, cursor, now });
+  const hidden = (state.runsTotal ?? runs.length) - runs.length;
+  if (hidden <= 0) return table(runs, columns, { style, width, height, cursor, now });
+  // The list is the newest of more receipts than it shows; say so, since 20 rows
+  // read as the whole history.
+  return [...table(runs, columns, { style, width, height: height - 1, cursor, now }), style.dim(`newest ${runs.length} of ${state.runsTotal} — older receipts are in .etnpilot/state/runs`)];
 }
 
 function renderQueue(state, { style, width, height, cursor, now }) {
@@ -376,7 +380,7 @@ export function renderAgentText(state, { style, width, height, agentText, offset
     lines.push("", style.dim("Tool calls"));
     for (const call of agentText.toolCalls) {
       const tone = call.ok === false ? "bad" : "ok";
-      lines.push(`  ${style.tone(pad(call.ok === false ? "refused" : "ran", 8), tone)} ${style.ink(pad(call.tool ?? "—", 14))} ${style.muted(call.error ?? "")}`);
+      lines.push(`  ${style.tone(pad(call.ok !== false ? "ran" : call.refused ? "refused" : "failed", 8), tone)} ${style.ink(pad(call.tool ?? "—", 14))} ${style.muted(call.error ?? "")}`);
     }
   }
   if (agentText.usage) {
@@ -750,8 +754,9 @@ function renderRunDetail(state, { style, width, height, cursor, receipt, verific
   if (outcome.tools) {
     lines.push(style.dim("Tools it used"));
     for (const row of outcome.tools) {
-      const refused = row.failed > 0 ? style.bad(`${row.failed} refused`) : style.muted("none refused");
-      lines.push(`  ${style.ink(pad(row.tool, 14))} ${style.muted(`${row.ok} ran`)} ${refused} ${style.muted(row.error ?? "")}`);
+      const refused = row.refused > 0 ? style.bad(`${row.refused} refused`) : style.muted("none refused");
+      const failed = row.failed > 0 ? style.warn(`${row.failed} failed`) : "";
+      lines.push(`  ${style.ink(pad(row.tool, 14))} ${style.muted(`${row.ok} ran`)} ${refused} ${failed} ${style.muted(row.error ?? "")}`.replace(/  +$/, ""));
     }
     lines.push("");
   }

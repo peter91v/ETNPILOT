@@ -190,3 +190,59 @@ A complete run against a real provider, and anything at all against a real
 GitLab instance. Until those two lines are filled in, this project's
 end-to-end behaviour is an expectation rather than an observation, and the
 table at the top of this file says so rather than implying otherwise.
+
+### 2026-09-30 — the chat, on a phone, against OpenAI (`gpt-6-luna`)
+
+The first real conversation. What it showed:
+
+- **It works end to end.** Turns are answered, the tokens are counted (1,340 on one
+  turn), a failed turn stays in the thread as a failed turn and the next one
+  carries on, and the page is usable on a phone.
+- **The known `reasoning_effort` 400 appeared in the chat** ("Function tools with
+  reasoning_effort are not supported for gpt-6-luna…"). The error carried no
+  advice, which means the effort came from something that was set — the agent's
+  `effort:`, `/effort`, or `providers.<name>.reasoningEffort` — not from the
+  server's default. The message now says so and how to clear it.
+- **"Ich kann in dieser Umgebung keine Dateiänderung direkt ausführen"** for an
+  edit of `.etnpilot/etnpilot.yaml`. That was the policy doing its job
+  (`protect-etnpilot-governance` denies an agent's writes under `.etnpilot/`), but
+  the reply did not say so and the person could not tell it from a model that
+  cannot write. Each turn now lists what the agent did and what was refused, and
+  why, from the record and not from the reply.
+- **"Was gibt es neues bei openai"** was answered from the model's own knowledge:
+  the starter agents have no `fetch_url` (it reads text nobody here wrote, so it is
+  opt-in). To let an agent read the web: add `fetch_url` to its `tools:` and allow
+  the host under `policy.operations`.
+- Not addressed: answers are shown as plain text, so the model's Markdown
+  (`**…**`, links, fences) appears literally.
+
+### 2026-09-30 — a full workflow run on a phone, against OpenAI (`plan → build → test → review`)
+
+The first real workflow run, through the page. It ended `succeeded`: four steps, the
+build step ran `doctor`, `check doctor` and the whole test suite (486 tests, 0 failed)
+on Android/arm64 under the harness, the merge rehearsal was clean, 101,595 tokens of
+which 72,445 were read from the provider's cache. What it showed:
+
+- **`search_files` was refused every time** ("Operation is denied by the default
+  policy", five times). It asked to read without naming a path, so the generated
+  rule `read-project` (which lists `paths: ["**"]`) matched nothing and the default
+  denied. Its tests approved everything with a stub and could not have said so.
+  Fixed, and a test now runs it under the policy a generated project has.
+- **Fixing that opened a second hole, closed in the same change:** a search reads
+  many files under one approval, so it could have shown the inside of a file
+  `read_file` is forbidden to open (`.env`, `*.pem`). Each candidate is now held to
+  the read policy on its own, and the result says how many it left out.
+- **A missing file was counted as a refusal** ("Tools it used": `read_file … Refused 1`
+  was an `ENOENT`). A tool that ran and failed, and an operation that was not
+  allowed, are different things and are now counted and labelled apart everywhere
+  (page, terminal interface, chat).
+- **"read was reject", five times, with nothing else.** Approvals in the record now
+  carry what they were about and the reason, and the page names who or what decided
+  (a person, or `policy · rule '…'` / `policy · the section default`). A refusal is
+  listed once, not once as an approval and again as a failed tool.
+- **"No provider usage was recorded for this run"** under every agent, while the run
+  above showed 101,595 tokens. The per-agent record has tokens but not a call count,
+  and the reader required the count. It shows the tokens now.
+- **Still open:** the planner looked for `first-real-run.md` at the repository root
+  (it lives in `docs/`) and the run was not told otherwise; `gpt-6-luna` is not
+  priced, so the cost reads "not priced".

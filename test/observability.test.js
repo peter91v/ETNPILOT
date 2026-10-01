@@ -138,7 +138,7 @@ test("a cost that cannot be worked out names the model whose rate is missing", a
     environment: "test",
     pricing: { currency: "USD", models: {} },
   });
-  for (const model of ["gpt-5", "gpt-5", "claude-opus-5"]) {
+  for (const model of ["gpt-mystery-0", "gpt-mystery-0", "claude-mystery-1"]) {
     const accounting = unpriced.recordProviderUsage({
       workflowRunId: "w",
       provider: "p",
@@ -155,8 +155,8 @@ test("a cost that cannot be worked out names the model whose rate is missing", a
   assert.equal(before.unpricedInvocations, 3);
   // Most-used model first, so the rate worth setting is the one named first.
   assert.deepEqual(before.unpricedModels, [
-    { model: "gpt-5", calls: 2 },
-    { model: "claude-opus-5", calls: 1 },
+    { model: "gpt-mystery-0", calls: 2 },
+    { model: "claude-mystery-1", calls: 1 },
   ]);
 
   // Now a rate exists, and one more call is made with it.
@@ -165,12 +165,12 @@ test("a cost that cannot be worked out names the model whose rate is missing", a
     file: path,
     serviceName: "s",
     environment: "test",
-    pricing: { currency: "USD", models: { "gpt-5": { inputPerMillion: 1, outputPerMillion: 2 } } },
+    pricing: { currency: "USD", models: { "gpt-mystery-0": { inputPerMillion: 1, outputPerMillion: 2 } } },
   });
   const accounting = priced.recordProviderUsage({
     workflowRunId: "w",
     provider: "p",
-    model: "gpt-5",
+    model: "gpt-mystery-0",
     usage: { inputTokens: 1000, outputTokens: 1000 },
   });
   await priced.startSpan("gen_ai.invoke_agent", { attributes: { "etnpilot.workflow.run_id": "w" } })
@@ -183,8 +183,8 @@ test("a cost that cannot be worked out names the model whose rate is missing", a
   // The earlier gpt-5 calls are marked as predating the rate, rather than as
   // a rate still to be set.
   assert.deepEqual(after.unpricedModels, [
-    { model: "gpt-5", calls: 2, pricedSince: true },
-    { model: "claude-opus-5", calls: 1 },
+    { model: "gpt-mystery-0", calls: 2, pricedSince: true },
+    { model: "claude-mystery-1", calls: 1 },
   ]);
 });
 

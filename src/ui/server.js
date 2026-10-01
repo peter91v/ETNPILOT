@@ -101,7 +101,8 @@ export async function createReviewServer({
       }
       if (!state) return send(response, 409, { error: "no-project-here", root });
       if (request.method === "GET" && url.pathname === "/api/state") {
-        return send(response, 200, await state.collect());
+        const wanted = Number(url.searchParams.get("runs"));
+        return send(response, 200, await state.collect(Number.isFinite(wanted) && wanted > 0 ? { runLimit: wanted } : undefined));
       }
       if (request.method === "POST" && url.pathname === "/api/approvals/decide") {
         const body = await readJsonBody(request);

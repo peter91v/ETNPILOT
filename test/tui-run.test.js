@@ -375,7 +375,8 @@ test("the agents in a run are a navigable tree, and 'a' then enter reads one's f
     const opened = screen(app);
     assert.match(opened, /linter failed openai · 1\.4s/);
     assert.match(opened, /lint failed: unexpected token at line 12/);
-    assert.match(opened, /refused\s+run_command\s+exit code 2/);
+    // It ran and exited non-zero: a failure, not a refusal.
+    assert.match(opened, /failed\s+run_command\s+exit code 2/);
     assert.equal(app.agentText.agent, "linter");
 
     // Esc backs out one layer at a time: text, then agent mode, then the run.

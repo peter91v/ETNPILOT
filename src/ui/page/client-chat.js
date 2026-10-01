@@ -360,6 +360,16 @@ function message(who, text, { tone = "", meta, extra = [] } = {}) {
   ]);
 }
 
+// What the agent did, from the record and not from its own account of it. A
+// refusal by policy shows here even when the reply says only that it could not.
+function callChips(calls = []) {
+  if (calls.length === 0) return [];
+  return [el("div", { class: "attach-row calls" }, calls.map((call) => pill(
+    (call.ok ? "did " : call.refused ? "refused " : "failed ") + call.label + (call.ok ? "" : " — " + (call.error ?? "no reason recorded")),
+    call.ok ? "" : "warn",
+  )))];
+}
+
 function attachmentChips(files, refused = []) {
   const chips = files.map((file) => pill(
     file.path + (file.kind === "directory" ? "/" : "") + (file.truncated ? " (cut)" : ""),
@@ -411,6 +421,7 @@ function drawThread(thread) {
     if (turn.status === "succeeded") {
       thread.append(message(turn.agent ?? "agent", turn.reply ?? "", {
         tone: "agent",
+        extra: callChips(turn.calls),
         meta: (turn.undone ? "undone · " : "") + "turn " + turn.turn + (turn.runId ? " · run " + turn.runId.slice(0, 8) : "") + (turn.usage ? " · " + (turn.usage.inputTokens + turn.usage.outputTokens) + " tokens" : "") + (turn.historyOmitted ? " · " + turn.historyOmitted + " earlier exchange(s) left out" : ""),
       }));
     } else {

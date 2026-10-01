@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { knownPriceForModel } from "./known-pricing.js";
 
 const TELEMETRY_VERSION = 1;
 const SCOPE_NAME = "etnpilot";
@@ -101,7 +102,8 @@ export class Telemetry {
     const key = workflowRunId ?? agentRunId;
     const rate = this.pricing.models[model]
       ?? this.pricing.models[undatedModel(model)]
-      ?? this.pricing.models["*"];
+      ?? this.pricing.models["*"]
+      ?? tabulatedRate(model, this.pricing.currency);
     const estimatedCost = rate ? calculateCost(normalized, rate) : undefined;
     const previous = this.totals.get(key) ?? emptySummary(this.pricing.currency);
     const total = {
@@ -111,6 +113,7 @@ export class Telemetry {
       cacheReadTokens: previous.cacheReadTokens + normalized.cacheReadTokens,
       cacheWriteTokens: previous.cacheWriteTokens + normalized.cacheWriteTokens,
       providerUnits: previous.providerUnits + normalized.providerUnits,
+      requests: previous.requests + normalized.requests,
       estimatedCost: addOptional(previous.estimatedCost, estimatedCost),
       invocations: previous.invocations + 1,
       pricedInvocations: previous.pricedInvocations + (estimatedCost === undefined ? 0 : 1),
@@ -186,10 +189,18 @@ export async function summarizeTelemetryFile(path, { workflowRunId } = {}) {
           summary.cacheReadTokens += attributes["gen_ai.usage.cache_read.input_tokens"] ?? 0;
           summary.cacheWriteTokens += attributes["gen_ai.usage.cache_creation.input_tokens"] ?? 0;
           summary.providerUnits += attributes["etnpilot.provider.usage_units"] ?? 0;
+          summary.requests += attributes["etnpilot.provider.requests"] ?? 0;
           const model = attributes["gen_ai.request.model"] ?? "unknown";
           if (attributes["etnpilot.cost.estimated"] !== undefined) {
             summary.estimatedCost = (summary.estimatedCost ?? 0) + attributes["etnpilot.cost.estimated"];
             summary.pricedInvocations += 1;
+            priced.add(model);
+          } else if (retroactive(attributes, summary, model)) {
+            // Recorded before a rate existed for it: the table prices it now, so a
+            // run is not stuck unpriced for having happened earlier.
+            summary.estimatedCost = (summary.estimatedCost ?? 0) + retroactive(attributes, summary, model);
+            summary.pricedInvocations += 1;
+            summary.currency ??= "USD";
             priced.add(model);
           } else {
             summary.unpricedInvocations += 1;
@@ -217,6 +228,17 @@ export async function summarizeTelemetryFile(path, { workflowRunId } = {}) {
       }
       : {}),
   };
+}
+
+function retroactive(attributes, summary, model) {
+  const rate = tabulatedRate(model, summary.currency ?? "USD");
+  if (!rate) return undefined;
+  return calculateCost({
+    inputTokens: attributes["gen_ai.usage.input_tokens"] ?? 0,
+    outputTokens: attributes["gen_ai.usage.output_tokens"] ?? 0,
+    cacheReadTokens: attributes["gen_ai.usage.cache_read.input_tokens"] ?? 0,
+    cacheWriteTokens: attributes["gen_ai.usage.cache_creation.input_tokens"] ?? 0,
+  }, rate);
 }
 
 function normalizeConfig(config = {}) {
@@ -271,7 +293,8 @@ function normalizeOtlp(config) {
 
 function normalizePricing(config) {
   if (!config || Array.isArray(config) || typeof config !== "object") throw new TypeError("observability.pricing must be an object.");
-  rejectUnknown(config, ["currency", "models"], "observability.pricing");
+  rejectUnknown(config, ["currency", "models", "autoUpdate"], "observability.pricing");
+  if (config.autoUpdate !== undefined && typeof config.autoUpdate !== "boolean") throw new TypeError("observability.pricing.autoUpdate must be true or false.");
   const currency = config.currency ?? "USD";
   if (typeof currency !== "string" || !/^[A-Z]{3}$/.test(currency)) throw new TypeError("Pricing currency must be a three-letter uppercase code.");
   if (config.models !== undefined && (!config.models || Array.isArray(config.models) || typeof config.models !== "object")) {
@@ -309,7 +332,24 @@ function normalizeUsage(usage) {
     cacheReadTokens: nonNegativeInteger(usage.cacheReadTokens ?? 0, "cacheReadTokens"),
     cacheWriteTokens: nonNegativeInteger(usage.cacheWriteTokens ?? 0, "cacheWriteTokens"),
     providerUnits: nonNegative(usage.providerUnits ?? 0, "providerUnits"),
+    requests: nonNegativeInteger(usage.requests ?? 0, "requests"),
   });
+}
+
+// What the maintained table of published prices says for this model, for when
+// the configuration names none: pricing follows the model in use without
+// anyone typing rates. The table is in USD, so it only applies to USD; a rate
+// the user wrote always wins over it.
+function tabulatedRate(model, currency) {
+  if (currency !== "USD") return undefined;
+  const known = typeof model === "string" ? knownPriceForModel(model) : undefined;
+  if (!known) return undefined;
+  return {
+    inputPerMillion: known.inputPerMillion,
+    outputPerMillion: known.outputPerMillion,
+    cacheReadPerMillion: known.cacheReadPerMillion ?? known.inputPerMillion,
+    cacheWritePerMillion: known.cacheWritePerMillion ?? known.inputPerMillion,
+  };
 }
 
 function calculateCost(usage, rates) {
@@ -431,6 +471,7 @@ function providerAttributes(accounting = {}) {
     "gen_ai.usage.cache_read.input_tokens": accounting.cacheReadTokens,
     "gen_ai.usage.cache_creation.input_tokens": accounting.cacheWriteTokens,
     "etnpilot.provider.usage_units": accounting.providerUnits,
+    "etnpilot.provider.requests": accounting.requests,
     "etnpilot.cost.estimated": accounting.estimatedCost,
     "etnpilot.cost.currency": accounting.currency,
   });
@@ -456,6 +497,7 @@ function emptySummary(currency) {
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
     providerUnits: 0,
+    requests: 0,
     estimatedCost: undefined,
     currency,
     invocations: 0,

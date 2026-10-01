@@ -333,8 +333,8 @@ test("a provider's live models reach the page, and a provider with no key says w
     assert.equal(openai.available, true);
     // Only the chat-capable one reached the page.
     assert.deepEqual(openai.models.map((m) => m.id), ["gpt-5"]);
-    // OpenAI has no known-price entry: honest about it, not a guessed number.
-    assert.equal(openai.models[0].knownPrice, undefined);
+    // The table's rate rides along with the model, so the settings page can fill it.
+    assert.equal(openai.models[0].knownPrice.inputPerMillion, 1.25);
 
     // A provider type with no models endpoint says so by name.
     const copilot = await (await call("/api/providers/local-copilot/models")).json();

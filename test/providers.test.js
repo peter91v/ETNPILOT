@@ -184,6 +184,7 @@ test("configured providers resolve API keys through the secret resolver", async 
       outputTokens: 20,
       cacheReadTokens: 10,
       cacheWriteTokens: 0,
+      requests: 1,
     });
   } finally {
     globalThis.fetch = originalFetch;

@@ -19,6 +19,7 @@ import { runProject, RUN_BRANCH_PREFIX } from "./project-runner.js";
 import { createSecretResolver } from "../secrets/resolver.js";
 import { resolveConfiguredApiKey } from "../providers/register.js";
 import { knownPriceFor } from "../observability/known-pricing.js";
+import { refreshPricing } from "../observability/pricing-sync.js";
 import { WorkflowQueue } from "../workflow/queue.js";
 
 // These name files this state opened when it started. Changing one is allowed,
@@ -287,9 +288,10 @@ export async function openProjectState({ root = process.cwd(), env = process.env
       // was abandoned. This surface knows what it started, so it says so.
       const runId = file.replace(/\.jsonl$/, "");
       const active = runId !== undefined && [...running].some((record) => record.runId === runId);
-      return active
+      const described = active
         ? { ...receipt, outcome: describeOutcome(receipt, { running: true }) }
         : receipt;
+      return withCurrentPricing(described, { root: projectRoot, config: current, runId });
     },
     // Worktrees and merge requests are read on demand for the same reason,
     // more sharply: one runs 'git status' per worktree, the other crosses the
@@ -382,7 +384,10 @@ export async function collectState(
     // terminal record yet. Reading that as a run that stopped is how a row
     // said 'incomplete' one minute and 'succeeded' the next, with nobody
     // touching anything.
-    runs: markRunning(await readRuns(runsDirectory, { limit: runLimit }), running),
+    runs: markRunning(await readRuns(runsDirectory, { limit: Math.min(Math.max(1, Math.trunc(runLimit) || 20), 500) }), running),
+    // The list above is a window; this is how many receipts there are, so a
+    // surface never presents the window's size as the count.
+    runsTotal: await countRuns(runsDirectory),
   };
 }
 
@@ -426,6 +431,11 @@ function settingsUnreadable(error) {
 // the answer to differ: its size and its modification time. A receipt that is
 // still being written fails that key on the next poll and is read again.
 const receiptCache = new Map();
+
+export async function countRuns(directory) {
+  const entries = await readdir(directory).catch(() => []);
+  return entries.filter((name) => name.endsWith(".jsonl")).length;
+}
 
 export async function readRuns(directory, { limit = 20, cache = receiptCache } = {}) {
   const entries = await readdir(directory).catch((error) => {
@@ -520,8 +530,11 @@ export function describeOutcome(receipt, { running = false } = {}) {
   for (const approval of rejected) {
     reasons.push({
       kind: "approval",
-      text: `${approval.operationKind ?? "an operation"} was ${approval.decision}`
-        + (approval.evidence?.reason ? `: ${approval.evidence.reason}` : ""),
+      // What it was about and who or what said no: 'read was reject' named
+      // neither, and five of them in a row could not be told apart.
+      text: `${approval.subject || approval.operationKind || "an operation"} was ${approval.decision === "reject" ? "refused" : approval.decision}`
+        + (approval.reason ?? approval.evidence?.reason ? `: ${approval.reason ?? approval.evidence.reason}` : "")
+        + (approval.policy ? ` (policy: ${approval.policy.rule ? `rule '${approval.policy.rule}'` : "the section default"})` : ""),
     });
   }
   // What the run actually did with its tools. A run can be told to write a
@@ -531,10 +544,14 @@ export function describeOutcome(receipt, { running = false } = {}) {
   // Chat providers record 'toolCalls'; the scripted provider records the same
   // shape under 'steps', because its steps are the tools it ran.
   const toolCalls = receipt?.entries?.flatMap((entry) => entry.result?.toolCalls ?? entry.result?.steps ?? []) ?? [];
-  for (const call of toolCalls.filter((call) => call.ok === false)) {
+  // A refusal that went through an approval already appears above as that
+  // approval; saying it twice is how five refusals became ten lines. One that
+  // never reached an approval (a tool the agent may not use) appears only here.
+  const told = new Set(rejected.map((approval) => approval.reason ?? approval.evidence?.reason).filter(Boolean));
+  for (const call of toolCalls.filter((call) => call.ok === false && !(call.refused && told.has(call.error)))) {
     reasons.push({
       kind: "tool",
-      text: `${call.tool ?? "a tool"} did not succeed: ${call.error ?? "no reason recorded"}`,
+      text: `${call.label ?? call.tool ?? "a tool"} ${call.refused ? "was refused" : "failed"}: ${call.error ?? "no reason recorded"}`,
     });
   }
   if (terminal.content?.verificationError) {
@@ -584,9 +601,12 @@ function summarizeToolCalls(calls) {
   const byTool = new Map();
   for (const call of calls) {
     const name = call.tool ?? "unknown";
-    const row = byTool.get(name) ?? { tool: name, ok: 0, failed: 0 };
+    const row = byTool.get(name) ?? { tool: name, ok: 0, failed: 0, refused: 0 };
     if (call.ok === false) {
-      row.failed += 1;
+      // Not allowed and did not work are different things: the first is a
+      // decision somebody made, the second a fault.
+      if (call.refused) row.refused += 1;
+      else row.failed += 1;
       if (call.error && !row.error) row.error = call.error;
     } else row.ok += 1;
     byTool.set(name, row);
@@ -760,6 +780,22 @@ function assertReceiptName(file) {
   }
 }
 
+// The sealed receipt holds the cost as it was worked out during the run, and
+// must not change. When that was 'no rate' for a model the table of published
+// prices knows, the run's usage is read back from the telemetry file, which
+// prices it now; the receipt itself stays exactly as sealed.
+export async function withCurrentPricing(receipt, { root, config, runId }) {
+  const usage = receipt.outcome?.usage;
+  if (!usage || !(usage.unpricedInvocations > 0) || usage.estimatedCost !== undefined) return receipt;
+  await refreshPricing({ root, config }).catch(() => undefined);
+  const file = resolve(root, config?.observability?.file ?? ".etnpilot/state/telemetry.jsonl");
+  const fresh = await summarizeTelemetryFile(file, { workflowRunId: receipt.terminal?.runId ?? runId }).catch(() => undefined);
+  if (!fresh || fresh.estimatedCost === undefined) return receipt;
+  const merged = { ...usage, ...fresh };
+  if (!fresh.unpricedModels) delete merged.unpricedModels;
+  return { ...receipt, outcome: { ...receipt.outcome, usage: merged } };
+}
+
 export async function readReceipt(directory, file) {
   assertReceiptName(file);
   const content = await readFile(join(directory, file), "utf8");
@@ -870,6 +906,8 @@ export async function readAgents({ root, config }) {
       file,
       ...(provider ? { provider, ...(manifest.provider ? {} : { inheritedProvider: true }) } : {}),
       ...(Array.isArray(manifest.requires) ? { requires: manifest.requires } : {}),
+      // What it may do, so a surface can say an agent only reads before anyone asks it to write.
+      ...(Array.isArray(manifest.tools) ? { tools: manifest.tools } : {}),
       ...(typeof manifest.description === "string" ? { description: manifest.description } : {}),
     });
   }
@@ -887,6 +925,7 @@ export async function readAgents({ root, config }) {
 // surface that never shows this leaves a budget nobody can see.
 let usageCache;
 export async function readUsage({ root, config }) {
+  await refreshPricing({ root, config }).catch(() => undefined);
   const file = resolve(root, config?.observability?.file ?? ".etnpilot/state/telemetry.jsonl");
   const stats = await stat(file).catch(() => undefined);
   if (!stats) {

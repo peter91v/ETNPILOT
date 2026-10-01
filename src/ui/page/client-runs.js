@@ -126,7 +126,7 @@ function renderOverview() {
       accent: "blue",
       hint: Object.entries(counts).filter(([, total]) => total > 0).map(([status, total]) => total + " " + status).join(", ") || "empty",
     }),
-    summaryCard("Runs", state.runs.length, { accent: "accent", hint: signed + (signed === 1 ? " signed receipt" : " signed receipts") }),
+    summaryCard("Runs", state.runsTotal ?? state.runs.length, { accent: "accent", hint: signed + (signed === 1 ? " signed receipt" : " signed receipts") }),
     summaryCard("Working now", (state.active ?? []).length, {
       accent: "amber",
       hint: (state.active ?? [])[0]?.task ?? "nothing started here",
@@ -152,7 +152,7 @@ function renderOverview() {
   });
 
   const runs = panel("Recent runs", {
-    meta: state.runs.length + " on disk",
+    meta: runsMeta(),
     body: [table([
       { label: "Run", value: (run) => run.runId, mono: true },
       { label: "Status", value: (run) => ({ text: run.status, class: run.status === "succeeded" ? "ok" : "bad" }) },
@@ -185,7 +185,15 @@ function usageCards() {
       hint: described.input.toLocaleString() + " in · " + described.output.toLocaleString() + " out",
     }),
     summaryCard("From cache", described.cached.toLocaleString(), { accent: "accent", hint: "read rather than sent again" }),
-    summaryCard("Provider calls", described.invocations.toLocaleString(), { accent: "accent", hint: "across every run on disk" }),
+    // The provider counts every request of a tool loop; a call here is one agent
+    // invocation, which can be several. Runs from before requests were counted
+    // only have the invocation figure.
+    summaryCard(described.requests > 0 ? "API requests" : "Provider calls", (described.requests || described.invocations).toLocaleString(), {
+      accent: "accent",
+      hint: described.requests > 0
+        ? described.invocations.toLocaleString() + " agent calls, as the provider counts them"
+        : "agent calls across every run on disk",
+    }),
     summaryCard("Estimated cost", described.cost ?? "not priced", {
       accent: "amber",
       hint: pricingHint(described),
@@ -359,11 +367,20 @@ function queueTone(status) {
   return "";
 }
 
+function runsHidden() {
+  return Math.max(0, (state.runsTotal ?? state.runs.length) - state.runs.length);
+}
+
+function runsMeta() {
+  const total = state.runsTotal ?? state.runs.length;
+  return runsHidden() > 0 ? "newest " + state.runs.length + " of " + total + " on disk" : total + " on disk";
+}
+
 function renderRuns() {
   const host = $("view-runs");
   host.replaceChildren();
   host.append(panel("All runs", {
-    meta: state.runs.length + " on disk",
+    meta: runsMeta(),
     body: [table([
       { label: "Run", value: (run) => openReceipt(run), mono: true },
       { label: "Status", value: (run) => pill(run.status, run.status === "succeeded" ? "ok" : "bad") },
@@ -373,7 +390,8 @@ function renderRuns() {
       { label: "Approvals", value: (run) => String(run.approvals) },
       { label: "Took", value: (run) => run.durationMs === undefined ? "—" : (run.durationMs / 1000).toFixed(1) + "s" },
       { label: "Receipt", value: (run) => (run.hash ?? "—").slice(0, 12), mono: true },
-    ], state.runs, "No runs have been recorded yet.", { selected: (run) => run.receiptFile === openRun?.file })],
+    ], state.runs, "No runs have been recorded yet.", { selected: (run) => run.receiptFile === openRun?.file }),
+      ...(runsHidden() > 0 ? [button("Show " + Math.min(50, runsHidden()) + " more", { class: "btn tonal", onClick: () => { runLimit += 50; refresh({ force: true }); } })] : [])],
   }));
   if (openRun) host.append(renderRunDetail());
 }
@@ -387,7 +405,9 @@ function stepDuration(step) {
 
 // Tokens and cost, in the same words everywhere they are shown.
 function describeUsage(summary) {
-  if (!summary || summary.invocations === undefined) return undefined;
+  // A whole run's summary counts invocations; one agent's own record does not,
+  // and is still usage.
+  if (!summary || (summary.invocations === undefined && summary.inputTokens === undefined && summary.outputTokens === undefined)) return undefined;
   const cost = summary.estimatedCost === undefined
     ? undefined
     : (summary.currency ? summary.currency + " " : "") + summary.estimatedCost.toFixed(4);
@@ -396,7 +416,8 @@ function describeUsage(summary) {
     input: summary.inputTokens ?? 0,
     output: summary.outputTokens ?? 0,
     cached: summary.cacheReadTokens ?? 0,
-    invocations: summary.invocations ?? 0,
+    invocations: summary.invocations,
+    requests: summary.requests ?? 0,
     cost,
     unpriced: summary.unpricedInvocations ?? 0,
     unpricedModels: summary.unpricedModels ?? [],
@@ -408,13 +429,13 @@ function describeUsage(summary) {
 // sends someone to set a rate they may already have set.
 function pricingHint(described) {
   const models = described.unpricedModels;
-  if (models.length === 0) return described.cost ? "from observability.pricing" : "set observability.pricing to see it";
+  if (models.length === 0) return described.cost ? "from observability.pricing" : "no published rate known for this model";
   const named = models.slice(0, 2).map((row) => "'" + row.model + "'").join(", ");
   const more = models.length > 2 ? " and " + (models.length - 2) + " more" : "";
   const calls = described.unpriced + (described.unpriced === 1 ? " call has" : " calls have");
   return models.every((row) => row.pricedSince)
     ? calls + " no cost: they ran before the rate for " + named + " was set"
-    : calls + " no rate: set observability.pricing.models for " + named + more;
+    : calls + " no rate known for " + named + more + " (observability.pricing.models can add one)";
 }
 
 // One row per agent invocation, indented by how deep it was spawned. Each
@@ -461,26 +482,38 @@ function agentDetail(node, depth) {
   if (node.toolCalls?.length > 0) {
     parts.push(table([
       { label: "Tool", value: (call) => call.tool ?? "—", mono: true },
-      { label: "Result", value: (call) => pill(call.ok === false ? "refused" : "ran", call.ok === false ? "bad" : "ok") },
-      { label: "Reason", value: (call) => ({ text: call.error ?? "", class: "bad" }) },
+      { label: "Result", value: (call) => (call.ok !== false ? pill("ran", "ok") : call.refused ? pill("refused", "bad") : pill("failed", "warn")) },
+      { label: "Reason", value: (call) => ({ text: call.error ?? "", class: call.refused ? "bad" : "warn" }) },
     ], node.toolCalls, "No tool calls."));
   }
-  if (node.usage) parts.push(usagePanelBody(node.usage));
+  parts.push(usagePanelBody(node.usage, { whole: false }));
   return el("div", {
     class: "agent-detail",
     attrs: { style: "padding-left:" + (depth * 20 + 20) + "px" },
   }, parts);
 }
 
-function usagePanelBody(summary) {
+// Who or what decided: the person at a surface, or the policy rule (or its
+// default) that answered without asking anybody.
+function decidedBy(approval) {
+  if (approval.evidence?.decidedBy) return String(approval.evidence.decidedBy);
+  const policy = approval.policy;
+  if (!policy) return "—";
+  return "policy · " + (policy.rule ? "rule '" + policy.rule + "'" : "the section default");
+}
+
+function usagePanelBody(summary, { whole = true } = {}) {
   const described = describeUsage(summary);
-  if (!described) return el("p", { class: "muted", text: "No provider usage was recorded for this run." });
+  if (!described) return el("p", { class: "muted", text: whole ? "No provider usage was recorded for this run." : "No usage was recorded for this agent." });
   return el("div", {}, [
     el("p", { class: "muted", text: "Usage" }),
     pairs([
       ["Tokens", described.tokens.toLocaleString() + " (" + described.input.toLocaleString() + " in, " + described.output.toLocaleString() + " out)"],
       ["Cached", described.cached > 0 ? described.cached.toLocaleString() + " read from cache" : "none"],
-      ["Provider calls", String(described.invocations)],
+      // One agent's record is one invocation with however many requests its
+      // tool loop made; only a whole run can say how many calls that was.
+      ...(described.invocations === undefined ? [] : [["Provider calls", String(described.invocations)]]),
+      ...(described.requests > 0 ? [["API requests", String(described.requests)]] : []),
       ["Estimated cost", described.cost ? described.cost : "not priced"],
       ...(described.unpricedModels.length > 0 || !described.cost ? [["", pricingHint(described)]] : []),
       ...(described.unpriced > 0 && described.cost ? [["Unpriced calls", String(described.unpriced)]] : []),
@@ -581,7 +614,8 @@ function renderRunDetail() {
     body.push(table([
       { label: "Tool", value: (row) => row.tool, mono: true },
       { label: "Ran", value: (row) => String(row.ok) },
-      { label: "Refused", value: (row) => ({ text: String(row.failed), class: row.failed > 0 ? "bad" : "" }) },
+      { label: "Failed", value: (row) => ({ text: String(row.failed), class: row.failed > 0 ? "warn" : "" }) },
+      { label: "Refused", value: (row) => ({ text: String(row.refused ?? 0), class: row.refused > 0 ? "bad" : "" }) },
       { label: "First reason", value: (row) => ({ text: row.error ?? "", class: "bad" }) },
     ], outcome.tools, "None."));
   }
@@ -605,11 +639,14 @@ function renderRunDetail() {
     body.push(el("p", { class: "muted", text: "Approvals (" + approvals.length + ")" }));
     body.push(table([
       { label: "Operation", value: (approval) => String(approval.operationKind ?? "—") },
+      { label: "What", value: (approval) => ({ text: String(approval.subject ?? ""), class: "mono" }) },
       { label: "Decision", value: (approval) => ({
         text: String(approval.decision ?? "—"),
         class: approval.decision === "approve-once" ? "ok" : "bad",
       }) },
-      { label: "Decided by", value: (approval) => String(approval.evidence?.decidedBy ?? "—") },
+      // A person, or the rule that decided without asking one.
+      { label: "Decided by", value: (approval) => decidedBy(approval) },
+      { label: "Why", value: (approval) => ({ text: String(approval.reason ?? ""), class: approval.decision === "approve-once" ? "" : "bad" }) },
       { label: "At", value: (approval) => when(approval.at ?? approval.evidence?.decidedAt).text },
     ], approvals, "None."));
   }

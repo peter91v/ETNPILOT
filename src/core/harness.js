@@ -257,6 +257,17 @@ export class Harness {
         emitDelta: (text) => {
           void this.events.emit("agent.delta", { runId, agent: agentName, text }).catch(() => {});
         },
+        // Whether the operation policy would let this run read a path, asked
+        // without recording an approval - for a tool that reads many files under
+        // one approval and must still respect each. A read that would need a
+        // person is not readable here: there is nobody to ask per file.
+        canRead: (fileName) => {
+          const decision = this.approvalPolicy?.policy?.evaluateOperation(
+            { kind: "read", fileName },
+            { runId, agent: agentName, workspace: metadata.workspace },
+          );
+          return decision === undefined || decision.kind === "approve-once";
+        },
         propose: (proposal) => {
           if (this.proposals.length >= MAX_PROPOSALS_PER_RUN) {
             return { ok: false, error: `At most ${MAX_PROPOSALS_PER_RUN} proposals per run.` };
@@ -294,6 +305,10 @@ export class Harness {
           });
           approvals.push({
             operationKind: request?.kind ?? "unknown",
+            // What it was about and why it was decided so: a list of 'read
+            // reject' with neither is a list nobody can act on.
+            subject: describeSubject(request),
+            ...(decision.reason ? { reason: String(decision.reason).slice(0, 200) } : {}),
             decision: decision.kind,
             at: new Date().toISOString(),
             ...(decision.policy ? { policy: decision.policy } : {}),
@@ -518,4 +533,12 @@ export class Harness {
       attempts: [attempt],
     };
   }
+}
+
+// One short line naming what an operation touched, for the record. The text
+// came from a model, so control characters are made harmless.
+function describeSubject(request) {
+  const what = request?.fileName ?? request?.path ?? request?.fullCommandText ?? request?.url ?? "";
+  const text = [request?.toolName, what].filter(Boolean).join(" ");
+  return text.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 160);
 }

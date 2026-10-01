@@ -2,7 +2,7 @@ import { missingApiKey } from "./openai-compatible.js";
 import { ProviderError } from "./router.js";
 import { collectAnthropicStream } from "./sse.js";
 import { retryAfterMs, withRetry } from "./retry.js";
-import { createWorkspaceTools, lazySkills, skillsOf } from "./workspace-tools.js";
+import { createWorkspaceTools, describeCall, lazySkills, skillsOf } from "./workspace-tools.js";
 import { createResultEnvelope } from "./tool-results.js";
 import { compactConversation } from "./compaction.js";
 
@@ -103,7 +103,7 @@ export function createAnthropicProvider({
       // the marker in use.
       const envelope = createResultEnvelope(context.runId);
       const system = buildSystemMessage(context, workspaceTools ? envelope : undefined, workspaceTools);
-      const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+      const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, requests: 0 };
       // Marks the last block of a list so everything before it is cached.
       // Anthropic allows four such breakpoints; this uses three — the tools,
       // the system prompt, and a rolling one at the end of the conversation.
@@ -181,7 +181,7 @@ export function createAnthropicProvider({
         for (const call of requested) {
           context.signal?.throwIfAborted();
           const result = await workspaceTools.invoke(call.name, call.input ?? {}, context);
-          toolCalls.push({ tool: call.name, ok: result.ok === true, ...(result.error ? { error: result.error } : {}), ...(result.afterWrite ? { afterWrite: result.afterWrite } : {}) });
+          toolCalls.push({ tool: call.name, label: describeCall(call.name, call.input), ok: result.ok === true, ...(result.refused ? { refused: result.refused } : {}), ...(result.error ? { error: result.error } : {}), ...(result.afterWrite ? { afterWrite: result.afterWrite } : {}) });
           results.push({
             type: "tool_result",
             tool_use_id: call.id,
@@ -349,6 +349,9 @@ function toolSchema(definitions) {
 }
 
 function addUsage(total, usage = {}) {
+  // One per answer received: a turn that reads files and then answers is
+  // several requests to the provider, and the provider bills and counts them so.
+  total.requests = (total.requests ?? 0) + 1;
   total.inputTokens += usage.input_tokens ?? 0;
   total.outputTokens += usage.output_tokens ?? 0;
   total.cacheReadTokens += usage.cache_read_input_tokens ?? 0;
