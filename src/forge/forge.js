@@ -102,12 +102,18 @@ export async function forgeProject(root, {
     answer = await askProvider({ chosen, root, env, input, fetchImpl, factories, signal, config });
   }
   report.usage = answer.usage;
+  report.finish = answer.finish;
 
   let plan;
   try {
     plan = validatePlan(parseJson(answer.text), { root });
   } catch (error) {
-    report.notes.push(`AgentsForge: the answer could not be used (${error.message}). Nothing was written.`);
+    // The model's own words are what is needed to see why, and are kept where
+    // the rest of the project's state is (not committed).
+    const kept = join(configDir, "state", "forge-last-answer.txt");
+    await mkdir(dirname(kept), { recursive: true }).then(() => writeFile(kept, String(answer.text ?? ""), "utf8")).catch(() => {});
+    const stopped = answer.finish && answer.finish !== "stop" && answer.finish !== "end_turn" ? ` The model stopped because: ${answer.finish}.` : "";
+    report.notes.push(`AgentsForge: the answer could not be used (${error.message}). Nothing was written.${stopped} The answer is in ${relative(root, kept)}.`);
     return report;
   }
   report.notes.push(...plan.notes);
@@ -153,28 +159,66 @@ async function askProvider({ chosen, root, env, input, fetchImpl, factories, sig
   const secretResolver = createSecretResolver({ root, config, env });
   // The project's own provider entry, with tools off: this request reads text
   // and answers text, and has nothing to read or write.
+  // OpenAI itself can be told to answer with a JSON object; another server that
+  // speaks the same protocol may refuse the field, so it is asked for there only.
+  const jsonMode = chosen.config.type === "openai-compatible" && /(^|\/\/)api\.openai\.com(\/|$)/.test(chosen.config.baseUrl ?? "");
   await registerConfiguredProviders(harness, {
-    forge: { ...chosen.config, tools: false, ...(chosen.config.type === "anthropic" ? { maxTokens: 16_000 } : {}), ...(fetchImpl ? { fetchImpl } : {}) },
+    forge: {
+      ...chosen.config,
+      tools: false,
+      ...(chosen.config.type === "anthropic" ? { maxTokens: 16_000 } : {}),
+      ...(jsonMode ? { requestBody: { ...(chosen.config.requestBody ?? {}), response_format: { type: "json_object" } } } : {}),
+      ...(fetchImpl ? { fetchImpl } : {}),
+    },
   }, { workingDirectory: root, env, secretResolver, ...(factories ? { factories } : {}) });
   harness.registerAgent({ name: "agents-forge", provider: "forge", prompt: FORGE_PROMPT, tools: [], requires: ["chat"] });
   const outcome = await harness.run({ agent: "agents-forge", input, signal });
   const result = outcome?.result ?? outcome ?? {};
-  return { text: result.text ?? "", usage: result.usage };
+  const raw = result.raw ?? {};
+  return { text: result.text ?? "", usage: result.usage, finish: raw.choices?.[0]?.finish_reason ?? raw.stop_reason };
 }
 
 // ---------------------------------------------------------------------- the answer
 
-function parseJson(text) {
-  const trimmed = String(text ?? "").trim();
-  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(trimmed);
-  const candidate = fenced ? fenced[1].trim() : trimmed;
+// The first complete JSON object in the answer. The model is asked for nothing
+// but the object, and mostly does that; this also copes with a fence around it,
+// a sentence before or after it, and a trailing comma. A string is skipped
+// whole, so a brace inside a prompt does not end the object early.
+export function parseJson(text) {
+  const raw = String(text ?? "");
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(raw);
+  const candidate = fenced && fenced[1].includes("{") ? fenced[1] : raw;
   const start = candidate.indexOf("{");
-  const end = candidate.lastIndexOf("}");
-  if (start < 0 || end <= start) throw new Error("no JSON object in the answer");
+  if (start < 0) throw new Error("no JSON object in the answer");
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let end = -1;
+  for (let index = start; index < candidate.length; index += 1) {
+    const character = candidate[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+    } else if (character === '"') inString = true;
+    else if (character === "{") depth += 1;
+    else if (character === "}") {
+      depth -= 1;
+      if (depth === 0) { end = index; break; }
+    }
+  }
+  if (end < 0) throw new Error(`the answer was cut off before the object ended (${raw.length.toLocaleString("en")} characters)`);
+  const body = candidate.slice(start, end + 1);
   try {
-    return JSON.parse(candidate.slice(start, end + 1));
-  } catch {
-    throw new Error("the answer was not valid JSON");
+    return JSON.parse(body);
+  } catch (first) {
+    try {
+      return JSON.parse(body.replace(/,(\s*[}\]])/g, "$1"));
+    } catch {
+      const position = Number(/position (\d+)/.exec(first.message)?.[1]);
+      const around = Number.isFinite(position) ? ` near "${body.slice(Math.max(0, position - 30), position + 30).replace(/\s+/g, " ")}"` : "";
+      throw new Error(`the answer was not valid JSON${around}`);
+    }
   }
 }
 

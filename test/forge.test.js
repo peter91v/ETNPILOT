@@ -169,3 +169,44 @@ test("the real provider path: a key is found, tools are off, the digest reaches 
   assert.doesNotMatch(JSON.stringify(calls[0].body.messages), /hunter2|sk-abcdefgh/);
   assert.ok(report.agents.length > 0);
 });
+
+test("the answer is read as the first complete object, however the model wrapped it", async () => {
+  const { parseJson } = await import("../src/forge/forge.js");
+  const object = { agents: [{ name: "a", prompt: "use {braces} and \"quotes\" } here" }] };
+  const text = JSON.stringify(object);
+  assert.deepEqual(parseJson(text), object);
+  assert.deepEqual(parseJson(`Here you go:\n${text}\nHope that helps {really}`), object);
+  assert.deepEqual(parseJson("```json\n" + text + "\n```\nNotes: {x}"), object);
+  assert.deepEqual(parseJson('{"a": [1, 2,], "b": {"c": 1,},}'), { a: [1, 2], b: { c: 1 } });
+  assert.throws(() => parseJson(text.slice(0, 40)), /cut off/);
+  assert.throws(() => parseJson('{"a": 1 "b": 2}'), /not valid JSON near/);
+  assert.throws(() => parseJson("no object"), /no JSON object/);
+});
+
+test("when the answer is unusable the model's own text is kept, with the reason it stopped", async () => {
+  const root = await repository();
+  await initializeProject(root, { forge: false, importExisting: false });
+  const config = await loadConfig(join(root, ".etnpilot/etnpilot.yaml"), {});
+  const report = await forgeProject(root, { config, runModel: async () => ({ text: '{"agents": [{"name": "a", "prompt": "cut', finish: "length" }) });
+  assert.match(report.notes.join(" "), /cut off/);
+  assert.match(report.notes.join(" "), /stopped because: length/);
+  assert.match(await readFile(join(root, ".etnpilot/state/forge-last-answer.txt"), "utf8"), /"agents"/);
+});
+
+test("OpenAI is asked for a JSON object; another server is not sent a field it may refuse", async () => {
+  const bodies = [];
+  const fetchImpl = async (url, options) => {
+    bodies.push(JSON.parse(options.body));
+    return { ok: true, status: 200, json: async () => ({ model: "m", choices: [{ message: { content: JSON.stringify(PLAN) }, finish_reason: "stop" }], usage: {} }), text: async () => "" };
+  };
+  for (const baseUrl of ["https://api.openai.com/v1", "http://127.0.0.1:11434/v1"]) {
+    const root = await repository();
+    await initializeProject(root, { forge: false, importExisting: false });
+    const config = await loadConfig(join(root, ".etnpilot/etnpilot.yaml"), {});
+    config.providers.openai.baseUrl = baseUrl;
+    config.defaultProvider = "openai";
+    await forgeProject(root, { config, env: { OPENAI_API_KEY: "k" }, fetchImpl });
+  }
+  assert.deepEqual(bodies[0].response_format, { type: "json_object" });
+  assert.equal(bodies[1].response_format, undefined);
+});
