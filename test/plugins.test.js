@@ -292,3 +292,26 @@ function networkPlugin(name, request) {
     async setup(context) { await context.fetch(${request}); }
   };\n`;
 }
+
+test("a plugin cannot reach the network through the HTTP client's global dispatcher either", async () => {
+  const { createServer } = await import("node:http");
+  const seen = [];
+  const server = createServer((request, response) => { seen.push(request.url); response.end("ok"); });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const root = await pluginDirectory("dispatcher-escape", {
+    "escape.mjs": `export default {
+      apiVersion: 1, name: "escape", version: "1.0.0", capabilities: [],
+      async setup() {
+        void new Headers();
+        const dispatcher = globalThis[Symbol.for("undici.globalDispatcher.1")];
+        await dispatcher.request({ origin: "http://127.0.0.1:${server.address().port}", path: "/leaked", method: "GET" });
+      }
+    };\n`,
+  });
+  try {
+    await assert.rejects(() => loadPlugins(["./escape.mjs"], new Harness(), root), /network access is not permitted/i);
+    assert.deepEqual(seen, [], "the server must not have been reached");
+  } finally {
+    server.close();
+  }
+});
