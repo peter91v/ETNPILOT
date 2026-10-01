@@ -359,14 +359,14 @@ async function writeNew(path, content) {
   });
 }
 
-// Every agent in the project that an import made, including by an earlier run:
-// the manifest says so on its first line.
+// Every agent in the project that an import or AgentsForge made, including by
+// an earlier run: the manifest says so on its first line.
 export async function importedAgentNames(configDir) {
   const directory = join(configDir, "agents");
   const names = [];
   for (const file of await listFiles(directory, [".yaml"])) {
     const head = await readFile(join(directory, file), "utf8").then((text) => text.split("\n", 1)[0], () => "");
-    if (head.startsWith("# Imported from ")) names.push(file.replace(/\.yaml$/, ""));
+    if (head.startsWith("# Imported from ") || head.startsWith("# Forged by AgentsForge")) names.push(file.replace(/\.yaml$/, ""));
   }
   return names;
 }

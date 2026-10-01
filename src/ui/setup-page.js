@@ -13,6 +13,7 @@ export function renderSetupPage(token, status) {
     checkout: status.checkout,
     templates: status.templates,
     importLines: status.importable?.lines ?? [],
+    forge: status.forge ?? null,
   });
   return `<!doctype html>
 <html lang="en">
@@ -133,6 +134,11 @@ export function renderSetupPage(token, status) {
     <ul id="found-list"></ul>
     <p class="footnote">Copied, never over anything. Unreviewed until you run <code>etnpilot content lock</code>.</p>
   </section>
+  <section class="notice" id="forge" hidden>
+    <label class="footnote"><input type="checkbox" id="forge-on" checked>
+      <span id="forge-label"></span></label>
+    <p class="footnote">It sends a bounded digest of this repository (layout, build files, a few source files; credential files are never read, secret-looking text is blanked) and writes agents, skills and instructions that fit it. Unreviewed until <code>etnpilot content lock</code>.</p>
+  </section>
   <div class="actions">
     <button class="btn state" id="create">Create it</button>
     <span class="footnote" id="status"></span>
@@ -146,6 +152,10 @@ const STATUS = ${data};
 let chosen = STATUS.templates[0]?.id;
 
 document.getElementById("root").textContent = STATUS.root;
+if (STATUS.forge) {
+  document.getElementById("forge-label").textContent = "Let AgentsForge write agents, skills and instructions for this repository, using " + STATUS.forge.provider + (STATUS.forge.model ? " (" + STATUS.forge.model + ")" : "") + ", the key it found";
+  document.getElementById("forge").hidden = false;
+}
 if (STATUS.importLines.length > 0) {
   const list = document.getElementById("found-list");
   for (const line of STATUS.importLines) {
@@ -199,13 +209,13 @@ async function create() {
   const status = document.getElementById("status");
   const error = document.getElementById("error");
   button.disabled = true;
-  status.textContent = "Creating…";
+  status.textContent = STATUS.forge && document.getElementById("forge-on").checked ? "Creating, and asking " + STATUS.forge.provider + " about this repository — this can take a minute…" : "Creating…";
   error.hidden = true;
   try {
     const response = await fetch("/api/project/create", {
       method: "POST",
       headers: { "x-etnpilot-token": TOKEN, "content-type": "application/json" },
-      body: JSON.stringify({ template: chosen, importExisting: document.getElementById("import").checked }),
+      body: JSON.stringify({ template: chosen, importExisting: document.getElementById("import").checked, forge: STATUS.forge ? document.getElementById("forge-on").checked : false }),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error ?? ("request failed (" + response.status + ")"));
@@ -224,6 +234,7 @@ async function create() {
       }
       document.getElementById("found").hidden = false;
       document.getElementById("import").parentElement.hidden = true;
+      document.getElementById("forge").hidden = true;
       status.textContent = "Created " + payload.configFile + ".";
       button.textContent = "Open the review page";
       button.disabled = false;
