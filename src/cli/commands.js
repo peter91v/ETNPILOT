@@ -76,6 +76,7 @@ export const CLI_OPTIONS = Object.freeze({
   "rotate-token": { type: "boolean", default: false },
   host: { type: "string" },
   "client-id": { type: "string" },
+  "allow-host": { type: "string" },
   skip: { type: "string" },
   "key-stdin": { type: "boolean", default: false },
   "no-verify": { type: "boolean", default: false },
@@ -685,6 +686,7 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     const resolver = createSecretResolver({ root, config });
     const token = await resolver.get("gitlab.apiToken", {
       fallback: { provider: "env", key: "ETNPILOT_GITLAB_TOKEN" },
+      baseUrl: config.git.baseUrl,
       required: true,
     });
     const client = new GitLabClient({ baseUrl: config.git.baseUrl, token });

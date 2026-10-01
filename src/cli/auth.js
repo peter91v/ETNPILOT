@@ -1,5 +1,5 @@
 import { join, resolve } from "node:path";
-import { authStatus, loginWithDevice, logout, saveKey } from "../auth/login.js";
+import { allowHost, authStatus, loginWithDevice, logout, saveKey } from "../auth/login.js";
 import { SERVICE_IDS, serviceFor } from "../auth/services.js";
 import { loadConfig } from "../config/load.js";
 
@@ -7,6 +7,7 @@ import { loadConfig } from "../config/load.js";
 // offers the same through the same functions.
 
 export const AUTH_USAGE = `  etnpilot login <anthropic|openai|github|gitlab> [--key-stdin] [--client-id id] [--host url] [--no-verify]
+  etnpilot login <service> --allow-host name      let the stored login be sent to one more host (a proxy)
   etnpilot logout <anthropic|openai|github|gitlab>
   etnpilot auth status`;
 
@@ -15,12 +16,21 @@ export async function runAuthCommand(command, subcommand, values, { stdin = proc
 
   if (command === "auth" || (command === "login" && !subcommand)) {
     if (command === "auth" && subcommand !== "status" && subcommand !== undefined) throw new Error("Use 'etnpilot auth status'.");
-    for (const entry of await authStatus({ env })) say(describeStatus(entry));
+    const entries = await authStatus({ env });
+    for (const entry of entries) say(describeStatus(entry));
+    const problem = entries.find((entry) => entry.storeProblem)?.storeProblem;
+    if (problem) say(`\nWarning: ${problem}`);
     if (command === "login") say(`\nSign in with: etnpilot login <${SERVICE_IDS.join("|")}>`);
     return 0;
   }
 
   const service = serviceFor(subcommand);
+
+  if (command === "login" && values["allow-host"]) {
+    const result = await allowHost(service.id, values["allow-host"], { env });
+    say(`The stored ${service.label} login may now also be sent to: ${result.hosts.join(", ")}.`);
+    return 0;
+  }
 
   if (command === "logout") {
     const { removed } = await logout(service.id, { env });
@@ -81,6 +91,7 @@ export function describeStatus(entry) {
   if (!entry.connected) return `${name} not connected   (etnpilot login ${entry.id})`;
   if (entry.source === "environment") return `${name} connected      from ${entry.environmentVariable} in the environment`;
   const stored = entry.stored;
+  if (stored.needsSignIn) return `${name} sign-in expired  (etnpilot login ${entry.id})`;
   const who = stored.account ? ` as ${stored.account}` : "";
   const how = stored.kind === "oauth" ? "signed in" : "key stored";
   const warn = stored.verified ? "" : "  (not verified)";

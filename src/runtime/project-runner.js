@@ -123,6 +123,7 @@ async function executeProject({
     });
     gitLabToken = await secrets.get("gitlab.apiToken", {
       fallback: { provider: "env", key: "ETNPILOT_GITLAB_TOKEN" },
+      baseUrl: bootstrapConfig.git?.baseUrl,
     });
     if (publish) assertPublishable(useWorktree, bootstrapConfig, gitLabToken);
     // Prices for models the built-in table does not know, so a run is costed

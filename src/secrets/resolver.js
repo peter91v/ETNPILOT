@@ -16,6 +16,9 @@ export class SecretResolver {
     // source has nothing: a variable somebody set is a decision, a stored login
     // is a convenience, so the variable wins.
     this.store = store;
+    // Why a stored login was not handed out, by secret name, so that the
+    // message about the missing key can say so instead of blaming the variable.
+    this.refusals = new Map();
   }
 
   register(provider) {
@@ -37,28 +40,44 @@ export class SecretResolver {
     return Object.keys(this.values).sort();
   }
 
-  async get(name, { fallback, required = false } = {}) {
+  // 'baseUrl' is where the value is about to be sent. A stored login is only
+  // handed to a host it was issued for.
+  async get(name, { fallback, required = false, baseUrl } = {}) {
     const reference = this.values[name] ?? fallback;
     if (!reference) {
-      const stored = await this.stored(name);
+      const stored = await this.stored(name, baseUrl);
       if (stored !== undefined) return stored;
-      if (required) throw new SecretResolutionError(`Required secret '${name}' is not configured.`, { code: "not_configured" });
+      if (required) throw this.missing(name, `Required secret '${name}' is not configured.`, { code: "not_configured" });
       return undefined;
     }
     const value = await this.resolve(reference, { name, required: false });
     if (value !== undefined) return value;
-    const stored = await this.stored(name);
+    const stored = await this.stored(name, baseUrl);
     if (stored !== undefined) return stored;
     if (required) {
-      throw new SecretResolutionError(`Required secret '${name}' is unavailable.`, { code: "unavailable", provider: reference.provider });
+      throw this.missing(name, `Required secret '${name}' is unavailable.`, { code: "unavailable", provider: reference.provider });
     }
     return undefined;
   }
 
-  async stored(name) {
+  // A stored login that was refused is the reason, when there is one.
+  missing(name, message, details) {
+    const refused = this.refusals.get(name);
+    return refused
+      ? new SecretResolutionError(`Required secret '${name}' was not used: ${refused}`, { code: "stored_login_refused" })
+      : new SecretResolutionError(message, details);
+  }
+
+  async stored(name, baseUrl) {
     if (!this.store) return undefined;
     try {
-      return await this.store.get(name);
+      const answer = await this.store.resolve(name, { baseUrl });
+      if (answer?.refused) {
+        this.refusals.set(name, answer.refused);
+        return undefined;
+      }
+      this.refusals.delete(name);
+      return answer?.value;
     } catch {
       return undefined;
     }

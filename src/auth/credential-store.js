@@ -1,6 +1,6 @@
-import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { hostAllowed, serviceForSecret } from "./services.js";
 
 // Where a login lives: one small file in the person's own configuration
 // directory, outside every repository, readable by its owner only. A project
@@ -11,9 +11,16 @@ import { dirname, join } from "node:path";
 // so a stored login answers exactly the question the environment would have.
 // The environment still wins when it holds a value: a variable somebody set is
 // a decision, a stored login is a convenience.
+//
+// The file is plain text with owner-only permissions, like the credentials
+// files of most command-line tools; there is no keychain to rely on in Termux.
+// What keeps a stored login from being used against its owner is that it is
+// bound to the hosts it was issued for (see hostAllowed).
 
 const FILE_VERSION = 1;
 const REFRESH_MARGIN_MS = 60_000;
+const LOCK_STALE_MS = 30_000;
+const LOCK_WAIT_MS = 5_000;
 
 export function credentialStorePath(env = process.env) {
   if (env.ETNPILOT_HOME) return join(env.ETNPILOT_HOME, "credentials.json");
@@ -23,13 +30,14 @@ export function credentialStorePath(env = process.env) {
 }
 
 export class CredentialStore {
-  constructor({ path, now = () => Date.now(), refresher } = {}) {
+  constructor({ path, now = () => Date.now(), refresher, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = {}) {
     if (!path) throw new TypeError("A credential store needs a file path.");
     this.path = path;
     this.now = now;
     // (entry) => Promise<entry | undefined>: renews an expiring login. Injected
     // so that this file knows nothing of any provider's endpoints.
     this.refresher = refresher;
+    this.sleep = sleep;
   }
 
   async read() {
@@ -38,8 +46,10 @@ export class CredentialStore {
       if (parsed && typeof parsed === "object" && parsed.credentials && typeof parsed.credentials === "object") {
         return { version: FILE_VERSION, credentials: parsed.credentials, apps: parsed.apps ?? {} };
       }
-    } catch {
-      // A missing or unreadable file is an empty store.
+    } catch (error) {
+      // A missing file is an empty store. A file that is there and cannot be
+      // read or parsed is not: say so rather than act as if nothing was saved.
+      if (error.code !== "ENOENT") this.damaged = error.message;
     }
     return { version: FILE_VERSION, credentials: {}, apps: {} };
   }
@@ -53,39 +63,117 @@ export class CredentialStore {
     await rename(temporary, this.path);
   }
 
-  // The value for a secret name, renewed first if it is about to expire.
-  async get(name) {
-    const data = await this.read();
-    const entry = data.credentials[name];
-    if (!entry || typeof entry.value !== "string" || entry.value === "") return undefined;
-    if (entry.expiresAt && this.refresher && entry.expiresAt - this.now() < REFRESH_MARGIN_MS) {
-      const renewed = await this.refresher(entry).catch(() => undefined);
-      if (renewed?.value) {
-        data.credentials[name] = renewed;
-        await this.write(data).catch(() => {});
-        return renewed.value;
+  // Reading, changing and writing the file is one step to anyone else using it:
+  // the page and the terminal can both renew the same login, and a renewal uses
+  // up the refresh token it was given.
+  async locked(work) {
+    const lock = `${this.path}.lock`;
+    await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
+    const started = Date.now();
+    for (;;) {
+      try {
+        await writeFile(lock, `${process.pid} ${Date.now()}\n`, { flag: "wx", mode: 0o600 });
+        break;
+      } catch (error) {
+        if (error.code !== "EEXIST") throw error;
+        const age = await stat(lock).then((details) => Date.now() - details.mtimeMs, () => 0);
+        if (age > LOCK_STALE_MS) { await rm(lock, { force: true }); continue; }
+        if (Date.now() - started > LOCK_WAIT_MS) throw new Error("The stored logins are being changed by another ETNPilot; try again in a moment.");
+        await this.sleep(40);
       }
-      // Could not renew: an expired value is worse than none, a still-valid one is fine.
-      if (entry.expiresAt <= this.now()) return undefined;
     }
-    return entry.value;
+    try {
+      return await work();
+    } finally {
+      await rm(lock, { force: true });
+    }
+  }
+
+  // The value for a secret name, renewed first if it is about to expire.
+  // 'baseUrl' is where it is about to be sent; a login is only handed to a host
+  // it was issued for. Returns { value } or { refused } or undefined.
+  async resolve(name, { baseUrl } = {}) {
+    if (!serviceForSecret(name)) return undefined;
+    let entry = (await this.read()).credentials[name];
+    if (!entry || typeof entry.value !== "string" || entry.value === "") return undefined;
+    if (baseUrl !== undefined) {
+      const verdict = hostAllowed(name, entry, baseUrl);
+      if (!verdict.ok) return { refused: verdict.reason };
+    }
+    if (entry.expiresAt && entry.expiresAt - this.now() < REFRESH_MARGIN_MS) {
+      entry = await this.renew(name, entry);
+      if (!entry) return undefined;
+    }
+    return { value: entry.value };
+  }
+
+  async get(name, options) {
+    return (await this.resolve(name, options))?.value;
+  }
+
+  // Under the lock, and re-read inside it: another process may have renewed
+  // already, in which case its result is used and the refresh token is not
+  // spent twice. A write that fails after a renewal is an error, not something
+  // to swallow: the new refresh token would be lost and the old one is used up.
+  async renew(name, seen) {
+    if (!this.refresher) return seen.expiresAt > this.now() ? seen : undefined;
+    return this.locked(async () => {
+      const data = await this.read();
+      const current = data.credentials[name];
+      if (!current) return undefined;
+      if (!current.expiresAt || current.expiresAt - this.now() >= REFRESH_MARGIN_MS) return current;
+      let renewed;
+      try {
+        renewed = await this.refresher(current);
+      } catch (error) {
+        if (error?.code === "invalid_grant") {
+          // The service no longer accepts the refresh token: say that, instead
+          // of looking like a login that was never made.
+          data.credentials[name] = { ...current, needsSignIn: true, expiredAt: new Date(this.now()).toISOString() };
+          await this.write(data);
+          return undefined;
+        }
+        renewed = undefined;
+      }
+      if (!renewed?.value) return current.expiresAt > this.now() ? current : undefined;
+      data.credentials[name] = { ...renewed, needsSignIn: undefined };
+      await this.write(data);
+      return data.credentials[name];
+    });
   }
 
   async save(name, entry) {
-    const data = await this.read();
-    data.credentials[name] = { ...entry, savedAt: new Date(this.now()).toISOString() };
-    await this.write(data);
+    return this.locked(async () => {
+      const data = await this.read();
+      data.credentials[name] = { ...entry, savedAt: new Date(this.now()).toISOString() };
+      await this.write(data);
+    });
   }
 
   async remove(name) {
-    const data = await this.read();
-    const had = name in data.credentials;
-    delete data.credentials[name];
-    if (had) {
-      if (Object.keys(data.credentials).length === 0 && Object.keys(data.apps).length === 0) await rm(this.path, { force: true });
-      else await this.write(data);
-    }
-    return had;
+    return this.locked(async () => {
+      const data = await this.read();
+      const had = name in data.credentials;
+      delete data.credentials[name];
+      if (had) {
+        if (Object.keys(data.credentials).length === 0 && Object.keys(data.apps).length === 0) await rm(this.path, { force: true });
+        else await this.write(data);
+      }
+      return had;
+    });
+  }
+
+  // Adds a host the owner chose to send this login to, such as a proxy.
+  async allowHost(name, host) {
+    return this.locked(async () => {
+      const data = await this.read();
+      const entry = data.credentials[name];
+      if (!entry) throw new Error("There is no stored login to add a host to. Sign in first.");
+      const hosts = new Set([...(entry.allowHosts ?? []), host.toLowerCase()]);
+      data.credentials[name] = { ...entry, allowHosts: [...hosts] };
+      await this.write(data);
+      return [...hosts];
+    });
   }
 
   // What may be shown: who, how, since when. Never the value or a refresh token.
@@ -99,7 +187,20 @@ export class CredentialStore {
       savedAt: entry.savedAt,
       expiresAt: entry.expiresAt,
       verified: entry.verified !== false,
+      needsSignIn: entry.needsSignIn === true,
+      allowHosts: entry.allowHosts ?? [],
     };
+  }
+
+  // Whether the file is readable by anyone but its owner, which would make
+  // "stored safely" untrue. Not meaningful on Windows.
+  async permissionsProblem() {
+    if (process.platform === "win32") return undefined;
+    const details = await stat(this.path).catch(() => undefined);
+    if (!details) return undefined;
+    return (details.mode & 0o077) !== 0
+      ? `${this.path} can be read by other users (mode ${(details.mode & 0o777).toString(8)}). Run: chmod 600 ${this.path}`
+      : undefined;
   }
 
   // The OAuth application a person registered for a service, remembered so the
@@ -109,9 +210,11 @@ export class CredentialStore {
   }
 
   async saveApp(service, app) {
-    const data = await this.read();
-    data.apps[service] = { ...data.apps[service], ...app };
-    await this.write(data);
+    return this.locked(async () => {
+      const data = await this.read();
+      data.apps[service] = { ...data.apps[service], ...app };
+      await this.write(data);
+    });
   }
 }
 

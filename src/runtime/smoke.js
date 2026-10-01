@@ -21,11 +21,24 @@ export async function runSmoke(root, { config, env = process.env, provider: want
     ? (config?.providers?.[wanted] ? { name: wanted, config: config.providers[wanted] } : undefined)
     : await chooseProvider(config, root, env);
   if (!chosen) {
+    // A key can exist and still be refused for the address this project gives
+    // the provider; that is the useful thing to say, not "no key".
+    const refusals = [];
+    if (!wanted) {
+      const resolver = createSecretResolver({ root, config, env });
+      for (const entry of Object.values(config?.providers ?? {})) {
+        if (!["anthropic", "openai-compatible"].includes(entry?.type)) continue;
+        await resolveConfiguredApiKey(entry.type, entry, { secretResolver: resolver, env }).catch(() => undefined);
+      }
+      refusals.push(...new Set(resolver.refusals.values()));
+    }
     report.steps.push({
       id: "key", status: "fail",
       detail: wanted
         ? `No provider named '${wanted}' in this project.`
-        : "No configured provider has a key. Sign in with 'etnpilot login openai' or 'etnpilot login anthropic'.",
+        : refusals.length > 0
+          ? `A stored login exists but was not used: ${refusals[0]}`
+          : "No configured provider has a key. Sign in with 'etnpilot login openai' or 'etnpilot login anthropic'.",
     });
     return report;
   }
@@ -63,7 +76,10 @@ export async function runSmoke(root, { config, env = process.env, provider: want
   const steps = {
     key: async () => {
       const key = await resolveConfiguredApiKey(chosen.config.type, chosen.config, { secretResolver: resolver, env });
-      if (!key) throw Object.assign(new Error("no key resolves for this provider"), { code: "missing_api_key" });
+      if (!key) {
+        const refused = resolver.refusals.get(chosen.config.apiKeySecret ?? (chosen.config.type === "anthropic" ? "anthropic.apiKey" : "provider.apiKey"));
+        throw Object.assign(new Error(refused ? `a stored login exists but was not used: ${refused}` : "no key resolves for this provider"), { code: "missing_api_key" });
+      }
       const service = serviceOf(chosen.config);
       const entry = service ? (await authStatus({ env })).find((item) => item.id === service) : undefined;
       const from = entry?.source === "environment" ? `from ${entry.environmentVariable}` : entry?.source === "stored" ? `stored login${entry.stored?.account ? ` (${entry.stored.account})` : ""}` : "resolved";

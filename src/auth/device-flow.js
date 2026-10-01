@@ -94,7 +94,13 @@ export async function refreshToken(entry, { fetchImpl = globalThis.fetch, now = 
     grant_type: "refresh_token",
     refresh_token: entry.refreshToken,
   });
-  if (!body.access_token) return undefined;
+  if (!body.access_token) {
+    // 'invalid_grant' is the service saying this refresh token is spent or
+    // revoked: the person has to sign in again, which is not the same as a
+    // network that did not answer.
+    if (body.error) throw new DeviceFlowError(describe(body, "The login could not be renewed."), body.error);
+    return undefined;
+  }
   return {
     ...entry,
     value: body.access_token,

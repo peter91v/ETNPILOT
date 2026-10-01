@@ -131,6 +131,15 @@ export async function loginWithDevice(serviceId, { env, fetchImpl, clientId, hos
 
 export { checkDeviceFlow };
 
+// A host the owner chose to send a stored login to, such as a proxy in front of
+// the service. Without this a login is only used with the hosts it was issued for.
+export async function allowHost(serviceId, host, { env } = {}) {
+  const service = serviceFor(serviceId);
+  const clean = String(host ?? "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/[/:].*$/, "");
+  if (!/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/.test(clean)) throw new Error(`'${host}' is not a host name.`);
+  return { service: service.id, hosts: await storeFor({ env }).allowHost(service.secret, clean) };
+}
+
 export async function logout(serviceId, { env } = {}) {
   const service = serviceFor(serviceId);
   const removed = await storeFor({ env }).remove(service.secret);
@@ -147,7 +156,9 @@ export async function authStatus({ env = process.env } = {}) {
     const stored = await store?.describe(service.secret);
     const fromEnvironment = typeof env[service.env] === "string" && env[service.env] !== "";
     const app = await store?.app(id);
+    const problem = id === SERVICE_IDS[0] ? await store?.permissionsProblem() : undefined;
     entries.push({
+      ...(problem ? { storeProblem: problem } : {}),
       id,
       label: service.label,
       method: service.method,

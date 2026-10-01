@@ -3,6 +3,8 @@ import { createCopilotProvider } from "./copilot.js";
 import { createOpenAICompatibleProvider } from "./openai-compatible.js";
 import { createScriptedProvider } from "./scripted.js";
 
+const ANTHROPIC_DEFAULT_URL = "https://api.anthropic.com";
+
 const BUILTIN_FACTORIES = {
   "github-copilot": async (name, config, context) => createCopilotProvider({
     ...config,
@@ -28,6 +30,7 @@ const BUILTIN_FACTORIES = {
       resolver: context.secretResolver,
       name: config.apiKeySecret ?? "anthropic.apiKey",
       fallbackKey: describeApiKeySource(config, context, "anthropic.apiKey", "ANTHROPIC_API_KEY").env,
+      baseUrl: config.baseUrl ?? ANTHROPIC_DEFAULT_URL,
       // Not required here: a project may configure several providers and use
       // one of them. A key that is missing is reported by the provider that
       // needs it, when it is used, and not by failing every run that does not.
@@ -45,6 +48,7 @@ const BUILTIN_FACTORIES = {
       resolver: context.secretResolver,
       name: config.apiKeySecret ?? "provider.apiKey",
       fallbackKey: describeApiKeySource(config, context, "provider.apiKey", "ETNPILOT_PROVIDER_API_KEY").env,
+      baseUrl: config.baseUrl,
       // See above: a provider that is configured but not used must not fail
       // the run. A local model server needs no key at all.
       required: false,
@@ -79,8 +83,11 @@ export async function registerConfiguredProviders(harness, providers = {}, conte
 function describeApiKeySource(config, context, defaultSecret, fallbackKey) {
   const secret = config.apiKeySecret ?? defaultSecret;
   const mapped = context.secretResolver?.values?.[secret];
-  if (mapped) return { secret, env: mapped.provider === "env" ? mapped.key : undefined, mapped: true };
-  return { secret, env: config.apiKeySecret ? undefined : fallbackKey, mapped: false };
+  // Read when the message is made, not now: whether a stored login was refused
+  // is only known after the key has been asked for.
+  const refusal = () => context.secretResolver?.refusals?.get(secret);
+  if (mapped) return { secret, env: mapped.provider === "env" ? mapped.key : undefined, mapped: true, refusal };
+  return { secret, env: config.apiKeySecret ? undefined : fallbackKey, mapped: false, refusal };
 }
 
 // The same key resolution the anthropic/openai-compatible factories use,
@@ -92,6 +99,7 @@ export async function resolveConfiguredApiKey(type, config, context) {
       resolver: context.secretResolver,
       name: config.apiKeySecret ?? "anthropic.apiKey",
       fallbackKey: describeApiKeySource(config, context, "anthropic.apiKey", "ANTHROPIC_API_KEY").env,
+      baseUrl: config.baseUrl ?? ANTHROPIC_DEFAULT_URL,
       required: false,
     });
   }
@@ -100,16 +108,18 @@ export async function resolveConfiguredApiKey(type, config, context) {
       resolver: context.secretResolver,
       name: config.apiKeySecret ?? "provider.apiKey",
       fallbackKey: describeApiKeySource(config, context, "provider.apiKey", "ETNPILOT_PROVIDER_API_KEY").env,
+      baseUrl: config.baseUrl,
       required: false,
     });
   }
   return undefined;
 }
 
-async function resolveProviderSecret({ resolver, name, fallbackKey, required }) {
+async function resolveProviderSecret({ resolver, name, fallbackKey, required, baseUrl }) {
   if (!resolver) return undefined;
   return resolver.get(name, {
     ...(fallbackKey ? { fallback: { provider: "env", key: fallbackKey } } : {}),
     required,
+    ...(baseUrl ? { baseUrl } : {}),
   });
 }

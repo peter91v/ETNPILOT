@@ -1021,10 +1021,12 @@ export async function readMergeRequests({ root, config, env }, { state = "opened
     };
   }
   let token;
+  let secrets;
   try {
-    const secrets = createSecretResolver({ root, config, env });
+    secrets = createSecretResolver({ root, config, env });
     token = await secrets.get("gitlab.apiToken", {
       fallback: { provider: "env", key: "ETNPILOT_GITLAB_TOKEN" },
+      baseUrl: config.git?.baseUrl,
     });
   } catch (error) {
     return { configured: true, available: false, project, error: error.message, entries: [] };
@@ -1034,7 +1036,7 @@ export async function readMergeRequests({ root, config, env }, { state = "opened
       configured: true,
       available: false,
       project,
-      error: "No GitLab API token is configured; set ETNPILOT_GITLAB_TOKEN or 'secrets.gitlab.apiToken'.",
+      error: secrets.refusals.get("gitlab.apiToken") ?? "No GitLab API token is configured; set ETNPILOT_GITLAB_TOKEN, 'secrets.gitlab.apiToken' or run 'etnpilot login gitlab'.",
       entries: [],
     };
   }

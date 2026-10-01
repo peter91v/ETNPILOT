@@ -386,6 +386,15 @@ export function missingApiKey(name, source, fallbackEnv) {
   const secret = source?.secret;
   const login = serviceForSecret(secret);
   const loginHint = login ? ` Or sign in once with 'etnpilot login ${login.id}'.` : "";
+  // A stored login that exists but was not handed over says why; blaming a
+  // variable nobody was supposed to set would send the person the wrong way.
+  const refused = source?.refusal?.();
+  if (refused) {
+    return new ProviderError(
+      `Provider '${name}' has no API key: ${refused}`,
+      { code: "stored_login_refused", retryable: false, safeToRetry: false },
+    );
+  }
   // A named secret with nothing behind it is a different problem from an
   // unset variable, and sending someone to the wrong file costs an hour.
   if (source && !source.env) {
