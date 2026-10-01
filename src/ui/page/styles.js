@@ -613,6 +613,8 @@ export const STYLES = `
       background: var(--md-error); color: var(--md-on-error); font: var(--md-label-small);
     }
     .toast-region { left: 16px; right: 16px; bottom: 96px; max-width: none; }
+    /* With a dialog open, a message at the bottom would cover its buttons. */
+    body:has(.backdrop.open) .toast-region { bottom: auto; top: 16px; z-index: 60; }
     .backdrop { padding: 12px; align-items: end; }
     .modal { max-height: calc(100vh - 24px); overflow-y: auto; }
     .palette { margin-top: 32px; }
