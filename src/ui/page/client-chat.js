@@ -6,7 +6,11 @@
 // session file and the receipts of its turns; a question from the agent is an
 // approval in the same inbox the Approvals view reads, shown here where it is
 // asked. Nothing about a turn is decided in the browser.
-export const CLIENT_CHAT = `let chatBuilt = false;
+import { parseMarkdown } from "../markdown.js";
+
+export const CLIENT_CHAT = `${parseMarkdown.toString()}
+
+let chatBuilt = false;
 let chatSession;
 let chatTurns = [];
 let chatCompactions = [];
@@ -350,14 +354,40 @@ function chatKey(event) {
 
 // --- drawing
 
-function message(who, text, { tone = "", meta, extra = [] } = {}) {
-  const said = el("p", { class: "said", text });
+function message(who, text, { tone = "", meta, extra = [], markdown = false } = {}) {
+  const said = markdown ? renderMarkdown(text) : el("p", { class: "said", text });
   return el("div", { class: "msg " + tone }, [
     el("span", { class: "who", text: who }),
     said,
     ...extra,
     ...(meta ? [el("span", { class: "meta", text: meta })] : []),
   ]);
+}
+
+// A reply as the structure parseMarkdown found in it, built from text nodes and
+// elements only. A link opens in a new tab and carries no opener.
+function markdownInline(nodes) {
+  return nodes.map((node) => {
+    if (node.code !== undefined) return el("code", { text: node.code });
+    if (node.bold) return el("strong", {}, markdownInline(node.bold));
+    if (node.italic) return el("em", {}, markdownInline(node.italic));
+    if (node.link) {
+      return el("a", { attrs: { href: node.link, target: "_blank", rel: "noopener noreferrer" } }, markdownInline(node.children));
+    }
+    return document.createTextNode(node.text);
+  });
+}
+
+function renderMarkdown(text) {
+  const body = el("div", { class: "said md" });
+  for (const block of parseMarkdown(text)) {
+    if (block.type === "code") body.append(el("pre", { attrs: block.language ? { "data-language": block.language } : {} }, [el("code", { text: block.text })]));
+    else if (block.type === "heading") body.append(el("h" + Math.min(6, block.level + 2), {}, markdownInline(block.children)));
+    else if (block.type === "list") body.append(el(block.ordered ? "ol" : "ul", {}, block.items.map((item) => el("li", {}, markdownInline(item)))));
+    else if (block.type === "quote") body.append(el("blockquote", {}, markdownInline(block.children)));
+    else body.append(el("p", {}, markdownInline(block.children)));
+  }
+  return body;
 }
 
 // What the agent did, from the record and not from its own account of it. A
@@ -421,6 +451,7 @@ function drawThread(thread) {
     if (turn.status === "succeeded") {
       thread.append(message(turn.agent ?? "agent", turn.reply ?? "", {
         tone: "agent",
+        markdown: true,
         extra: callChips(turn.calls),
         meta: (turn.undone ? "undone · " : "") + "turn " + turn.turn + (turn.runId ? " · run " + turn.runId.slice(0, 8) : "") + (turn.usage ? " · " + (turn.usage.inputTokens + turn.usage.outputTokens) + " tokens" : "") + (turn.historyOmitted ? " · " + turn.historyOmitted + " earlier exchange(s) left out" : ""),
       }));
@@ -435,7 +466,7 @@ function drawThread(thread) {
     thread.append(chatPending.lost
       ? message("agent", "This turn left no record. Check Runs for why it stopped.", { tone: "failed" })
       : chatPartial !== ""
-        ? message("agent", chatPartial, { tone: "agent", meta: "writing…" })
+        ? message("agent", chatPartial, { tone: "agent", markdown: true, meta: "writing…" })
         : message("agent", "Working…", { tone: "agent", meta: "waiting for the agent" }));
   }
 
