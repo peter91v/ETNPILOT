@@ -13,6 +13,13 @@ etnpilot content lock --root .
 git diff -- .etnpilot/content-lock.json
 ```
 
+See what you would be locking, before you lock it (`changed`, `added`, `removed`, with sizes; the text itself
+is `git diff` on the same paths; exits 1 when something differs):
+
+```bash
+etnpilot content diff --root .
+```
+
 Verify it without changing any file:
 
 ```bash

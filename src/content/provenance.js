@@ -105,6 +105,33 @@ export async function verifyProjectContent(root, config = {}, expected) {
   return evidence;
 }
 
+// What differs between the content on disk and the reviewed lock, file by file,
+// without failing: the question 'what would I be locking?'. The lock keeps
+// digests and sizes, not text, so a changed file is named with its size before
+// and after; the text itself is `git diff` on the same paths.
+export async function diffProjectContent(root, config = {}) {
+  const settings = normalizeContentProvenance(config, { defaultMode: "enforce" });
+  const snapshot = await captureProjectContent(root, settings);
+  const lockPath = resolveLockPath(root, settings.lockFile);
+  const serialized = await readSafeLock(lockPath, resolve(root)).catch((error) => {
+    if (error instanceof ContentProvenanceError) return undefined;
+    throw error;
+  });
+  if (serialized === undefined) return { locked: false, changed: [], added: snapshot.manifest.entries.map((entry) => ({ path: entry.path, bytes: entry.bytes })), removed: [], unchanged: 0 };
+  const locked = parseLock(serialized);
+  const lockedByPath = new Map(locked.entries.map((entry) => [entry.path, entry]));
+  const actualByPath = new Map(snapshot.manifest.entries.map((entry) => [entry.path, entry]));
+  return {
+    locked: true,
+    changed: snapshot.manifest.entries
+      .filter((entry) => lockedByPath.has(entry.path) && lockedByPath.get(entry.path).digest !== entry.digest)
+      .map((entry) => ({ path: entry.path, bytesBefore: lockedByPath.get(entry.path).bytes, bytesAfter: entry.bytes })),
+    added: snapshot.manifest.entries.filter((entry) => !lockedByPath.has(entry.path)).map((entry) => ({ path: entry.path, bytes: entry.bytes })),
+    removed: locked.entries.filter((entry) => !actualByPath.has(entry.path)).map((entry) => ({ path: entry.path, bytes: entry.bytes })),
+    unchanged: snapshot.manifest.entries.filter((entry) => lockedByPath.get(entry.path)?.digest === entry.digest).length,
+  };
+}
+
 export async function loadPinnedProjectContent(root, config = {}) {
   const settings = normalizeContentProvenance(config);
   const snapshot = await captureProjectContent(root, settings);

@@ -3,7 +3,7 @@ import { briefValue } from "../shared.js";
 import { describeSettings, diffSettings, parseSettingValue, setSetting, unsetSetting } from "../../config/settings.js";
 import { join, resolve } from "node:path";
 import { loadConfig } from "../../config/load.js";
-import { verifyProjectContent, writeContentLock } from "../../content/provenance.js";
+import { diffProjectContent, verifyProjectContent, writeContentLock } from "../../content/provenance.js";
 
 // The commands of one area. Each entry says which command line it answers
 // ('match') and what it does ('run'); src/cli/commands.js tries them in order.
@@ -58,6 +58,24 @@ export const configCommands = [
       const root = resolve(values.root);
       const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"));
       console.log(JSON.stringify(await writeContentLock(root, config), null, 2));
+    },
+  },
+  {
+    match: ({ command, subcommand }) => command === "content" && subcommand === "diff",
+    async run({ values }) {
+      const root = resolve(values.root);
+      const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"));
+      const diff = await diffProjectContent(root, config);
+      if (values.json) console.log(JSON.stringify(diff, null, 2));
+      else {
+        if (!diff.locked) console.log("There is no content lock yet; everything below would be locked by 'etnpilot content lock'.");
+        for (const entry of diff.changed) console.log(`changed  ${entry.path}  (${entry.bytesBefore} -> ${entry.bytesAfter} bytes)`);
+        for (const entry of diff.added) console.log(`added    ${entry.path}  (${entry.bytes} bytes)`);
+        for (const entry of diff.removed) console.log(`removed  ${entry.path}`);
+        const differs = diff.changed.length + diff.added.length + diff.removed.length;
+        console.log(differs === 0 ? `Nothing differs from the lock (${diff.unchanged} files).` : `${differs} file(s) differ, ${diff.unchanged} do not. The text: git diff -- ${[...diff.changed, ...diff.removed].map((entry) => entry.path).join(" ") || "<path>"}`);
+      }
+      return diff.changed.length + diff.added.length + diff.removed.length === 0 ? 0 : 1;
     },
   },
   {

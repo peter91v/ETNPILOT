@@ -15,6 +15,7 @@ pre-1.0, so breaking changes may appear in any release.
   one command (docs/providers.md). The settings writer gained a `project` scope for the committed file.
 - **`etnpilot gc`**: shows, and with `--apply` deletes, old sealed receipts and rotated telemetry (docs/maintenance.md).
 - Architecture decision records (docs/adr/), a release process (docs/releasing.md).
+- `etnpilot content diff`: what changed, was added or removed since the reviewed lock, before you lock it.
 - The run list can be filtered by text and status; a running run's card shows tokens and cost so far.
 - An axe-core accessibility test visits every view in both colour schemes (dev dependency).
 - The type check covers every file in `src/` (was 12), and a test keeps it that way (`docs/typecheck.md`).

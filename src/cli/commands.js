@@ -135,6 +135,7 @@ Usage:
   etnpilot smoke [--provider name] [--model id] [--skip key,reply,tools,stream,toolstream,forge] [--gitlab] [--json]
   etnpilot forge [--root directory] [--dry-run | --preview]
   etnpilot content lock [--root directory]
+  etnpilot content diff [--json] [--root directory]
   etnpilot content verify [--root directory]
   etnpilot webhook serve [--root directory] [--host address] [--port number]
   etnpilot ui [--root directory] [--host address] [--port number] [--no-open] [--rotate-token]
