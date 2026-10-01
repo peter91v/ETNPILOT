@@ -33,8 +33,11 @@ function showRunReadiness(readiness) {
   }
   banner.className = "banner";
   banner.hidden = false;
-  $("run-banner-title").textContent = readiness.code === "not-a-checkout" ? "This is not a git checkout" : "The project is not committed yet";
-  $("run-banner-text").textContent = readiness.message + " Commit it, or work in this directory instead.";
+  const titles = { "not-a-checkout": "This is not a git checkout", "content-not-locked": "Read the project content, then lock it" };
+  $("run-banner-title").textContent = titles[readiness.code] ?? "The project is not committed yet";
+  $("run-banner-text").textContent = readiness.message + ((readiness.fixes ?? []).includes("in-place")
+    ? " Commit it, or work in this directory instead."
+    : " Run the command below in the project's terminal, then start again.");
   $("run-banner-commands").textContent = (readiness.commands ?? []).join("\\n");
   $("run-copy").hidden = (readiness.commands ?? []).length === 0;
   $("run-inplace").hidden = !(readiness.fixes ?? []).includes("in-place");

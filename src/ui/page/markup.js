@@ -51,7 +51,7 @@ export const MARKUP = `</head>
         </div>
         <div class="page-actions" id="page-actions"></div>
       </div>
-      <p class="notice bad" id="error" hidden></p>
+      <div class="banner" id="error" role="alert" hidden></div>
       <section id="view-overview" class="view"></section>
       <section id="view-chat" class="view" hidden></section>
       <section id="view-approvals" class="view" hidden></section>

@@ -108,10 +108,19 @@ const VIEWS = [
 ];
 
 async function api(path, options = {}) {
-  const response = await fetch(path, {
-    ...options,
-    headers: { "x-etnpilot-token": TOKEN, ...(options.body ? { "content-type": "application/json" } : {}) },
-  });
+  let response;
+  try {
+    response = await fetch(path, {
+      ...options,
+      headers: { "x-etnpilot-token": TOKEN, ...(options.body ? { "content-type": "application/json" } : {}) },
+    });
+  } catch {
+    // The browser only says "Failed to fetch". What it means here is that the
+    // server this page came from is not answering.
+    const unreachable = new Error("ETNPilot is not answering.");
+    unreachable.network = true;
+    throw unreachable;
+  }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     // What the server said besides the sentence (a code, the ways out) stays
@@ -178,7 +187,18 @@ function toast(message, tone = "ok") {
 
 function fail(error) {
   const box = $("error");
-  box.textContent = error.message;
+  box.replaceChildren();
+  box.append(icon("M12 3l10 18H2z M12 10v4 M12 17.5v.01"));
+  const text = el("div", { class: "banner-text" }, error.network
+    ? [
+      el("p", { class: "banner-title", text: "ETNPilot is not answering" }),
+      el("p", { text: "This page cannot reach the server it came from (" + location.host + "). The server may have been stopped, or the phone ended the app in the background. Start it again with 'etnpilot ui'; this page reconnects by itself and keeps what you typed." }),
+    ]
+    : [el("p", { class: "banner-title", text: "Something went wrong" }), el("p", { text: error.message })]);
+  box.append(text);
+  if (error.network) {
+    box.append(el("div", { class: "banner-actions" }, [button("Try again now", { class: "btn tonal", onClick: () => refresh({ force: true }) })]));
+  }
   box.hidden = false;
 }
 

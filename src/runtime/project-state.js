@@ -4,6 +4,7 @@ import { compactSession, compactionCheck, createSessionId, listSessions, readSes
 import { resolveAttachments, summarizeAttachments } from "./chat-attachments.js";
 import { PolicyEngine } from "../policy/engine.js";
 import { git } from "../git/command.js";
+import { normalizeContentProvenance, verifyProjectContent } from "../content/provenance.js";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import YAML from "yaml";
@@ -1052,26 +1053,51 @@ function presentMergeRequest(mergeRequest) {
 }
 
 export async function checkRunReadiness({ root, config }) {
-  if (config?.workspace?.mode === "in-place") return { ready: true, workspace: "in-place" };
+  // Project content is pinned by a lock a person made after reading it. A run
+  // refuses content that has no lock or no longer matches it — so that is
+  // asked first, and answered with the command, not with the refusal.
+  let lock;
+  if (normalizeContentProvenance(config ?? {}).mode === "enforce") {
+    await verifyProjectContent(root, config).catch((error) => {
+      lock = { message: error.message.replace(/\s+Run 'etnpilot content lock'[^.]*\.?/i, "").trim() || error.message };
+    });
+  }
+  const lockCommand = "etnpilot content lock";
+  const commit = "git add .etnpilot && git commit -m \"Add ETNPilot configuration\"";
+
+  const inPlace = config?.workspace?.mode === "in-place";
+  const inside = inPlace ? true : await git(["rev-parse", "--is-inside-work-tree"], { cwd: root }).then((result) => result.stdout === "true", () => false);
   const baseRef = config?.git?.baseRef ?? "HEAD";
-  const inside = await git(["rev-parse", "--is-inside-work-tree"], { cwd: root }).then((result) => result.stdout === "true", () => false);
-  if (!inside) {
+  const committed = inPlace || !inside ? true : await git(["cat-file", "-e", `${baseRef}:.etnpilot/etnpilot.yaml`], { cwd: root }).then(() => true, () => false);
+
+  if (!inPlace && !inside) {
     return {
       ready: false,
       code: "not-a-checkout",
       message: "This directory is not a git checkout, and a run works in a git worktree.",
-      fixes: ["in-place"],
-      commands: ["git init", "git add .etnpilot && git commit -m \"Add ETNPilot configuration\""],
+      // Working in place does not need a checkout, but it does need the lock.
+      fixes: lock ? [] : ["in-place"],
+      commands: ["git init", ...(lock ? [lockCommand] : []), commit],
     };
   }
-  const committed = await git(["cat-file", "-e", `${baseRef}:.etnpilot/etnpilot.yaml`], { cwd: root }).then(() => true, () => false);
-  if (committed) return { ready: true, workspace: "worktree", baseRef };
-  return {
-    ready: false,
-    code: "project-not-committed",
-    baseRef,
-    message: `A run works in its own worktree, made from ${baseRef}, and ${baseRef} has no '.etnpilot/etnpilot.yaml' yet.`,
-    fixes: ["in-place"],
-    commands: ["git add .etnpilot && git commit -m \"Add ETNPilot configuration\""],
-  };
+  if (!committed) {
+    return {
+      ready: false,
+      code: "project-not-committed",
+      baseRef,
+      message: `A run works in its own worktree, made from ${baseRef}, and ${baseRef} has no '.etnpilot/etnpilot.yaml' yet.${lock ? ` Also: ${lock.message}` : ""}`,
+      fixes: lock ? [] : ["in-place"],
+      commands: [...(lock ? [lockCommand] : []), commit],
+    };
+  }
+  if (lock) {
+    return {
+      ready: false,
+      code: "content-not-locked",
+      message: lock.message,
+      fixes: [],
+      commands: [lockCommand, ...(inPlace ? [] : [commit.replace("Add ETNPilot configuration", "Lock ETNPilot content")])],
+    };
+  }
+  return { ready: true, workspace: inPlace ? "in-place" : "worktree", baseRef };
 }
