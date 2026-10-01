@@ -1,3 +1,5 @@
+import { acquireWorkspaceLease } from "./workspace-lease.js";
+import { commandEnvironment } from "./command-environment.js";
 import { randomUUID } from "node:crypto";
 import { access } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
@@ -42,7 +44,7 @@ const PROPOSALS_ROOT = ".etnpilot/proposals";
 // tells ETNPilot's own merge requests apart from everyone else's.
 export const RUN_BRANCH_PREFIX = "etnpilot/";
 
-export async function runProject({
+async function executeProject({
   root = process.cwd(),
   input,
   agent,
@@ -248,7 +250,7 @@ export async function runProject({
     });
   } catch (error) {
     codegraph?.graph.close();
-    mcp?.close();
+    await mcp?.close();
     await harness.close();
     // Setup never reached the workflow, so the run left no evidence worth
     // keeping. Remove the workspace instead of leaking a worktree per attempt.
@@ -369,7 +371,7 @@ export async function runProject({
       summary,
     });
     codegraph?.graph.close();
-    mcp?.close();
+    await mcp?.close();
     await harness.close();
     error.run = {
       runId,
@@ -432,7 +434,7 @@ export async function runProject({
   // The servers were only ever closed when a run failed. A run that succeeded
   // left every one of them running — invisible while a project configured
   // none, and a hung process on every run now that codegraph is one.
-  mcp?.close();
+  await mcp?.close();
   const observability = await finishTelemetry({
     telemetry,
     span: workflowSpan,
@@ -533,37 +535,8 @@ export async function runProject({
 // wrapper script. None of them carry credentials, which is what this list
 // keeps out; they come from the same shell that started the run, exactly as
 // PATH does.
-const DEFAULT_CHECK_ENV_ALLOW = Object.freeze([
-  "PATH",
-  "HOME",
-  "LANG",
-  "LC_ALL",
-  "TZ",
-  "TMPDIR",
-  "LD_PRELOAD",
-  "LD_LIBRARY_PATH",
-  "PREFIX",
-  "ANDROID_DATA",
-  "ANDROID_ROOT",
-]);
-
-// Checks execute code the agent just wrote. They inherit an allow-listed
-// environment so repository and provider credentials cannot be read by them.
-// Exported under its own name so a test can assert what a check inherits and
-// what it must not, without starting a run to find out.
-export const checkEnvironmentForTest = (env, config) => checkEnvironment(env, config);
-
-function checkEnvironment(env, config = {}) {
-  const extra = config.envAllow ?? [];
-  if (!Array.isArray(extra) || extra.some((name) => typeof name !== "string" || !/^[A-Z][A-Z0-9_]*$/.test(name))) {
-    throw new TypeError("checks.envAllow must contain uppercase environment variable names.");
-  }
-  const allow = new Set([...DEFAULT_CHECK_ENV_ALLOW, ...extra]);
-  const inherited = Object.fromEntries(
-    Object.entries(env).filter(([key, value]) => allow.has(key) && value !== undefined),
-  );
-  return { ...inherited, ...(config.env ?? {}), ETNPILOT_CHECK: "1" };
-}
+export const checkEnvironmentForTest = commandEnvironment;
+const checkEnvironment = commandEnvironment;
 
 async function resolveSandboxConfig(sandboxConfig, workspacePath) {
   if (sandboxConfig.enabled !== true || sandboxConfig.useDevcontainerImage !== true) return sandboxConfig;
@@ -1005,4 +978,13 @@ async function cleanupWorkspace({ policy, published, workspace, manager }) {
   const requested = policy === "on-success" || (policy === "after-publish" && published);
   if (!requested) return { requested: false, removed: false, reason: "retained-by-policy" };
   return { requested: true, ...await manager.removeIfClean(workspace.name) };
+}
+
+export async function runProject(options = {}) {
+  const root = resolve(options.root ?? process.cwd());
+  const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"), options.env ?? process.env);
+  const inPlace = options.worktree === false || (options.worktree === undefined && (options.inPlace || config.workspace?.mode === "in-place"));
+  const lease = inPlace && !options.workspaceLease ? await acquireWorkspaceLease(root, { sessionId: options.session?.id }) : undefined;
+  try { return await executeProject(options); }
+  finally { lease?.release(); }
 }

@@ -16,7 +16,8 @@
     "test": "node --test test/*.test.js",
     "check": "node scripts/check-syntax.mjs && node --test test/*.test.js",
     "etnpilot": "node bin/etnpilot.js",
-    "eval": "node bin/etnpilot.js eval"
+    "eval": "node bin/etnpilot.js eval",
+    "smoke:gitlab": "node scripts/gitlab-smoke.mjs"
   },
   "engines": {
     "node": ">=22.13"

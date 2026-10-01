@@ -1,6 +1,11 @@
 // The page's stylesheet: Material Design 3 tokens first, then components.
 // Below the token block there are no colour literals; see test/ui-material.test.js.
-export const STYLES = `  /* Material Design 3, implemented rather than approximated -------------
+export const STYLES = `
+.markdown p { margin: .4em 0; }
+.markdown pre { overflow-x: auto; white-space: pre; padding: .8em; border-radius: 8px; background: var(--surface-container); }
+.markdown code { font-family: monospace; }
+.markdown a { overflow-wrap: anywhere; }
+  /* Material Design 3, implemented rather than approximated -------------
      Tokens first: a colour scheme built from tonal palettes, the type
      scale, the shape scale, elevation, motion, and the state-layer
      opacities. Every rule below reads these; nothing hard-codes a colour.

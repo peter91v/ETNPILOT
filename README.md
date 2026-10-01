@@ -8,7 +8,8 @@ The repository is in early development. The first runnable vertical slice provid
 
 - a composable harness for providers, plugins, agents, and subagents;
 - a GitHub Copilot SDK provider that uses an existing Copilot login or token;
-- an OpenAI-compatible provider adapter;
+- OpenAI-compatible and Anthropic adapters with mediated tools, streaming, and per-request usage;
+- persistent chat across CLI, TUI, and the authenticated review page, with workspace leases and journal-based undo;
 - conservative approval policy hooks and proof-carrying JSONL receipts;
 - isolated Git worktrees without shell interpolation;
 - a client for self-hosted GitLab projects, branches, merge requests, notes, and pipelines;
@@ -25,7 +26,7 @@ The repository is in early development. The first runnable vertical slice provid
 - a versioned secret-provider API with policy-restricted environment and confined file backends.
 - deny-first policy-as-code for operation types, workspace paths, network hosts, and providers.
 - OTLP/HTTP traces with provider usage, configurable cost estimates, and workflow budgets.
-- one restricted worker process per plugin with bounded RPC, runtime, memory, and output.
+- one restricted worker process per plugin with bounded RPC, runtime, memory, and output, and fail-closed RSS monitoring.
 - an isolated OIDC/Vault secret-provider plugin with scoped secret and HTTPS grants.
 - reviewed SHA-256 pins and run provenance for agents, instructions, prompts, and skills.
 
@@ -631,3 +632,12 @@ Both repositories may keep their existing initial commits. Synchronization is pe
 ## Upstream
 
 The design starts from `peter91v/agentwerk` at commit `87ea7e669b8cc5b24462c297817eb8f139b3eeea`. See [UPSTREAM.md](UPSTREAM.md) and [docs/architecture.md](docs/architecture.md).
+
+## Review hardening
+
+[Review hardening](docs/review-hardening.md) records the implemented controls,
+configuration, regression coverage, and operational limits. Replay verifies an
+immutable, complete receipt before executing commands; `--inspect-only` runs no
+command. Workspace file tools authorize reads before generating diffs and reject
+changed files or parent paths after approval. Chat attachments needing human read
+approval are withheld; request `read_file` during the turn to obtain that approval.

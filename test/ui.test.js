@@ -270,7 +270,7 @@ test("a port open to the network is named as such, with an address that works th
     await loopback.close();
   }
 
-  const shared = await createReviewServer({ root });
+  const shared = await createReviewServer({ root, getNetworkInterfaces: () => ({ fixture: [{ address: "127.0.0.2", family: "IPv4", internal: false }] }) });
   try {
     const address = await shared.listen({ host: "0.0.0.0", port: 0 });
     // The link has to be one the other device can reach, and the caller has
@@ -279,7 +279,7 @@ test("a port open to the network is named as such, with an address that works th
     assert.doesNotMatch(address.url, /127\.0\.0\.1/);
     assert.match(address.url, /^http:\/\/[^/]+:\d+\/\?token=/);
     // It is the same server either way: the token still decides everything.
-    const base = address.url.slice(0, address.url.indexOf("/?token="));
+    const base = `http://127.0.0.1:${address.port}`;
     assert.equal((await fetch(`${base}/api/state`)).status, 401);
     assert.equal((await fetch(`${base}/api/state`, { headers: { "x-etnpilot-token": shared.token } })).status, 200);
   } finally {

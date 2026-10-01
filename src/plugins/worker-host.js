@@ -1,3 +1,5 @@
+import { createRssMeasurement } from "./process-memory.js";
+import { processGroupOptions, signalTree } from "../runtime/child-process.js";
 import { randomUUID } from "node:crypto";
 import { fork } from "node:child_process";
 import { readFile, stat } from "node:fs/promises";
@@ -34,6 +36,8 @@ export class PluginWorkerHost {
   #invocations = new Map();
   #limits;
   #memoryTimer;
+  #measureMemory;
+  #memoryChecking = false;
   #outputBytes = 0;
   #pending = new Map();
   #pluginName;
@@ -60,6 +64,8 @@ export class PluginWorkerHost {
       resources,
     });
     try {
+      await host.#checkMemory();
+      if (host.#fatalError) throw host.#fatalError;
       const manifest = await host.#request("inspect", {
         entryUrl: pathToFileURL(entryPath).href,
         sdkUrl: SDK_URL,
@@ -97,8 +103,10 @@ export class PluginWorkerHost {
       env: { NODE_NO_WARNINGS: "1" },
       execArgv,
       serialization: "json",
+      ...processGroupOptions(),
       stdio: ["ignore", "pipe", "pipe", "ipc"],
     });
+    this.#measureMemory = resources.measureMemory ?? createRssMeasurement(this.#child.pid);
     this.entryPath = entryPath;
     this.#exitPromise = new Promise((resolveExit) => {
       this.#child.once("exit", (code, signal) => {
@@ -131,6 +139,8 @@ export class PluginWorkerHost {
     this.#memoryTimer = setInterval(() => void this.#checkMemory(), limits.memoryPollIntervalMs);
     this.#memoryTimer.unref();
   }
+
+  get memoryMonitoring() { return this.#limits.memoryMonitoring; }
 
   get pluginName() {
     return this.#pluginName;
@@ -236,7 +246,7 @@ export class PluginWorkerHost {
         timer.unref?.();
       }),
     ]);
-    if (!exited && !this.#closed) this.#child.kill("SIGKILL");
+    if (!exited && !this.#closed) signalTree(this.#child, "SIGKILL");
     await this.#exitPromise;
   }
 
@@ -263,7 +273,10 @@ export class PluginWorkerHost {
     return new Promise((resolveRequest, rejectRequest) => {
       const onAbort = () => {
         const error = abortError(signal.reason);
+        const request = this.#pending.get(id);
         this.#pending.delete(id);
+        clearTimeout(request?.timer);
+        request?.cleanup();
         this.#terminate(error);
         rejectRequest(error);
       };
@@ -272,7 +285,9 @@ export class PluginWorkerHost {
           code: "plugin_timeout",
           plugin: this.#pluginName,
         });
+        const request = this.#pending.get(id);
         this.#pending.delete(id);
+        request?.cleanup();
         if (fatalOnTimeout) this.#terminate(error);
         rejectRequest(error);
       }, timeoutMs);
@@ -498,25 +513,21 @@ export class PluginWorkerHost {
   }
 
   async #checkMemory() {
-    if (this.#closed || !this.#child.pid) return;
+    if (this.#closed || this.#closing || this.#memoryChecking || this.#limits.memoryMonitoring === "heap-only") return;
+    this.#memoryChecking = true;
     try {
-      const status = await readFile(`/proc/${this.#child.pid}/status`, "utf8");
-      const rssKb = Number(/^VmRSS:\s+(\d+)\s+kB$/m.exec(status)?.[1]);
-      if (Number.isFinite(rssKb) && rssKb > this.#limits.memoryMb * 1024) {
-        this.#terminate(new PluginProcessError(
-          `Plugin process exceeded the ${this.#limits.memoryMb} MiB memory limit.`,
-          { code: "plugin_memory_limit", plugin: this.#pluginName },
-        ));
-      }
+      const rss = await this.#measureMemory();
+      if (!Number.isFinite(rss) || rss <= 0) throw new Error("Invalid RSS measurement.");
+      if (rss > this.#limits.memoryMb * 1024 * 1024) this.#terminate(new PluginProcessError(
+        `Plugin process exceeded the ${this.#limits.memoryMb} MiB memory limit.`,
+        { code: "plugin_memory_limit", plugin: this.#pluginName },
+      ));
     } catch (error) {
-      if (error.code !== "ENOENT" && error.code !== "EACCES") {
-        this.#terminate(new PluginProcessError("Plugin memory monitor failed.", {
-          code: "plugin_process_error",
-          plugin: this.#pluginName,
-          cause: error,
-        }));
-      }
-    }
+      if (!this.#closed && !this.#closing) this.#terminate(new PluginProcessError(
+        "Plugin RSS monitoring is unavailable; worker refused. Explicit heap-only mode limits V8 heap only.",
+        { code: "plugin_memory_monitor_unavailable", plugin: this.#pluginName, cause: error },
+      ));
+    } finally { this.#memoryChecking = false; }
   }
 
   #terminate(error) {
@@ -527,7 +538,7 @@ export class PluginWorkerHost {
     this.#disposeSubscriptions();
     for (const controller of this.#networkControllers) controller.abort();
     this.#networkControllers.clear();
-    this.#child.kill("SIGKILL");
+    signalTree(this.#child, "SIGKILL");
   }
 
   #rejectPending(error) {

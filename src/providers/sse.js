@@ -10,31 +10,42 @@ import { ProviderError } from "./router.js";
 // 'response.json()' would have returned — so tool calls, usage and the receipt
 // do not learn a second shape.
 
-export async function* readEvents(response) {
+export async function* readEvents(response, { signal, maxBytes = 16 * 1024 * 1024, maxEventBytes = 1024 * 1024 } = {}) {
   if (!response.body?.getReader) {
     throw new ProviderError("The provider sent no stream to read.", { code: "stream_missing", retryable: false, safeToRetry: false });
   }
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let bytes = 0;
+  const abort = () => { void reader.cancel(signal.reason).catch(() => {}); };
+  signal?.throwIfAborted();
+  signal?.addEventListener("abort", abort, { once: true });
   try {
     for (;;) {
       const { value, done } = await reader.read();
+      signal?.throwIfAborted();
       if (done) break;
+      bytes += value.byteLength;
+      if (bytes > maxBytes) throw new ProviderError("Provider stream byte limit exceeded.", { code: "stream_limit" });
       buffer += decoder.decode(value, { stream: true });
       let boundary = nextBoundary(buffer);
       while (boundary) {
+        if (boundary.index > maxEventBytes) throw new ProviderError("Provider stream event limit exceeded.", { code: "stream_limit" });
         const raw = buffer.slice(0, boundary.index);
         buffer = buffer.slice(boundary.index + boundary.length);
         const event = parseEvent(raw);
         if (event) yield event;
         boundary = nextBoundary(buffer);
       }
+      if (Buffer.byteLength(buffer) > maxEventBytes) throw new ProviderError("Provider stream event limit exceeded.", { code: "stream_limit" });
     }
     // Whatever is left has no blank line after it: by the SSE rules an event
     // is only complete once it does, so a stream cut mid-event ends without it
     // rather than delivering half a JSON object as though it were whole.
   } finally {
+    signal?.removeEventListener("abort", abort);
+    await reader.cancel().catch(() => {});
     reader.releaseLock?.();
   }
 }
@@ -74,10 +85,10 @@ function parseJson(text, what) {
 // message_delta with the stop reason and the final output count.
 // 'onDelta' hears each piece of answer text as it arrives; the return value is
 // still the whole message, so nothing downstream depends on it being called.
-export async function collectAnthropicStream(response, { onDelta } = {}) {
+export async function collectAnthropicStream(response, { onDelta, onUsage, signal } = {}) {
   const message = { content: [], usage: {} };
   const blocks = [];
-  for await (const { event, data } of readEvents(response)) {
+  for await (const { event, data } of readEvents(response, { signal })) {
     if (!data || event === "ping") continue;
     const payload = parseJson(data, `a '${event}' event`);
     const type = payload.type ?? event;
@@ -85,7 +96,9 @@ export async function collectAnthropicStream(response, { onDelta } = {}) {
       const start = payload.message ?? {};
       Object.assign(message, { ...start, content: [] });
       message.usage = { ...(start.usage ?? {}) };
+      onUsage?.(message.usage, message.model);
     } else if (type === "content_block_start") {
+      if (!Number.isInteger(payload.index) || payload.index < 0 || payload.index >= 256) throw new ProviderError("Invalid stream block index.", { code: "stream_protocol" });
       blocks[payload.index] = { ...payload.content_block };
       if (blocks[payload.index].type === "tool_use") blocks[payload.index]._json = "";
     } else if (type === "content_block_delta") {
@@ -110,6 +123,7 @@ export async function collectAnthropicStream(response, { onDelta } = {}) {
     } else if (type === "message_delta") {
       Object.assign(message, payload.delta ?? {});
       message.usage = { ...message.usage, ...(payload.usage ?? {}) };
+      onUsage?.(message.usage, message.model);
     } else if (type === "error") {
       const kind = payload.error?.type ?? "error";
       // 'overloaded_error' is the API asking for a retry, mid-stream.
@@ -134,7 +148,7 @@ export async function collectAnthropicStream(response, { onDelta } = {}) {
 
 // OpenAI-compatible: chat.completion.chunk objects, tool calls arriving in
 // pieces keyed by index, and a final chunk with usage when asked for.
-export async function collectChatStream(response, { onDelta } = {}) {
+export async function collectChatStream(response, { onDelta, onUsage, signal } = {}) {
   const message = { role: "assistant", content: "" };
   const calls = [];
   let finish;
@@ -142,7 +156,7 @@ export async function collectChatStream(response, { onDelta } = {}) {
   let model;
   let id;
   let sawDone = false;
-  for await (const { data } of readEvents(response)) {
+  for await (const { data } of readEvents(response, { signal })) {
     if (data === "[DONE]") {
       sawDone = true;
       break;
@@ -159,6 +173,7 @@ export async function collectChatStream(response, { onDelta } = {}) {
     model = chunk.model ?? model;
     id = chunk.id ?? id;
     usage = chunk.usage ?? usage;
+    if (chunk.usage) onUsage?.(usage, model);
     const choice = chunk.choices?.[0];
     if (!choice) continue;
     const delta = choice.delta ?? {};
@@ -167,6 +182,7 @@ export async function collectChatStream(response, { onDelta } = {}) {
       if (delta.content !== "") onDelta?.(delta.content);
     }
     for (const piece of delta.tool_calls ?? []) {
+      if (!Number.isInteger(piece.index ?? 0) || (piece.index ?? 0) < 0 || (piece.index ?? 0) >= 256) throw new ProviderError("Invalid stream tool index.", { code: "stream_protocol" });
       const call = calls[piece.index ?? 0] ??= { id: undefined, type: "function", function: { name: "", arguments: "" } };
       call.id = piece.id ?? call.id;
       call.function.name += piece.function?.name ?? "";

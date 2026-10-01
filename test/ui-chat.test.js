@@ -1,3 +1,5 @@
+import { digestBytes } from "../src/runtime/workspace-files.js";
+import { basename } from "node:path";
 import assert from "node:assert/strict";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -33,7 +35,10 @@ function provider(seen, behaviour = {}) {
           const decision = await context.approve({ kind: "shell", fullCommandText: "npm run build" });
           if (decision.kind !== "approve-once") throw new Error("refused");
         }
-        if (behaviour.make) await writeFile(behaviour.make, "x");
+        if (behaviour.make) {
+          await writeFile(behaviour.make, "x");
+          await context.recordFileEffect({ path: basename(behaviour.make), before: null, after: digestBytes(Buffer.from("x")) });
+        }
         if (behaviour.hang) await new Promise((resolve, reject) => context.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true }));
         return { text: `answer ${seen.length}`, model: "m" };
       },

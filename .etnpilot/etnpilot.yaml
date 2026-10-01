@@ -184,6 +184,7 @@ pluginIsolation:
   maxMessageBytes: 1048576
   maxPendingRequests: 32
   memoryPollIntervalMs: 100
+  memoryMonitoring: required
 
 plugins: []
 

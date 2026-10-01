@@ -87,3 +87,10 @@ served stale. The Dockerfile and its context must stay inside the project.
 Every sandboxed check records the runtime, image, network mode, and the
 declared command alongside the wrapped one, so a reviewer can see both what was
 asked for and what actually ran.
+
+Each sandbox command has a unique owned container name and label. Completion,
+abort, timeout, and output overflow kill its runtime client process group and then
+issue a bounded `rm --force` for that container. Cleanup failures are reported.
+Host commands also use a combined output-byte ceiling, timeout, signal handling,
+and POSIX process-group cleanup. Programs that deliberately leave the group and
+Windows descendants require container containment.

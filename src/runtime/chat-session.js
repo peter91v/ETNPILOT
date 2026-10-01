@@ -1,10 +1,13 @@
+import { readRegularFile } from "./bounded-io.js";
+import { acquireWorkspaceLease } from "./workspace-lease.js";
+import { undoFileEffects } from "./file-effects.js";
 import { randomBytes } from "node:crypto";
-import { appendFile, mkdir, readFile, readdir } from "node:fs/promises";
+import { appendFile, mkdir, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { loadConfig } from "../config/load.js";
 import { boundHistory } from "../core/history.js";
 import { composeTurnInput, summarizeAttachments } from "./chat-attachments.js";
-import { pinSnapshot, snapshotTree, undoBetween } from "./chat-snapshots.js";
+import { pinSnapshot, snapshotTree } from "./chat-snapshots.js";
 
 // A conversation, kept as the receipts of its turns.
 //
@@ -49,7 +52,7 @@ export async function readSession(root, sessionId) {
   assertId(sessionId);
   let text;
   try {
-    text = await readFile(join(sessionsDirectory(root), `${sessionId}.jsonl`), "utf8");
+    text = await readRegularFile(join(sessionsDirectory(root), `${sessionId}.jsonl`), 16 * 1024 * 1024).then((bytes) => bytes.toString("utf8"));
   } catch (error) {
     if (error.code === "ENOENT") return { id: sessionId, exists: false, turns: [], compactions: [] };
     throw error;
@@ -137,14 +140,21 @@ export function historyFrom(turns, compactions = []) {
 
 // What the run cost in tokens, from the result the provider returned.
 export function usageOf(outcome) {
+  if (outcome?.observability?.summary) return outcome.observability.summary;
+  let total;
+  const models = new Set();
   for (const step of Object.values(outcome?.summary?.steps ?? {})) {
-    const result = step?.result?.result ?? step?.result;
-    const usage = result?.usage;
-    if (usage && (usage.inputTokens || usage.outputTokens)) {
-      return { inputTokens: usage.inputTokens ?? 0, outputTokens: usage.outputTokens ?? 0, ...(result.model ? { model: result.model } : {}) };
+    const result = step?.result?.result ?? step?.result ?? step?.partialResult;
+    const usage = result?.usage ?? step?.usage ?? step?.result?.partialResult?.usage;
+    if (!usage) continue;
+    total ??= { inputTokens: 0, outputTokens: 0 };
+    for (const key of ["inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens", "requests", "providerUnits"]) {
+      if (Number.isFinite(usage[key])) total[key] = (total[key] ?? 0) + usage[key];
     }
+    if (result?.model) models.add(result.model);
+    if (["partial", "unknown"].includes(usage.usageStatus)) total.usageStatus = "partial";
   }
-  return undefined;
+  return total && { ...total, ...(models.size === 1 ? { model: [...models][0] } : {}) };
 }
 
 // What the agent did this turn, in one line each: the tool and what it was asked
@@ -200,7 +210,7 @@ export function replyOf(outcome) {
   return undefined;
 }
 
-export async function runChatTurn({
+async function runChatTurnUnlocked({
   root,
   sessionId,
   text,
@@ -228,6 +238,12 @@ export async function runChatTurn({
   const before = dryRun ? undefined : await snapshotTree(root).catch(() => undefined);
   if (before) await pinSnapshot(root, before, `${id}/${number}-before`).catch(() => {});
 
+  const effects = new Map();
+  const recordFileEffect = (effect) => {
+    const previous = effects.get(effect.path);
+    if (previous && previous.after !== effect.before) throw new Error("File changed between this turn’s writes; undo attribution is unavailable.");
+    effects.set(effect.path, { ...effect, ...(previous ? { before: previous.before, beforeContent: previous.beforeContent } : {}) });
+  };
   let outcome;
   try {
     outcome = await run({
@@ -238,6 +254,7 @@ export async function runChatTurn({
       // boundary; a worktree per sitting would take the immediacy out of it.
       worktree: false,
       ...runOptions,
+      metadata: { ...runOptions.metadata, recordFileEffect },
       session: { id, turn: number, history: bounded.history, attachments: summarizeAttachments(attachments) },
     });
   } catch (error) {
@@ -249,6 +266,8 @@ export async function runChatTurn({
       ...(attachments.length > 0 ? { attachments: summarizeAttachments(attachments) } : {}),
       status: "failed",
       error: error.message,
+      ...(usageOf({ observability: error.run?.observability, summary: error.workflow }) || error.usage || error.accounting
+        ? { usage: usageOf({ observability: error.run?.observability, summary: error.workflow }) ?? error.usage ?? error.accounting } : {}),
       ...(error.run?.runId ? { runId: error.run.runId } : {}),
     });
     throw error;
@@ -267,6 +286,7 @@ export async function runChatTurn({
     status,
     ...(usageOf(outcome) ? { usage: usageOf(outcome) } : {}),
     ...(callsOf(outcome).length > 0 ? { calls: callsOf(outcome) } : {}),
+    fileEffects: [...effects.values()],
     snapshots: before && after ? { before, after } : { unavailable: dryRun ? "a dry run" : "not a git repository" },
     ...(reply !== undefined ? { reply } : {}),
     ...(bounded.omitted > 0 ? { historyOmitted: bounded.omitted } : {}),
@@ -318,7 +338,7 @@ export async function verifySession(root, sessionId, { verifyReceipt, readEntrie
 
 // Takes back the file changes of the newest turn that has not been taken back.
 // Reports what it reverted and what it left, and why.
-export async function undoLastTurn({ root, sessionId, now = () => new Date() }) {
+async function undoLastTurnUnlocked({ root, sessionId, now = () => new Date() }) {
   if (!sessionId) return { ok: false, message: "There is no conversation yet, so nothing to undo." };
   const { turns } = await readSession(root, sessionId);
   const turn = [...turns].reverse().find((entry) => entry.status === "succeeded" && !entry.undone);
@@ -326,10 +346,11 @@ export async function undoLastTurn({ root, sessionId, now = () => new Date() }) 
   if (!turn.snapshots?.before) {
     return { ok: false, message: `Turn ${turn.turn} cannot be undone: no snapshot was taken (${turn.snapshots?.unavailable ?? "an older turn"}).` };
   }
-  const result = await undoBetween(root, turn.snapshots.before, turn.snapshots.after);
+  if (!Array.isArray(turn.fileEffects)) return { ok: false, message: `Turn ${turn.turn} has no attributed file journal; review its changes manually.` };
+  const result = await undoFileEffects(root, turn.fileEffects);
   await appendTurn(root, sessionId, { type: "undo", turn: turn.turn, at: now().toISOString(), ...result });
   const lines = [];
-  if (turn.snapshots.before === turn.snapshots.after) lines.push(`Turn ${turn.turn} changed no files, so there was nothing to take back.`);
+  if (turn.fileEffects.length === 0) lines.push(`Turn ${turn.turn} changed no files, so there was nothing to take back.`);
   else lines.push(`Turn ${turn.turn}: ${result.reverted.length} file${result.reverted.length === 1 ? "" : "s"} put back${result.reverted.length ? ` (${result.reverted.join(", ")})` : ""}.`);
   for (const file of result.skipped) lines.push(`  left ${file.path}: ${file.reason}`);
   return { ok: true, turn: turn.turn, ...result, message: lines.join("\n") };
@@ -359,7 +380,7 @@ export async function compactionCheck(root, sessionId) {
   return { ok: true, prior, covered, fresh };
 }
 
-export async function compactSession({ root, sessionId, agent, runner, now = () => new Date(), ...runOptions } = {}) {
+async function compactSessionUnlocked({ root, sessionId, agent, runner, now = () => new Date(), ...runOptions } = {}) {
   const check = await compactionCheck(root, sessionId);
   if (!check.ok) return check;
   const { prior, covered, fresh } = check;
@@ -382,4 +403,22 @@ export async function compactSession({ root, sessionId, agent, runner, now = () 
   }
   await appendTurn(root, sessionId, { type: "compact", at: now().toISOString(), upToTurn, turns: fresh.length, runId: outcome.runId, summary: summary.trim(), ...(usageOf(outcome) ? { usage: usageOf(outcome) } : {}) });
   return { ok: true, upToTurn, summary: summary.trim(), runId: outcome.runId, message: `Turns ${covered + 1}–${upToTurn} are now carried as a summary (${summary.trim().length} characters). The turns themselves are unchanged on disk.` };
+}
+
+export async function runChatTurn(options = {}) {
+  const lease = options.workspaceLease ?? await acquireWorkspaceLease(options.root, { sessionId: options.sessionId });
+  try { return await runChatTurnUnlocked({ ...options, workspaceLease: lease }); }
+  finally { lease.release(); }
+}
+
+export async function undoLastTurn(options = {}) {
+  const lease = options.workspaceLease ?? await acquireWorkspaceLease(options.root, { sessionId: options.sessionId });
+  try { return await undoLastTurnUnlocked({ ...options, workspaceLease: lease }); }
+  finally { lease.release(); }
+}
+
+export async function compactSession(options = {}) {
+  const lease = options.workspaceLease ?? await acquireWorkspaceLease(options.root, { sessionId: options.sessionId });
+  try { return await compactSessionUnlocked({ ...options, workspaceLease: lease }); }
+  finally { lease.release(); }
 }

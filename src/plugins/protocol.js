@@ -20,6 +20,7 @@ export const DEFAULT_PLUGIN_LIMITS = Object.freeze({
   maxMessageBytes: 1024 * 1_024,
   maxPendingRequests: 32,
   memoryPollIntervalMs: 100,
+  memoryMonitoring: "required",
 });
 
 export class PluginProcessError extends Error {
@@ -34,11 +35,13 @@ export class PluginProcessError extends Error {
 export function normalizePluginLimits(value = {}, defaults = DEFAULT_PLUGIN_LIMITS) {
   if (!isPlainObject(value)) throw new TypeError("Plugin isolation limits must be an object.");
   for (const name of Object.keys(value)) {
-    if (!Object.hasOwn(INTEGER_LIMITS, name)) {
+    if (!Object.hasOwn(INTEGER_LIMITS, name) && name !== "memoryMonitoring") {
       throw new TypeError(`Unsupported plugin isolation limit '${name}'.`);
     }
   }
-  const normalized = {};
+  const mode = value.memoryMonitoring ?? defaults.memoryMonitoring ?? "required";
+  if (!["required", "heap-only"].includes(mode)) throw new TypeError("Plugin memoryMonitoring must be required or heap-only.");
+  const normalized = { memoryMonitoring: mode };
   for (const [name, [minimum, maximum]] of Object.entries(INTEGER_LIMITS)) {
     const candidate = value[name] ?? defaults[name];
     if (!Number.isSafeInteger(candidate) || candidate < minimum || candidate > maximum) {

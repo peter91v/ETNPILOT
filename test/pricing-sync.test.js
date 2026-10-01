@@ -13,7 +13,7 @@ const catalog = {
     { id: "x/free", pricing: { prompt: "-1", completion: "0" } },
   ],
 };
-const answer = (body, ok = true) => async () => ({ ok, status: ok ? 200 : 500, json: async () => body });
+const answer = (body, ok = true) => async () => new Response(JSON.stringify(body), { status: ok ? 200 : 500, headers: { "content-type": "application/json" } });
 const config = { observability: { pricing: { autoUpdate: true } } };
 
 test("catalog prices become per-million rates, bad rows are skipped", () => {
@@ -29,8 +29,8 @@ test("a model the table lacks is priced after a refresh, and the built-in table 
   assert.equal(knownPriceForModel("gpt-7-nova"), undefined);
   const result = await refreshPricing({ root, config, fetchImpl: answer(catalog) });
   assert.equal(result.used, "network");
-  assert.equal(knownPriceForModel("gpt-7-nova").inputPerMillion, 3);
-  assert.equal(knownPriceForModel("gpt-7-nova-2026-10-01").outputPerMillion, 12);
+  assert.equal(knownPriceForModel("gpt-7-nova", { root }).inputPerMillion, 3);
+  assert.equal(knownPriceForModel("gpt-7-nova-2026-10-01", { root }).outputPerMillion, 12);
   // Checked by hand beats fetched.
   useLearnedRates({ "gpt-5-4": { inputPerMillion: 999, outputPerMillion: 999 } });
   assert.equal(knownPriceForModel("gpt-5.4").inputPerMillion, 2.5);

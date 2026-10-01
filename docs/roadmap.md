@@ -82,22 +82,22 @@ Every surface should be able to do everything; none of them is the junior one.
 - [x] Local settings layer: a user's changes stay local, only defaults are committed
 - [x] Editing settings, policy included, from the TUI
 - [x] Starting a run from the TUI, deciding its approvals in the same window
-- [ ] Editing settings from the page and the app
-- [ ] Starting a run from the page and the app
+- [x] Editing settings from the page and the app
+- [x] Starting a run from the page and the app
 - [ ] The remaining CLI commands from every surface
 
 The surfaces have a roadmap of their own, with exact steps, file paths and
 acceptance criteria: [roadmap-ui.md](roadmap-ui.md). That one is now finished
 apart from two items it names.
 
-## M8 — The agent itself (next)
+## M8 — The agent itself (implemented; integration validation continues)
 
-The surfaces show an agent that can do less than the tools it is modelled on.
-[roadmap-agent.md](roadmap-agent.md) is the critical read-through of the
-project and the plan from it, measured against Claude Code: what to take, what
-to adapt, and what would be wrong here. Its first two phases — the agent can
-search and edit rather than rewrite whole files, and it stops paying for the
-same context twice — are the difference between 'runs' and 'usable'.
+Search and exact edits, context compaction and cache accounting, persistent chat,
+streaming, delegation, skills, MCP, and shared surface controls are implemented.
+[roadmap-agent.md](roadmap-agent.md) retains their acceptance criteria.
+[review-hardening.md](review-hardening.md) records the next security and operational
+controls now implemented. A complete real OpenAI workflow was recorded on
+2026-09-30; publishing against a real GitLab instance remains unverified.
 
 ## Brainstorming backlog
 

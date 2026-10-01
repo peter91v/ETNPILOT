@@ -253,8 +253,8 @@ test("mentions, directories, binary files, limits, and a file that tries to clos
   assert.match(byPath.lib.content, /one\.js/);
   assert.equal(byPath["big.txt"].truncated, true);
   assert.equal(byPath["big.txt"].content.length, 50);
-  // The digest names the whole file, not the part that was sent.
-  assert.equal(byPath["big.txt"].digest, createHash("sha256").update("x".repeat(200)).digest("hex"));
+  // The digest names the bounded text sent to the model.
+  assert.equal(byPath["big.txt"].digest, createHash("sha256").update("x".repeat(50)).digest("hex"));
   assert.match(result.refused[0].reason, /binary/);
 
   // Whatever the file says, it cannot end the envelope early.
