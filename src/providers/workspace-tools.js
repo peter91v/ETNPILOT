@@ -1,3 +1,4 @@
+// @ts-check
 import { workspaceFile } from "../runtime/workspace-files.js";
 import { readResponseBytes, utf8Prefix, cancelBody } from "../runtime/bounded-io.js";
 import { searchLines } from "./search-worker-host.js";
@@ -403,7 +404,7 @@ async function readWorkspaceFile(root, bounds, args, context) {
   if (decision.kind !== "approve-once") return denied(decision);
   try {
     const file = await workspaceFile(root, path.relative, { maxBytes: bounds.maxFileBytes });
-    try { return { ok: true, path: path.relative, content: file.bytes.toString("utf8") }; }
+    try { return { ok: true, path: path.relative, content: /** @type {Buffer} */ (file.bytes).toString("utf8") }; }
     finally { await file.close(); }
   } catch (error) {
     return { ok: false, error: describe(error) };
@@ -589,7 +590,7 @@ async function editWorkspaceFile(root, bounds, args, context) {
   if (readDecision.kind !== "approve-once") return denied(readDecision);
   const file = await workspaceFile(root, path.relative, { maxBytes: bounds.maxFileBytes });
   try {
-    const before = file.bytes.toString("utf8");
+    const before = /** @type {Buffer} */ (file.bytes).toString("utf8");
     const occurrences = countOccurrences(before, args.old_string);
     if (occurrences === 0) {
       // The most common failure, and the one worth explaining: the model is

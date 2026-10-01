@@ -1,3 +1,4 @@
+// @ts-check
 import { swallow } from "./swallow.js";
 import { join, resolve } from "node:path";
 import { loadConfig } from "../config/load.js";
@@ -54,7 +55,7 @@ const CHECKS = Object.freeze([
         summary: rows.length === 0
           ? "no providers configured"
           : `${rows.length - denied.length} of ${rows.length} allowed`,
-        findings: rows.map((row) => ({
+        findings: rows.map((/** @type {any} */ row) => ({
           label: row.name,
           text: row.allowed === false
             ? `denied by ${row.rule ? `rule '${row.rule}'` : "the section default"}`

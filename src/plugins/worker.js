@@ -1,3 +1,4 @@
+// @ts-check
 import rawProcess from "node:process";
 import { register } from "node:module";
 import { randomUUID } from "node:crypto";
@@ -33,7 +34,7 @@ rawProcess.on("message", (message) => {
     safeSend({
       v: PLUGIN_PROTOCOL_VERSION,
       type: "response",
-      id: typeof message?.id === "string" ? message.id : "invalid",
+      id: typeof /** @type {any} */ (message)?.id === "string" ? /** @type {any} */ (message).id : "invalid",
       ok: false,
       error: serializeError(error),
     });

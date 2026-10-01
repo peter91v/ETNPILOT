@@ -1,3 +1,4 @@
+// @ts-check
 // Terminal primitives as plain strings. Nothing here touches a real terminal,
 // so the renderers built on it stay pure and testable without a TTY.
 
@@ -93,7 +94,7 @@ export function since(iso, now = Date.now()) {
   const seconds = Math.round((now - time) / 1000);
   const ago = seconds >= 0;
   const magnitude = Math.abs(seconds);
-  for (const [suffix, size] of [["d", 86_400], ["h", 3600], ["m", 60]]) {
+  for (const [suffix, size] of /** @type {Array<[string, number]>} */ ([["d", 86_400], ["h", 3600], ["m", 60]])) {
     if (magnitude >= size) return `${Math.floor(magnitude / size)}${suffix}${ago ? "" : " ahead"}`;
   }
   return magnitude < 5 ? "now" : `${magnitude}s${ago ? "" : " ahead"}`;
@@ -105,7 +106,7 @@ export function until(iso, now = Date.now()) {
   if (Number.isNaN(time)) return "—";
   const seconds = Math.round((time - now) / 1000);
   if (seconds <= 0) return "expired";
-  for (const [suffix, size] of [["d", 86_400], ["h", 3600], ["m", 60]]) {
+  for (const [suffix, size] of /** @type {Array<[string, number]>} */ ([["d", 86_400], ["h", 3600], ["m", 60]])) {
     if (seconds >= size) return `${Math.floor(seconds / size)}${suffix}`;
   }
   return `${seconds}s`;

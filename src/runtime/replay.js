@@ -1,3 +1,4 @@
+// @ts-check
 import { resolve } from "node:path";
 import { runCheck } from "../checks/runner.js";
 import { verifyReceiptText } from "../core/receipt-store.js";
@@ -24,7 +25,7 @@ export async function replayRun(receiptPath, {
   const path = resolve(receiptPath);
   const content = (await readRegularFile(path, 16 * 1024 * 1024, { signal })).toString("utf8");
   const verification = verifyReceiptText(content, { verifiers, requireSignatures, requireTerminal });
-  if (!verification.valid) return { receipt: path, receiptValid: false, receiptReason: verification.reason, checks: [], drifted: [], replayable: false };
+  if (!verification.valid) return { receipt: path, receiptValid: false, receiptReason: /** @type {any} */ (verification).reason, checks: [], drifted: [], replayable: false };
   const entries = readEntries(content);
   const config = await loadConfig(join(resolve(root), ".etnpilot/etnpilot.yaml"), env).catch((error) => { if (error.code === "ENOENT") return {}; throw error; });
   const passedEnv = commandEnvironment(env, config.checks);
@@ -69,7 +70,7 @@ export async function replayRun(receiptPath, {
     mode: terminal.mode ?? "execute",
     recordedStatus: terminal.status,
     receiptValid: verification.valid,
-    ...(verification.valid ? {} : { receiptReason: verification.reason }),
+    ...(verification.valid ? {} : { receiptReason: /** @type {any} */ (verification).reason }),
     workspace: resolve(root),
     // What the record says a human allowed, and what the providers were asked.
     approvals: agents.flatMap(([id, state]) => (state.result.approvals ?? []).map((approval) => ({

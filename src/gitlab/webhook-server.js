@@ -1,3 +1,4 @@
+// @ts-check
 import { createServer } from "node:http";
 import { join, resolve } from "node:path";
 import { loadConfig } from "../config/load.js";
@@ -185,7 +186,7 @@ export async function createGitLabWebhookServer({
         });
       }
       queueWorker.wake();
-      return json(response, 202, { accepted: true, deliveryId, jobId: queued.job.id });
+      return json(response, 202, { accepted: true, deliveryId, jobId: queued.job?.id });
     } catch (error) {
       const status = error.statusCode ?? 500;
       if (status >= 500) onError(error);

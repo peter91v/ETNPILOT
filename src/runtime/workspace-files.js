@@ -1,3 +1,4 @@
+// @ts-check
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, mkdir, open, opendir, realpath, unlink } from "node:fs/promises";
@@ -49,7 +50,7 @@ export async function workspaceFile(root, name, { maxBytes, missing = false, tru
       parentPath = nextPath;
       parents.push({ path: nextPath, details: named });
     }
-    const source = () => anchor ? `${anchor}/${parent.fd}/${leaf}` : join(parentPath, leaf);
+    const source = () => anchor ? `${anchor}/${parent.fd}/${leaf}` : join(/** @type {string} */ (parentPath), /** @type {string} */ (leaf));
     async function assertParents() {
       for (const entry of parents) {
         const now = await lstat(entry.path);
@@ -67,7 +68,7 @@ export async function workspaceFile(root, name, { maxBytes, missing = false, tru
       try {
         const details = await handle.stat();
         if (details.nlink > 1) throw new Error("Hard-linked workspace files are not supported.");
-        const named = await lstat(join(parentPath, leaf));
+        const named = await lstat(join(/** @type {string} */ (parentPath), /** @type {string} */ (leaf)));
         if (named.isSymbolicLink() || !same(named, details)) throw new Error("Workspace file changed while opening it.");
         const bytes = await readHandle(handle, maxBytes, { truncate });
         const after = await handle.stat();
@@ -98,7 +99,7 @@ export async function workspaceFile(root, name, { maxBytes, missing = false, tru
       async remove() {
         if (!anchor || before.bytes === undefined) throw new Error("Secure removal requires an existing anchored file.");
         const current = await snapshot();
-        if (!same(current.details, before.details) || !current.bytes.equals(before.bytes)) throw new Error("Workspace file changed; request a new approval.");
+        if (!same(current.details, before.details) || !/** @type {Buffer} */ (current.bytes).equals(before.bytes)) throw new Error("Workspace file changed; request a new approval.");
         await assertParents();
         await unlink(source());
       },

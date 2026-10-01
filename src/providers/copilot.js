@@ -1,3 +1,4 @@
+// @ts-check
 import { ProviderError } from "./router.js";
 
 // The SDK keeps its runtime in per-platform packages and GitHub publishes them
@@ -23,6 +24,7 @@ export function copilotSdkAdvice(platform = process.platform, arch = process.arc
 }
 
 export function createCopilotProvider(options = {}) {
+  // @ts-ignore -- an optional dependency: it is not installed everywhere
   const importer = options.importer ?? (() => import("@github/copilot-sdk"));
 
   return {

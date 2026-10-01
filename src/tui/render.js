@@ -1,3 +1,4 @@
+// @ts-check
 import { renderChat } from "./render-chat.js";
 import { createStyle, displayWidth, duration, pad, padStart, shortId, since, truncate, until } from "./ansi.js";
 
@@ -640,7 +641,7 @@ function mergeTone(entry) {
   return entry.mergeStatus === "mergeable" ? "ok" : "muted";
 }
 
-function table(rows, columns, { style, width, height, cursor }) {
+function table(rows, columns, { style, width, height, cursor } = /** @type {any} */ ({})) {
   const heading = columns.map((column) => style.dim(pad(column.label, column.width))).join(" ");
   const lines = [`  ${heading}`];
   const visibleRows = Math.max(1, height - 1);
@@ -872,7 +873,7 @@ function renderRunDetail(state, { style, width, height, cursor, receipt, verific
 
 function renderHelp({ style, width, height, offset = 0 }) {
   const sections = HELP_SECTIONS;
-  const render = ([title, keys], columnWidth) => [
+  const render = (/** @type {any} */ [title, keys], columnWidth) => [
     style.dim(title),
     ...keys.map(([key, label]) => truncate(`  ${style.accent(pad(key, 10))} ${style.ink(label)}`, columnWidth)),
     "",

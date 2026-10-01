@@ -1,3 +1,4 @@
+// @ts-check
 import { compactConversation } from "./compaction.js";
 import { ProviderError } from "./router.js";
 import { withRetry } from "./retry.js";
@@ -47,7 +48,7 @@ export async function runResponsesTurn({
   const toolCalls = [];
   const retried = [];
   const compactions = [];
-  const { reasoning_effort: configuredEffort, ...passthrough } = extraBody;
+  const { reasoning_effort: configuredEffort, ...passthrough } = /** @type {any} */ (extraBody);
   const effort = context.agent.effort ?? configuredEffort;
   let responseModel;
   let payload;

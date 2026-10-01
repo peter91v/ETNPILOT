@@ -243,9 +243,9 @@ fremde Hosts, Zufallstests (`test/fuzz.test.js`), `CODEOWNERS`, PR-Vorlage mit �
 Danach ebenfalls erledigt: Benachrichtigung bei offener Genehmigung (`approval.notify`), Provider-Presets
 (`provider add`), `etnpilot gc`, ADRs (`docs/adr/`), Release-Prozess (`docs/releasing.md`), deutsche Kurzfassung
 (`README.de.md`), Filter und Suche in der Lauf-Liste, laufende Kosten in der Karte eines laufenden Laufs,
-axe-core-Test über alle Ansichten in hell und dunkel (er fand eine Tabellenüberschrift ohne Text; behoben).
+Typprüfung jetzt für alle Dateien in `src/`, axe-core-Test über alle Ansichten in hell und dunkel (er fand eine Tabellenüberschrift ohne Text; behoben).
 
 Weiter offen: Lauf fortsetzen nach Abbruch, Inhaltsdiff beim Content-Lock, Erste-Schritte-Checkliste in der
 Oberfläche, Übersetzung der Oberfläche, optionaler Schlüsselbund, Gültigkeitszeitraum für Signaturschlüssel,
-aufgezeichnete Live-Fixtures, die 37 Dateien ohne Typprüfung, `openProjectState`/`createTuiApp` weiter zerlegen,
+aufgezeichnete Live-Fixtures, `openProjectState`/`createTuiApp` weiter zerlegen,
 Komplexitäts-Baseline in ESLint, SHA-gepinnte Actions, Ursache der unsteten PTY-Tests.

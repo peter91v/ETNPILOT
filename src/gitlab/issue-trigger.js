@@ -1,3 +1,4 @@
+// @ts-check
 import { git } from "../git/command.js";
 import { runProject } from "../runtime/project-runner.js";
 import { waitForPipeline } from "./pipelines.js";
@@ -10,7 +11,7 @@ export class GitLabIssueTrigger {
     client,
     run = runProject,
     secretResolver,
-    onSyncError = () => {},
+    onSyncError = /** @type {(error: any) => void} */ (() => {}),
   }) {
     this.root = root;
     this.config = config;

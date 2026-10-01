@@ -1,3 +1,4 @@
+// @ts-check
 // Approval prompts render text an agent controls. Control characters could
 // hide or fake parts of a command in a terminal, so they are escaped before
 // a human ever sees them.
@@ -13,7 +14,7 @@ export function escapeControlCharacters(value, { allowNewlines = false } = /** @
     if (character === "\n") return allowNewlines ? "\n" : "\\n";
     if (character === "\r") return allowNewlines ? "" : "\\r";
     if (character === "\t") return "\\t";
-    return `\\u{${code.toString(16).padStart(4, "0")}}`;
+    return `\\u{${/** @type {number} */ (code).toString(16).padStart(4, "0")}}`;
   });
 }
 

@@ -1,3 +1,4 @@
+// @ts-check
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import YAML from "yaml";
@@ -84,7 +85,7 @@ export async function forgeProject(root, {
   configDir = join(root, ".etnpilot"),
   signal,
 } = /** @type {any} */ ({})) {
-  const report = { agents: [], skills: [], instructions: [], skipped: [], notes: [], sent: undefined, provider: undefined, usage: undefined, dryRun };
+  const report = /** @type {any} */ ({ agents: [], skills: [], instructions: [], skipped: [], notes: [], sent: undefined, provider: undefined, usage: undefined, dryRun });
   onProgress("AgentsForge: reading the repository…");
   const survey = await surveyRepository(root);
   report.sent = { files: survey.files, bytes: survey.bytes, included: survey.included, leftOut: survey.leftOut };
@@ -201,7 +202,7 @@ async function askProvider({ chosen, root, env, input, fetchImpl, factories, sig
     },
   }, { workingDirectory: root, env, secretResolver, ...(factories ? { factories } : {}) });
   harness.registerAgent({ name: "agents-forge", provider: "forge", prompt: FORGE_PROMPT, tools: [], requires: ["chat"] });
-  const outcome = await harness.run({ agent: "agents-forge", input, signal });
+  const outcome = await harness.run(/** @type {any} */ ({ agent: "agents-forge", input, signal }));
   const result = outcome?.result ?? outcome ?? {};
   const raw = result.raw ?? {};
   return { text: result.text ?? "", usage: result.usage, finish: raw.choices?.[0]?.finish_reason ?? raw.stop_reason };

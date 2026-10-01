@@ -1,3 +1,4 @@
+// @ts-check
 import { createAnthropicProvider } from "./anthropic.js";
 import { createCopilotProvider } from "./copilot.js";
 import { createOpenAICompatibleProvider } from "./openai-compatible.js";
@@ -115,7 +116,7 @@ export async function resolveConfiguredApiKey(type, config, context) {
   return undefined;
 }
 
-async function resolveProviderSecret({ resolver, name, fallbackKey, required, baseUrl }) {
+async function resolveProviderSecret({ resolver, name, fallbackKey, required, baseUrl } = /** @type {any} */ ({})) {
   if (!resolver) return undefined;
   return resolver.get(name, {
     ...(fallbackKey ? { fallback: { provider: "env", key: fallbackKey } } : {}),

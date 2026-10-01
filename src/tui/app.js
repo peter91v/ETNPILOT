@@ -1,3 +1,4 @@
+// @ts-check
 import { screen, shortId } from "./ansi.js";
 import { parseSettingValue } from "../config/settings.js";
 import { PolicyEngine } from "../policy/engine.js";
@@ -51,7 +52,7 @@ export function createTuiApp({
   let merges;
   // The conversation, as this window sees it: what the server keeps about it
   // plus the choices made for the next turn. 'compose' is the line being typed.
-  const chat = { sessionId: undefined, turns: [], compactions: [], running: false, pending: undefined, choice: createChoice(undefined), scroll: 0, notes: [], known: undefined };
+  const chat = /** @type {any} */ ({ sessionId: undefined, turns: [], compactions: [], running: false, pending: undefined, choice: createChoice(undefined), scroll: 0, notes: [], known: undefined });
   let compose;
   // The checks are listed from the registry once; what each one found is kept
   // per check, so a result stays on screen until it is run again. Nothing here

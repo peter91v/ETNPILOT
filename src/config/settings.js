@@ -1,3 +1,4 @@
+// @ts-check
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import YAML from "yaml";
@@ -77,7 +78,7 @@ export function scopeFile(scope, { root, env = process.env } = /** @type {any} *
   if (scope === "project") return projectConfigFile(root);
   return scope === "global"
     ? globalConfigFile(env)
-    : layerPaths(projectConfigFile(root), { env }).find((layer) => layer.source === "user-local").path;
+    : layerPaths(projectConfigFile(root), { env }).find((layer) => layer.source === "user-local")?.path ?? "";
 }
 
 export async function describeSettings({ root = process.cwd(), env = process.env } = /** @type {any} */ ({})) {
@@ -141,7 +142,7 @@ async function writeSetting(path, change, { root, env, scope }) {
   const projectFile = projectConfigFile(root);
   const file = scopeFile(scope, { root, env });
   const source = scope === "global" ? "user-global" : scope === "project" ? "project" : "user-local";
-  const text = await readFile(file, "utf8").catch(ignoreMissing);
+  const text = /** @type {string | undefined} */ (await readFile(file, "utf8").catch(ignoreMissing));
   const document = text === undefined ? new YAML.Document({}) : YAML.parseDocument(text);
   const keys = path.split(".");
   if (change.present) document.setIn(keys, change.value);

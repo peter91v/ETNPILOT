@@ -1,3 +1,4 @@
+// @ts-check
 import { mkdir, readFile, stat } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { git } from "./command.js";
@@ -158,7 +159,7 @@ export class WorktreeManager {
       file,
       text: text.length > maxBytes ? text.slice(0, maxBytes) : text,
       truncated: text.length > maxBytes,
-      ...(result.error ? { error: result.error } : {}),
+      ...(/** @type {any} */ (result).error ? { error: /** @type {any} */ (result).error } : {}),
     };
   }
 

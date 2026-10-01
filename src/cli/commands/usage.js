@@ -1,3 +1,4 @@
+// @ts-check
 import { join, resolve } from "node:path";
 import { loadConfig } from "../../config/load.js";
 import { summarizeTelemetryFile } from "../../observability/telemetry.js";
@@ -12,7 +13,7 @@ export const usageCommands = [
       const root = resolve(values.root);
       const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"));
       const file = resolve(root, config.observability?.file ?? ".etnpilot/state/telemetry.jsonl");
-      const summary = await summarizeTelemetryFile(file, { root, config });
+      const summary = /** @type {any} */ (await summarizeTelemetryFile(file, { root, config }));
       if (values.json) {
         console.log(JSON.stringify(summary, null, 2));
         return 0;

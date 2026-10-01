@@ -1,3 +1,4 @@
+// @ts-check
 import { forgeProject, summarizeForge } from "../../forge/forge.js";
 import { join, resolve } from "node:path";
 import { loadConfig } from "../../config/load.js";
@@ -51,7 +52,7 @@ export const agentsCommands = [
           }
         }
         : undefined;
-      const report = await forgeProject(root, { config, dryRun: Boolean(values["dry-run"]), preview, onProgress: (line) => console.log(line) });
+      const report = /** @type {any} */ (await forgeProject(root, { config, dryRun: Boolean(values["dry-run"]), preview, onProgress: (line) => console.log(line) }));
       if (values["dry-run"]) {
         console.log(`AgentsForge would send a digest of ${report.sent.files} files (${Math.round(report.sent.bytes / 1024)} KiB; ${report.sent.leftOut} credential files left out). Included in part:`);
         for (const path of report.sent.included) console.log(`  ${path}`);

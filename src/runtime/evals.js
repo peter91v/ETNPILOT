@@ -1,3 +1,4 @@
+// @ts-check
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { git } from "../git/command.js";
@@ -37,7 +38,7 @@ export async function listEvalCases(directory) {
     throw error;
   });
   const cases = [];
-  for (const entry of entries.filter((candidate) => candidate.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
+  for (const entry of /** @type {import("node:fs").Dirent[]} */ (entries).filter((candidate) => candidate.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
     const file = join(root, entry.name, "case.js");
     if (!await stat(file).then(() => true, () => false)) continue;
     const module = await import(`file://${file}`);
@@ -78,12 +79,12 @@ async function applyCheck(workspace, check, { runCommand }) {
     throw new TypeError(`Eval check path '${check.path}' leaves the workspace.`);
   }
   if (check.kind === "fileExists" || check.kind === "fileAbsent") {
-    const there = await stat(target).then((details) => details.isFile(), () => false);
+    const there = await stat(/** @type {string} */ (target)).then((details) => details.isFile(), () => false);
     const wanted = check.kind === "fileExists";
     return { ok: there === wanted, found: there ? "present" : "absent" };
   }
   if (check.kind === "fileContains") {
-    const content = await readFile(target, "utf8").catch(() => undefined);
+    const content = await readFile(/** @type {string} */ (target), "utf8").catch(() => undefined);
     if (content === undefined) return { ok: false, found: "the file does not exist" };
     const matcher = check.pattern instanceof RegExp ? check.pattern : new RegExp(check.pattern);
     return matcher.test(content)
@@ -201,7 +202,7 @@ export async function prepareEvalWorkspace(evalCase, root, { provider = "scripte
     const document = YAML.parseDocument(await readFile(file, "utf8"));
     document.setIn(["providers", "scripted"], { type: "scripted", steps: evalCase.scripted ?? [] });
     document.setIn(["defaultProvider"], "scripted");
-    const rules = document.getIn(["policy", "providers", "rules"])?.toJSON() ?? [];
+    const rules = /** @type {any} */ (document.getIn(["policy", "providers", "rules"]))?.toJSON() ?? [];
     document.setIn(["policy", "providers", "rules"],
       rules.map((rule) => (rule.id === "configured-providers"
         ? { ...rule, providers: [...rule.providers, "scripted"] }

@@ -1,3 +1,4 @@
+// @ts-check
 import { AUTH_USAGE } from "./auth.js";
 import { TRUST_USAGE, guardProject, runTrustCommand } from "./trust.js";
 import { agentsCommands } from "./commands/agents.js";
@@ -189,5 +190,5 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
 
   const [entry] = COMMANDS.filter((candidate) => candidate.match({ command, subcommand }));
   if (!entry) throw new Error(`Unknown command: ${positionals.join(" ")}`);
-  return (await entry.run({ command, subcommand, rest, positionals, values, waitForShutdown })) ?? 0;
+  return (await entry.run(/** @type {any} */ ({ command, subcommand, rest, positionals, values, waitForShutdown }))) ?? 0;
 }
