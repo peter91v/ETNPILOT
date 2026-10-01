@@ -56,10 +56,6 @@ function choicesFor(path, value, config) {
   return undefined;
 }
 
-export function settingChoices(path, { value, config } = {}) {
-  return choicesFor(path, value, config);
-}
-
 export class SettingsRefused extends Error {
   constructor(path, reason) {
     super(`Cannot change '${path}': ${reason}.`);

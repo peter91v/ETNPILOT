@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, unlink } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { git } from "../git/command.js";
@@ -69,37 +69,3 @@ export async function diffSnapshots(root, from, to) {
   return changes;
 }
 
-async function currentHash(root, path) {
-  try {
-    await readFile(join(root, path));
-  } catch (error) {
-    if (error.code === "ENOENT" || error.code === "EISDIR") return null;
-    throw error;
-  }
-  return (await git(["hash-object", "--", path], { cwd: root })).stdout;
-}
-
-// Puts back what the turn changed, file by file, and reports both halves.
-export async function undoBetween(root, before, after) {
-  const reverted = [];
-  const skipped = [];
-  for (const change of await diffSnapshots(root, before, after)) {
-    const now = await currentHash(root, change.path);
-    // Still what the turn left? Only then is it the turn's to take back.
-    const stillTheTurns = change.status === "D" ? now === null : now === change.after;
-    if (!stillTheTurns) {
-      skipped.push({ path: change.path, reason: now === null ? "it was deleted since" : "it was changed since the turn" });
-      continue;
-    }
-    if (change.status === "A") {
-      await unlink(join(root, change.path));
-    } else {
-      // Content and mode from the tree recorded before, into the working
-      // directory only; the person's staging area is not touched. Read as
-      // bytes by git itself, so a binary file survives the round trip.
-      await git(["restore", `--source=${before}`, "--worktree", "--", change.path], { cwd: root });
-    }
-    reverted.push(change.path);
-  }
-  return { reverted, skipped };
-}

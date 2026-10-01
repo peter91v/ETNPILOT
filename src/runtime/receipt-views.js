@@ -21,7 +21,7 @@ import { verifyReceiptFile } from "../core/receipt-store.js";
 // So a receipt is parsed once and kept, keyed by what would have to change for
 // the answer to differ: its size and its modification time. A receipt that is
 // still being written fails that key on the next poll and is read again.
-export const receiptCache = new Map();
+const receiptCache = new Map();
 
 export async function countRuns(directory) {
   const entries = await readdir(directory).catch(() => []);
@@ -191,7 +191,7 @@ export function describeOutcome(receipt, { running = false } = {}) {
 
 // One row per tool, so 'it wrote three files and one was refused' is readable
 // without counting lines.
-export function summarizeToolCalls(calls) {
+function summarizeToolCalls(calls) {
   const byTool = new Map();
   for (const call of calls) {
     const name = call.tool ?? "unknown";
@@ -217,7 +217,7 @@ const REHEARSAL_REASONS = Object.freeze({
 // rehearsal fetches the target branch first, and a fetch that fails leaves
 // nothing to be clean or dirty about — reporting that as 'not clean' invents
 // a conflict nobody found.
-export function describeRehearsal(rehearsal) {
+function describeRehearsal(rehearsal) {
   const target = rehearsal.targetBranch ?? "the target branch";
   if (rehearsal.rehearsed === false) {
     const why = REHEARSAL_REASONS[rehearsal.reason] ?? rehearsal.reason ?? "no reason recorded";
@@ -243,7 +243,7 @@ export function describeRehearsal(rehearsal) {
 // Today every built-in provider is flat — none call the 'spawn' a manifest's
 // 'subagents' declares — so this renders as one row per workflow step. It
 // nests correctly the day one does, without either surface changing.
-export function agentTree(receipt) {
+function agentTree(receipt) {
   const entries = (receipt?.entries ?? [])
     .filter((entry) => typeof entry.agent === "string" && typeof entry.runId === "string");
   const byId = new Map(entries.map((entry) => [entry.runId, agentNode(entry)]));
@@ -257,7 +257,7 @@ export function agentTree(receipt) {
   return roots;
 }
 
-export function agentNode(entry) {
+function agentNode(entry) {
   const result = entry.result ?? {};
   // The scripted provider records its steps under 'steps' rather than
   // 'toolCalls' — the same shape under another name, read the same way here
@@ -301,7 +301,7 @@ export function agentRawResponses(receipt) {
     }));
 }
 
-export function publicationReason(publication) {
+function publicationReason(publication) {
   if (publication.reason === "workflow-not-succeeded") return "not published: the workflow did not succeed";
   if (publication.reason === "merge-conflict") {
     return `not published: it would conflict with ${(publication.conflicts ?? []).join(", ") || "the target branch"}`;
@@ -333,7 +333,7 @@ export async function verifyProjectReceipt(directory, file, { root, config } = {
 // A reason code is for a program; this is the sentence a person reads. Every
 // failure here means someone or something changed a sealed record, so it says
 // which line and what kind of change it was, not 'invalid'.
-export function describeVerification(report, { signaturesChecked = false } = {}) {
+function describeVerification(report, { signaturesChecked = false } = {}) {
   if (report.valid) {
     const chain = `${report.entries} ${report.entries === 1 ? "entry" : "entries"}, each hashed onto the one before it`;
     const signatures = signaturesChecked
@@ -368,7 +368,7 @@ export function describeVerification(report, { signaturesChecked = false } = {})
   };
 }
 
-export function assertReceiptName(file) {
+function assertReceiptName(file) {
   if (typeof file !== "string" || file.includes("/") || file.includes("\\") || !file.endsWith(".jsonl")) {
     throw new TypeError(`'${file}' is not a receipt file in this project.`);
   }
@@ -405,7 +405,7 @@ export async function readReceipt(directory, file) {
   return { ...receipt, outcome: describeOutcome(receipt) };
 }
 
-export function countApprovals(lines) {
+function countApprovals(lines) {
   let total = 0;
   for (const line of lines) {
     try {

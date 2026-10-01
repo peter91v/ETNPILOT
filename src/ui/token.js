@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { chmod, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 // The token that opens the review surface. It used to be minted on every
@@ -59,8 +59,3 @@ export async function writeToken(root, token) {
   return path;
 }
 
-export async function forgetToken(root) {
-  await unlink(tokenFile(root)).catch((error) => {
-    if (error.code !== "ENOENT") throw error;
-  });
-}

@@ -162,7 +162,7 @@ export async function readMergeRequests({ root, config, env }, { state = "opened
 // Titles, branch names and author names are written by other people. They are
 // data here, escaped and bounded, exactly as the merge-train inspection treats
 // them.
-export function presentMergeRequest(mergeRequest) {
+function presentMergeRequest(mergeRequest) {
   const text = (value, max = 200) => escapeControlCharacters(String(value ?? "")).slice(0, max);
   const sourceBranch = text(mergeRequest.source_branch, 200);
   return {
