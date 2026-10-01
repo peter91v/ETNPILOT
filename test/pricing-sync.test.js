@@ -67,3 +67,28 @@ test("without autoUpdate nothing is fetched, and a failure never throws", async 
   assert.equal(offline.used, "none");
   assert.equal(calls, 1);
 });
+
+test("prices worth believing: no zero rates unless free, nothing absurd, the vendor's own listing wins", () => {
+  const entry = (id, prompt, completion) => ({ id, pricing: { prompt: String(prompt), completion: String(completion) } });
+  const rates = ratesFromCatalog({ data: [
+    entry("acme/zero-model", 0, 0),
+    entry("acme/free-model:free", 0, 0),
+    entry("acme/half-zero", 0.000001, 0),
+    entry("acme/absurd", 0.01, 0.01),
+    entry("reseller-a/gpt-x", 0.000001, 0.000002),
+    entry("openai/gpt-x", 0.000005, 0.00002),
+    entry("reseller-b/gpt-x", 0.000009, 0.00004),
+    entry("reseller-a/other", 0.000001, 0.000002),
+    entry("reseller-b/other", 0.000003, 0.000006),
+    entry("reseller-c/other", 0.000002, 0.000004),
+  ] });
+  assert.equal(rates["zero-model"], undefined);
+  assert.ok(rates["free-model:free"]);
+  assert.equal(rates["half-zero"], undefined);
+  assert.equal(rates.absurd, undefined);
+  // The vendor's listing, whatever order the resellers came in.
+  assert.equal(rates["gpt-x"].inputPerMillion, 5);
+  assert.equal(rates["gpt-x"].outputPerMillion, 20);
+  // Between resellers, the dearer.
+  assert.equal(rates.other.inputPerMillion, 3);
+});

@@ -9,6 +9,7 @@ import { queueCommands } from "./commands/queue.js";
 import { receiptsCommands } from "./commands/receipts.js";
 import { securityCommands } from "./commands/security.js";
 import { serversCommands } from "./commands/servers.js";
+import { modelsCommands } from "./commands/models.js";
 import { usageCommands } from "./commands/usage.js";
 import { defaultWaitForShutdown, shouldOpenBrowser } from "./shared.js";
 
@@ -30,6 +31,7 @@ export const COMMANDS = [
   ...securityCommands,
   ...opsCommands,
   ...usageCommands,
+  ...modelsCommands,
 ];
 
 export const CLI_OPTIONS = Object.freeze({
@@ -151,6 +153,7 @@ ${TRUST_USAGE}
   etnpilot scan secrets [--root directory]
   etnpilot attest <receipt-file> [--out file] [--root directory]
   etnpilot telemetry summary [workflow-run-id] [--root directory]
+  etnpilot models [--provider name] [--json]       what the provider offers this account, with known prices
   etnpilot usage [--json] [--root directory]       tokens, requests and cost by model and by day
   etnpilot doctor [--root directory]
   etnpilot check [name...] [--root directory]
