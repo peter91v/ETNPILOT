@@ -445,3 +445,35 @@ test("a long run does not slow down: appending reads the chain's tail once, not 
   assert.equal(verified.valid, true);
   assert.equal(verified.entries, 1502);
 });
+
+test("a receipt larger than 16 MiB is still listed, verified and shown; a line past the limit is a row that says so", async () => {
+  const { mkdtemp, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { JsonlReceiptStore, verifyReceiptFile } = await import("../src/core/receipt-store.js");
+  const { readReceipt, readRuns } = await import("../src/runtime/receipt-views.js");
+  const dir = await mkdtemp(join(tmpdir(), "etnpilot-bigchain-"));
+  const store = new JsonlReceiptStore(join(dir, "big-run.jsonl"));
+  const blob = "y".repeat(900_000);
+  for (let index = 0; index < 20; index += 1) await store.append({ type: "tool", mode: "execute", index, blob, approvals: index === 3 ? [{ decision: "approve-once" }] : [] });
+  await store.append({ type: "end", terminal: true, status: "succeeded", runId: "big-run", mode: "execute", durationMs: 5 });
+  const verified = await verifyReceiptFile(join(dir, "big-run.jsonl"), { requireTerminal: true });
+  assert.equal(verified.valid, true);
+  assert.equal(verified.entries, 21);
+  const [run] = await readRuns(dir);
+  assert.equal(run.status, "succeeded");
+  assert.equal(run.entries, 21);
+  assert.equal(run.approvals, 1);
+  const shown = await readReceipt(dir, "big-run.jsonl");
+  assert.equal(shown.entries.length, 21);
+
+  // One line past the per-line limit cannot be read; the list says so.
+  await writeFile(join(dir, "zz-huge-line.jsonl"), `${"z".repeat(9 * 1024 * 1024)}\n`);
+  const runs = await readRuns(dir);
+  const huge = runs.find((entry) => entry.receiptFile === "zz-huge-line.jsonl");
+  assert.equal(huge.status, "unreadable");
+  assert.match(huge.unreadable, /longer than/);
+  const failed = await verifyReceiptFile(join(dir, "zz-huge-line.jsonl"));
+  assert.equal(failed.valid, false);
+  assert.equal(failed.reason, "file-read-failed");
+});

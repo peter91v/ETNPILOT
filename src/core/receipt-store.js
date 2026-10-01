@@ -1,4 +1,4 @@
-import { readRegularFile } from "../runtime/bounded-io.js";
+import { readLastLine, readLines } from "../runtime/jsonl.js";
 import { createHash } from "node:crypto";
 import { mkdir, appendFile } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -46,11 +46,10 @@ export class JsonlReceiptStore {
   }
 
   async #lastEntry() {
-    const content = await readRegularFile(this.path, 16 * 1024 * 1024).then((bytes) => bytes.toString("utf8")).catch((error) => {
-      if (error.code === "ENOENT") return "";
+    const lastLine = await readLastLine(this.path).catch((error) => {
+      if (error.code === "ENOENT") return undefined;
       throw error;
     });
-    const lastLine = content.trim().split("\n").filter(Boolean).at(-1);
     return lastLine ? JSON.parse(lastLine) : { hash: null, terminal: false };
   }
 }
@@ -60,95 +59,117 @@ export async function verifyReceiptFile(path, {
   requireSignatures = false,
   requireTerminal = false,
 } = {}) {
-  let content;
+  // Line by line: a receipt is as long as the run was, and a limit on the whole
+  // file would make a long run impossible to verify.
+  const chain = new ChainVerifier({ verifiers, requireSignatures, requireTerminal });
   try {
-    content = await readRegularFile(path, 16 * 1024 * 1024).then((bytes) => bytes.toString("utf8"));
+    for await (const line of readLines(path)) {
+      const failure = chain.push(line);
+      if (failure) return failure;
+    }
   } catch (error) {
     return verificationFailure("file-read-failed", { message: error.message });
   }
-  return verifyReceiptText(content, { verifiers, requireSignatures, requireTerminal });
+  return chain.finish();
 }
 
 export function verifyReceiptText(content, { verifiers = new Map(), requireSignatures = false, requireTerminal = false } = {}) {
   const lines = content.split("\n");
   if (lines.at(-1) === "") lines.pop();
-  if (lines.length === 0) return verificationFailure("empty-file");
-  let previousHash = null;
-  let legacyEntries = 0;
-  let signed = 0;
-  let unsigned = 0;
-  let terminal = false;
-  for (let index = 0; index < lines.length; index += 1) {
+  const chain = new ChainVerifier({ verifiers, requireSignatures, requireTerminal });
+  for (const line of lines) {
+    const failure = chain.push(line);
+    if (failure) return failure;
+  }
+  return chain.finish();
+}
+
+// The checks, one line at a time, so the same code verifies a string and a file
+// of any length.
+class ChainVerifier {
+  constructor({ verifiers, requireSignatures, requireTerminal }) {
+    this.verifiers = verifiers;
+    this.requireSignatures = requireSignatures;
+    this.requireTerminal = requireTerminal;
+    this.previousHash = null;
+    this.legacyEntries = 0;
+    this.signed = 0;
+    this.unsigned = 0;
+    this.terminal = false;
+    this.count = 0;
+    this.keyIds = new Set();
+  }
+
+  push(line) {
+    const index = this.count;
     const lineNumber = index + 1;
+    const counts = () => ({ entries: index, signed: this.signed, unsigned: this.unsigned });
+    if (this.terminal) {
+      // The entry that sealed the chain was not the last one.
+      return verificationFailure("entries-after-terminal", { line: lineNumber - 1, entries: index, signed: this.signed, unsigned: this.unsigned });
+    }
     let entry;
     try {
-      entry = JSON.parse(lines[index]);
+      entry = JSON.parse(line);
     } catch {
-      return verificationFailure("invalid-json", { line: lineNumber, entries: index, signed, unsigned });
+      return verificationFailure("invalid-json", { line: lineNumber, ...counts() });
     }
     if (!entry || Array.isArray(entry) || typeof entry !== "object") {
-      return verificationFailure("invalid-entry", { line: lineNumber, entries: index, signed, unsigned });
+      return verificationFailure("invalid-entry", { line: lineNumber, ...counts() });
     }
     const { hash, signature, ...payload } = entry;
     if (hash !== receiptHash(payload)) {
       // Receipts written before canonical serialization hashed the payload in
       // file order. They stay verifiable; new entries are always canonical.
       if (hash !== createHash("sha256").update(JSON.stringify(payload)).digest("hex")) {
-        return verificationFailure("hash-mismatch", { line: lineNumber, entries: index, signed, unsigned });
+        return verificationFailure("hash-mismatch", { line: lineNumber, ...counts() });
       }
-      legacyEntries += 1;
+      this.legacyEntries += 1;
     }
-    if (payload.previousHash !== previousHash) {
-      return verificationFailure("chain-mismatch", { line: lineNumber, entries: index, signed, unsigned });
+    if (payload.previousHash !== this.previousHash) {
+      return verificationFailure("chain-mismatch", { line: lineNumber, ...counts() });
     }
     if (payload.proof || signature) {
-      const proof = verifyReceiptSignature({ ...payload, hash, signature }, verifiers);
+      const proof = verifyReceiptSignature({ ...payload, hash, signature }, this.verifiers);
       if (!proof.valid) {
-        return verificationFailure(proof.reason, {
-          line: lineNumber,
-          keyId: proof.keyId,
-          entries: index,
-          signed,
-          unsigned,
-        });
+        return verificationFailure(proof.reason, { line: lineNumber, keyId: proof.keyId, ...counts() });
       }
-      signed += 1;
+      this.signed += 1;
     } else {
-      if (requireSignatures) {
-        return verificationFailure("signature-required", { line: lineNumber, entries: index, signed, unsigned });
+      if (this.requireSignatures) {
+        return verificationFailure("signature-required", { line: lineNumber, ...counts() });
       }
-      unsigned += 1;
+      this.unsigned += 1;
     }
-    previousHash = hash;
-    terminal = payload.terminal === true;
-    if (terminal && index !== lines.length - 1) {
-      return verificationFailure("entries-after-terminal", {
-        line: lineNumber,
-        entries: index + 1,
-        signed,
-        unsigned,
+    if (payload.proof?.keyId) this.keyIds.add(payload.proof.keyId);
+    this.previousHash = hash;
+    this.terminal = payload.terminal === true;
+    this.count += 1;
+    return undefined;
+  }
+
+  finish() {
+    if (this.count === 0) return verificationFailure("empty-file");
+    if (this.requireTerminal && !this.terminal) {
+      return verificationFailure("terminal-receipt-required", {
+        entries: this.count,
+        signed: this.signed,
+        unsigned: this.unsigned,
+        lastHash: this.previousHash,
       });
     }
+    return {
+      valid: true,
+      entries: this.count,
+      encoding: this.legacyEntries === 0 ? "canonical" : "mixed",
+      ...(this.legacyEntries > 0 ? { legacyEntries: this.legacyEntries } : {}),
+      signed: this.signed,
+      unsigned: this.unsigned,
+      terminal: this.terminal,
+      lastHash: this.previousHash,
+      keyIds: [...this.keyIds],
+    };
   }
-  if (requireTerminal && !terminal) {
-    return verificationFailure("terminal-receipt-required", {
-      entries: lines.length,
-      signed,
-      unsigned,
-      lastHash: previousHash,
-    });
-  }
-  return {
-    valid: true,
-    entries: lines.length,
-    encoding: legacyEntries === 0 ? "canonical" : "mixed",
-    ...(legacyEntries > 0 ? { legacyEntries } : {}),
-    signed,
-    unsigned,
-    terminal,
-    lastHash: previousHash,
-    keyIds: [...new Set(lines.map((line) => JSON.parse(line).proof?.keyId).filter(Boolean))],
-  };
 }
 
 // Receipts are hashed over sorted-key JSON so an independent verifier in any
