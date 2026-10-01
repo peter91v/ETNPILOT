@@ -2,6 +2,7 @@ import { access } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { CodeGraph } from "../codegraph/codegraph.js";
 import { initializeProject } from "../config/init.js";
+import { summarizeImport } from "../config/migrate.js";
 import { loadConfig } from "../config/load.js";
 import {
   describeSettings,
@@ -89,6 +90,7 @@ export const CLI_OPTIONS = Object.freeze({
   provider: { type: "string" },
   out: { type: "string", short: "o" },
   template: { type: "string", short: "t" },
+  "no-import": { type: "boolean" },
   global: { type: "boolean", default: false },
   changed: { type: "boolean", default: false },
   "record-fixtures": { type: "string" },
@@ -99,7 +101,7 @@ export const CLI_OPTIONS = Object.freeze({
 export const USAGE = `ETNPilot
 
 Usage:
-  etnpilot init [directory] [--template default|minimal|regulated]
+  etnpilot init [directory] [--template default|minimal|regulated] [--no-import]
   etnpilot run <task> [--agent name] [--root directory] [--approvals terminal|inbox]
     [--events jsonl]
     [--worktree | --no-worktree] [--cleanup-worktree] [--publish] [--dry-run]
@@ -164,9 +166,10 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
   }
 
   if (command === "init") {
-    const result = await initializeProject(resolve(subcommand ?? "."), { template: values.template });
+    const result = await initializeProject(resolve(subcommand ?? "."), { template: values.template, importExisting: !values["no-import"] });
     console.log(`Initialized ETNPilot in ${result.root} (template: ${result.template}).`);
-    console.log("Next: review '.etnpilot/', commit it, then run 'etnpilot run \"<task>\"'.");
+    for (const line of result.imported ? summarizeImport(result.imported) : []) console.log(line);
+    console.log("Next: review '.etnpilot/', run 'etnpilot content lock' to approve what you reviewed, commit it, then run 'etnpilot run \"<task>\"'.");
   } else if (command === "run") {
     if (values.worktree && (values["no-worktree"] || values["in-place"])) {
       throw new Error("Choose either --worktree or --no-worktree, not both.");

@@ -1,4 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
+import { importExistingProject } from "./migrate.js";
 import { join } from "node:path";
 import YAML from "yaml";
 
@@ -425,7 +426,7 @@ export function renderProjectConfig(template = "default") {
   return String(document);
 }
 
-export async function initializeProject(root, { template = "default" } = {}) {
+export async function initializeProject(root, { template = "default", importExisting = true } = {}) {
   const config = renderProjectConfig(template);
   const configDir = join(root, ".etnpilot");
   await Promise.all([
@@ -445,7 +446,10 @@ export async function initializeProject(root, { template = "default" } = {}) {
     writeIfAbsent(join(configDir, "agents", "orchestrator.yaml"), STARTER_AGENT),
     writeIfAbsent(join(configDir, "prompts", "orchestrator.md"), STARTER_PROMPT),
   ]);
-  return { root, configDir, template };
+  // A project that already has instructions, agents or skills for another
+  // coding agent keeps them: they are copied in, never over anything here.
+  const imported = importExisting ? await importExistingProject(root, { configDir }) : undefined;
+  return { root, configDir, template, ...(imported ? { imported } : {}) };
 }
 
 async function writeIfAbsent(path, content) {
