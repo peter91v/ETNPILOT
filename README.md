@@ -28,24 +28,34 @@ The repository is in early development. The first runnable vertical slice provid
 - OTLP/HTTP traces with provider usage, configurable cost estimates, and workflow budgets.
 - one restricted worker process per plugin with bounded RPC, runtime, memory, and output, and fail-closed RSS monitoring.
 - an isolated OIDC/Vault secret-provider plugin with scoped secret and HTTPS grants.
-- reviewed SHA-256 pins and run provenance for agents, instructions, prompts, and skills.
+- reviewed SHA-256 pins and run provenance for agents, instructions, prompts, and skills;
+- `init` imports the agents, skills and instructions a repository already has (Claude Code, Copilot, Cursor layouts), and **AgentsForge** reads the repository and proposes the ones it is missing ([docs](docs/init-import.md), [docs](docs/agents-forge.md));
+- named workflows (`agent`, `check`, `gate`, `quorum` steps) as locked content, built and run from the page ([docs](docs/named-workflows.md));
+- one review page and one terminal interface over the same state: approvals, runs, agents, content lock, accounts, worktrees, merge requests ([docs](docs/review-ui.md), [docs](docs/tui.md));
+- OpenAI's `/v1/responses` API with streaming and tool calls, switched to automatically for models that need it;
+- cost shown without configuration: a built-in table, prices learned from a public catalogue, `etnpilot usage` by model and day;
+- `etnpilot login` instead of exporting keys, `etnpilot trust` before acting on a project you did not make, `etnpilot smoke` to check a key end to end ([docs](docs/login.md), [docs](docs/first-real-run.md)).
 
 ## Quick start
 
 Node.js 22.13 or newer is required; `node:sqlite` backs the durable queue and
-the approval inbox.
+the approval inbox. The full walk-through is [docs/first-15-minutes.md](docs/first-15-minutes.md).
 
 ```bash
 npm install
-npm install @github/copilot-sdk
-npm run etnpilot -- init .            # or: init . --template regulated
-npm run etnpilot -- doctor            # node, git, sqlite, and the provider a run would reach
-# Describe at least one agent under .etnpilot/agents/, then:
+npm link                              # makes the 'etnpilot' command (see below)
+etnpilot login openai                 # or anthropic; GitHub and GitLab sign in from a browser
+etnpilot init .                       # imports existing agents, and proposes missing ones with a key
+etnpilot smoke                        # a few tiny real requests: key, answer, tool call, stream
+etnpilot content lock                 # you read what is new, then approve it
 git add .etnpilot && git commit -m "Add ETNPilot configuration"
-npm run etnpilot -- content lock --root .
-npm run etnpilot -- graph build .
-npm test
+etnpilot run "Add a health check"     # or: etnpilot ui, etnpilot tui, etnpilot chat
+npm test                              # the repository's own tests
 ```
+
+Without a provider at all, [docs/trying-it-out.md](docs/trying-it-out.md) shows a project that runs on a
+scripted one. `npm run check` is what CI runs: syntax, lint, types for the newer modules, and the tests;
+`npm run test:ui` drives the page in a real browser.
 
 ### Calling it `etnpilot`
 
@@ -184,6 +194,21 @@ workflow exits 1, is never published, and is reported as failed to GitLab.
 Operations such as writes, shell commands, and network access require confirmation in an interactive terminal and are rejected when no terminal is available. The prompt shows the full command, file, tool arguments, and URL with control characters escaped, so what you read is what you approve. Publishing is never implicit. Once the GitLab remote and the `gitlab.apiToken` secret are configured, `--publish` commits the reviewed work, pushes its run branch, and opens a draft merge request. Setting `workspace.cleanup` to `after-publish` removes the clean linked worktree after a successful publication while retaining its branch.
 
 For GitHub Copilot, authenticate with the Copilot CLI/SDK-supported GitHub login. ETNPilot never auto-approves writes, shell commands, or network access by default.
+
+## Signing in, trusting, checking
+
+- **Signing in.** `etnpilot login <anthropic|openai|github|gitlab>` keeps a login in a file only you can read,
+  outside every repository, so keys do not have to be exported each session. GitHub and GitLab sign in from a
+  browser (device flow); Anthropic and OpenAI sell access by key, so there the key is entered once and checked.
+  A variable in the environment still wins. A stored login is sent only to the hosts it was issued for. See
+  [docs/login.md](docs/login.md).
+- **Trusting.** A repository's configuration names the addresses providers talk to, the secrets they read and
+  the commands checks run. The first time you use a project on this machine, and whenever that changes,
+  `etnpilot run|chat|check|smoke|forge|ui` show you that and ask once. `etnpilot trust` does the same on its own.
+  A project you made with `init` here is trusted. Pipelines set `ETNPILOT_TRUST=all`.
+- **Checking.** `etnpilot smoke` sends a handful of tiny real requests and prints a report you can paste back;
+  `etnpilot doctor` says whether a run could start and warns about what does not stop one (unsigned
+  receipts, commands running without a sandbox).
 
 ## Provider routing
 
@@ -620,6 +645,17 @@ Read [SECURITY.md](SECURITY.md) for the security model and reporting process,
 and [docs/threat-model.md](docs/threat-model.md) for the adversaries each
 control assumes, together with the accepted risks — the widest of which is that
 an approved shell command runs unconstrained.
+
+Two statements worth reading precisely:
+
+- **Receipts.** The hash chain shows accidental edits and partial tampering. Without a signature
+  (`receipts.signing`, off by default except in the `regulated` template) anyone who can write the files can
+  rewrite the whole chain. "Proof-carrying" means signed.
+- **Stored logins** are plain text with owner-only permissions (there is no keychain in Termux). What keeps them
+  from being used against their owner is that they are bound to the hosts they were issued for, and that a project
+  is asked about before it is acted on. Details in [docs/login.md](docs/login.md).
+
+A review of the repository with its open findings is in [docs/review-2026-10.md](docs/review-2026-10.md).
 
 ## Repository strategy
 

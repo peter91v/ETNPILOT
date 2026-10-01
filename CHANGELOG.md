@@ -6,6 +6,58 @@ pre-1.0, so breaking changes may appear in any release.
 
 ## [Unreleased]
 
+### Security — a review of the repository (docs/review-2026-10.md)
+
+- **A stored login goes only to the hosts it was issued for**, over https. Before, a repository's configuration
+  could name any `baseUrl` for a provider and read a stored key by its standard name (reproduced; now a
+  regression test). `etnpilot login <service> --allow-host <name>` adds a proxy. A refusal says why.
+- **`etnpilot trust`**: the first time a project is used on this machine, and whenever its configuration,
+  plugin code or other non-content files change, the commands that act on it (`run`, `chat`, `check`,
+  `smoke`, `forge`, `ui`, `tui`, …) show what it can do and ask once. Reading commands never ask;
+  `init` trusts what it creates; `ETNPILOT_TRUST=all` skips it in a pipeline.
+- Plugins never receive stored logins. A run's command may not name the credential store. `LD_PRELOAD` and
+  `LD_LIBRARY_PATH` reach commands only on Termux.
+- The page checks the `Host` header (IP literals and `localhost`; other names via `ETNPILOT_UI_HOSTS`), sets
+  `frame-ancestors 'none'`, `X-Frame-Options: DENY` and `base-uri 'none'`, and removes the token from the
+  address bar once the cookie holds it. Sign-in addresses given by a page are validated.
+- A renewal of a stored login is done under a lock, a renewal that cannot be written is an error instead of a lost
+  refresh token, and a refresh token the service refuses shows as "sign-in expired".
+- `etnpilot doctor` warns about unsigned receipts, commands running without a sandbox, a credential file others can
+  read, and an untrusted project.
+
+### Added
+
+- `etnpilot login|logout|auth status` and the **Accounts** view: GitHub and GitLab sign in from a browser
+  (device flow); Anthropic and OpenAI keys are entered once, checked and kept.
+- `etnpilot smoke`: a few tiny real requests (key, answer, tool call, stream, tool call while streaming, forge
+  digest; `--gitlab` reads who the token is) with a report that can be pasted back. A manual workflow runs it in CI.
+- `etnpilot usage`: tokens, requests and cost by model and by UTC day, to compare with a provider's dashboard.
+- A `github-models` provider (models served by GitHub, no SDK, works on Android).
+- `etnpilot forge --preview`; AgentsForge is told what exists and adds only what is missing.
+- `init` imports existing agents, skills and instructions; AgentsForge proposes missing ones; named workflows;
+  the Agents, Content and Accounts views with builders, editing, deleting and the content lock.
+- OpenAI `/v1/responses` with streaming and tool calls, chosen automatically for models that need it.
+- Prices without configuration (built-in table, learned from a public catalogue), run totals priced
+  retroactively, requests counted.
+- The running-run card lists every step and every agent, with markers that follow the run's progress; long lists
+  of successful tool calls in a chat reply are folded; the Runs view in the terminal shows the same.
+- `npm run lint`, a typecheck of the newer modules, `npm run test:ui` (Chromium at 412 px) and a coverage job in
+  CI; `docs/first-15-minutes.md`, `docs/index.md`, `docs/login.md`.
+
+### Changed
+
+- The CLI is one file per area under `src/cli/commands/` instead of a 46-branch chain; `project-state.js` is
+  split (`receipt-views.js`, `project-reads.js`); the page's script, styles and markup are real files under
+  `src/ui/client/`, and views register themselves.
+- Telemetry rotates at 16 MiB (`observability.rotateBytes`); totals still cover every file.
+- `package.json` has a `files` list; a test checks what would be published.
+
+### Fixed
+
+- Two duplicate object keys (`src/tui/render.js`, `src/workflow/engine.js`) and a duplicate option
+  (`--dry-run`) found by the linter; cleanup errors in `runChild` and the GitLab smoke no longer hide the failure
+  they follow (it is now their `cause`).
+
 ### Added — roadmap UI-1: the page does what the TUI does
 
 - The review page resumes queue jobs, opens a run's receipt (branch, sandbox,
