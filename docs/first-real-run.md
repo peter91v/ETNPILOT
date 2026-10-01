@@ -274,3 +274,38 @@ included as encrypted content, are handed back with the tool results, and the ef
 `reasoning.effort`. Usage is read from the same fields. With `stream: true` the route streams too: the text pieces are shown as they
 arrive, and the finished response in the stream's last event is what the loop continues from, so tool calls and
 reasoning items are never reassembled from fragments.
+
+## `etnpilot smoke` — the quick check on a real key
+
+```
+etnpilot smoke                       # the project's default provider
+etnpilot smoke --provider openai --model gpt-5.6-sol
+etnpilot smoke --skip tools,stream,toolstream   # fewer requests
+etnpilot smoke --json
+```
+
+A handful of tiny real requests (a few cents at most), then a report that can
+be pasted as it is:
+
+```
+✓ key    provider 'openai' (openai-compatible, gpt-5), key stored login (peter91v)
+✓ reply  gpt-5 via responses, 12 in / 3 out                          1.1 s
+✓ tools  1 tool call(s), gpt-5 via responses, 160 in / 24 out        3.9 s
+✓ stream 9 pieces, gpt-5 via responses, 31 in / 36 out               1.8 s
+✓ toolstream 1 tool call(s) while streaming 6 pieces, gpt-5 via responses   4.2 s
+✓ forge  digest of 40 files (6 KiB), 0 credential files left out; nothing sent
+6/6 passed against 'openai'; 363 tokens in, 90 out.
+```
+
+| Step | Checks |
+| --- | --- |
+| `key` | a key resolves for the provider, and from where |
+| `reply` | a plain answer ("pong"), and which API answered (`chat` or `responses`) |
+| `tools` | a read-only tool call in a scratch directory: the model must call it and use what it read |
+| `stream` | the answer arrives in several pieces (the setting `stream` is switched on for this step only) |
+| `toolstream` | the same tool call while the answer streams, on whichever API the model needs — the combination used day to day |
+| `forge` | the repository digest is built; it is not sent |
+
+It never writes to the project, and the tool step runs in a temporary
+directory with only `read_file` and `list_files` offered. A failure prints the
+reason and, where there is one, the command that fixes it.

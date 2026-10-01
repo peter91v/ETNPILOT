@@ -76,6 +76,7 @@ export const CLI_OPTIONS = Object.freeze({
   "rotate-token": { type: "boolean", default: false },
   host: { type: "string" },
   "client-id": { type: "string" },
+  skip: { type: "string" },
   "key-stdin": { type: "boolean", default: false },
   "no-verify": { type: "boolean", default: false },
   port: { type: "string" },
@@ -97,6 +98,7 @@ export const CLI_OPTIONS = Object.freeze({
   path: { type: "string" },
   url: { type: "string" },
   provider: { type: "string" },
+  model: { type: "string" },
   out: { type: "string", short: "o" },
   template: { type: "string", short: "t" },
   "no-import": { type: "boolean" },
@@ -133,6 +135,7 @@ Usage:
   etnpilot config set <path> <value> [--global] [--root directory]
   etnpilot config unset <path> [--global] [--root directory]
   etnpilot config diff [--root directory]
+  etnpilot smoke [--provider name] [--model id] [--skip key,reply,tools,stream,toolstream,forge] [--json]
   etnpilot forge [--root directory] [--dry-run]
   etnpilot content lock [--root directory]
   etnpilot content verify [--root directory]
@@ -345,6 +348,23 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     const changes = await diffSettings({ root: resolve(values.root) });
     if (changes.length === 0) console.log("No local settings. This project behaves as it was committed.");
     else console.log(JSON.stringify(changes, null, 2));
+  } else if (command === "smoke") {
+    // A few tiny real requests against the configured provider: the login, one
+    // answer, one tool call, one streamed answer, and the forge digest.
+    const { runSmoke, formatSmoke, SMOKE_STEPS } = await import("../runtime/smoke.js");
+    const root = resolve(values.root);
+    const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"));
+    const skip = String(values.skip ?? "").split(",").map((name) => name.trim()).filter(Boolean);
+    const unknown = skip.filter((name) => !SMOKE_STEPS.includes(name));
+    if (unknown.length > 0) throw new Error(`Unknown step${unknown.length === 1 ? "" : "s"}: ${unknown.join(", ")}. Steps: ${SMOKE_STEPS.join(", ")}.`);
+    console.log("etnpilot smoke: a few tiny real requests (a few cents at most). Nothing is written to the project.");
+    const report = await runSmoke(root, {
+      config, provider: values.provider, model: values.model, skip,
+      onStep: (id) => { if (!values.json && process.stdout.isTTY) process.stdout.write(`  … ${id}\r`); },
+    });
+    if (values.json) console.log(JSON.stringify(report, null, 2));
+    else for (const line of formatSmoke(report)) console.log(line);
+    return report.steps.some((step) => step.status === "fail") ? 1 : 0;
   } else if (command === "forge") {
     // AgentsForge on a project that already exists: the same request init makes.
     const root = resolve(values.root);
