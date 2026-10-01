@@ -13,7 +13,8 @@ import { describeCall } from "./workspace-tools.js";
 // whole conversation travels with every request, and the reasoning a model did
 // between two tool calls comes back as encrypted items that are handed back
 // as they arrived. That is also why a tool loop works without the server
-// remembering anything.
+// remembering anything. With 'stream' the text is shown as it arrives; the
+// answer the loop works from is still the finished response of the last event.
 
 export function responsesToolSchema(definitions) {
   return definitions.map((definition) => ({

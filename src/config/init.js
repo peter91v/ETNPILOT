@@ -61,8 +61,8 @@ providers:
     tools: true
     # Which OpenAI API is spoken. 'auto' starts on /chat/completions and switches
     # by itself, once, when a model says it needs /responses for tools (newer
-    # models do). 'responses' always speaks it; 'chat' never does. Answers are
-    # not streamed on /responses yet.
+    # models do). 'responses' always speaks it; 'chat' never does. 'stream: true'
+    # applies to either.
     # api: auto
     # Uncomment for a reasoning model that refuses function tools on
     # /v1/chat/completions ("set reasoning_effort to 'none'"). It turns that
