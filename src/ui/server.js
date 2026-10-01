@@ -91,7 +91,7 @@ export async function createReviewServer({
       if (request.method === "POST" && url.pathname === "/api/project/create") {
         if (state) throw badRequest("This directory already has a project.");
         const body = await readJsonBody(request);
-        const created = await createProject({ root, template: String(body.template ?? "default") })
+        const created = await createProject({ root, template: String(body.template ?? "default"), importExisting: body.importExisting !== false })
           .catch((error) => { throw error instanceof TypeError ? badRequest(error.message) : error; });
         state = await openProjectState({ root, env });
         // Now there is somewhere to keep it, so the link survives a restart

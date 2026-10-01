@@ -365,6 +365,8 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
         return 0;
       }
       console.log(`Created ${setup.created.configFile} (${setup.created.template}).`);
+      for (const line of setup.created.importLines ?? []) console.log(line);
+      if (setup.created.importLines?.length) console.log("Review what came along, then run 'etnpilot content lock'.");
     }
     const state = await openProjectState({ root });
     const app = createTuiApp({ state, actor: values.actor });

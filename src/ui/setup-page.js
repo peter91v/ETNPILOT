@@ -12,6 +12,7 @@ export function renderSetupPage(token, status) {
     configFile: status.configFile,
     checkout: status.checkout,
     templates: status.templates,
+    importLines: status.importable?.lines ?? [],
   });
   return `<!doctype html>
 <html lang="en">
@@ -126,6 +127,12 @@ export function renderSetupPage(token, status) {
   <p>Choose what to create. It writes <code>.etnpilot/</code> — the configuration, one agent manifest
      and its prompt. Nothing outside that directory is touched, and nothing is committed for you.</p>
   <div class="templates" id="templates"></div>
+  <section class="notice" id="found" hidden>
+    <label class="footnote"><input type="checkbox" id="import" checked>
+      Bring these along from this project's other coding-agent files</label>
+    <ul id="found-list"></ul>
+    <p class="footnote">Copied, never over anything. Unreviewed until you run <code>etnpilot content lock</code>.</p>
+  </section>
   <div class="actions">
     <button class="btn state" id="create">Create it</button>
     <span class="footnote" id="status"></span>
@@ -139,6 +146,15 @@ const STATUS = ${data};
 let chosen = STATUS.templates[0]?.id;
 
 document.getElementById("root").textContent = STATUS.root;
+if (STATUS.importLines.length > 0) {
+  const list = document.getElementById("found-list");
+  for (const line of STATUS.importLines) {
+    const item = document.createElement("li");
+    item.textContent = line.trim();
+    list.append(item);
+  }
+  document.getElementById("found").hidden = false;
+}
 if (!STATUS.checkout.inside) {
   const box = document.getElementById("checkout");
   box.textContent = "This is not a git checkout. A project can still be created; a run needs one, "
@@ -189,12 +205,31 @@ async function create() {
     const response = await fetch("/api/project/create", {
       method: "POST",
       headers: { "x-etnpilot-token": TOKEN, "content-type": "application/json" },
-      body: JSON.stringify({ template: chosen }),
+      body: JSON.stringify({ template: chosen, importExisting: document.getElementById("import").checked }),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error ?? ("request failed (" + response.status + ")"));
     // The server is serving the review page now; this one has nothing left
     // to say, so it gets out of the way.
+    // What came along is shown before the page moves on: it is the part of
+    // creating a project that is not obvious from the button.
+    const lines = payload.importLines ?? [];
+    if (lines.length > 0) {
+      const list = document.getElementById("found-list");
+      list.replaceChildren();
+      for (const line of lines) {
+        const item = document.createElement("li");
+        item.textContent = line.trim();
+        list.append(item);
+      }
+      document.getElementById("found").hidden = false;
+      document.getElementById("import").parentElement.hidden = true;
+      status.textContent = "Created " + payload.configFile + ".";
+      button.textContent = "Open the review page";
+      button.disabled = false;
+      button.onclick = () => location.reload();
+      return;
+    }
     status.textContent = "Created " + payload.configFile + ". Opening the review page…";
     location.reload();
   } catch (failure) {
@@ -206,7 +241,7 @@ async function create() {
   }
 }
 
-document.getElementById("create").addEventListener("click", () => { void create(); });
+document.getElementById("create").addEventListener("click", () => { if (!document.getElementById("create").onclick) void create(); });
 renderTemplates();
 </script>
 </body>

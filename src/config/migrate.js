@@ -69,14 +69,21 @@ const TOOL_NAMES = Object.freeze({
 });
 const EVERY_TOOL = Object.freeze(["read_file", "list_files", "search_files", "write_file", "edit_file", "run_command", "fetch_url"]);
 
-export async function importExistingProject(root, { configDir = join(root, ".etnpilot") } = {}) {
-  const report = { instructions: [], agents: [], skills: [], skipped: [], notes: [] };
+// With 'dryRun' nothing is written: the report says what would be imported, so a
+// surface can show it before anyone has chosen to create the project.
+export async function importExistingProject(root, { configDir = join(root, ".etnpilot"), dryRun = false } = {}) {
+  const report = { instructions: [], agents: [], skills: [], skipped: [], notes: [], dryRun };
   const seen = new Set();
-  await importInstructions(root, configDir, report, seen);
-  const agentNames = new Set();
-  await importAgents(root, configDir, report, agentNames);
-  await importSkills(root, configDir, report);
-  await noteWhatIsLeft(root, report);
+  dry = dryRun;
+  try {
+    await importInstructions(root, configDir, report, seen);
+    const agentNames = new Set();
+    await importAgents(root, configDir, report, agentNames);
+    await importSkills(root, configDir, report);
+    await noteWhatIsLeft(root, report);
+  } finally {
+    dry = false;
+  }
   return report;
 }
 
@@ -84,7 +91,7 @@ export function summarizeImport(report) {
   const lines = [];
   const count = (list, word) => `${list.length} ${word}${list.length === 1 ? "" : "s"}`;
   if (report.instructions.length + report.agents.length + report.skills.length > 0) {
-    lines.push(`Imported ${count(report.instructions, "instruction file")}, ${count(report.agents, "agent")} and ${count(report.skills, "skill")} from this project:`);
+    lines.push(`${report.dryRun ? "Found" : "Imported"} ${count(report.instructions, "instruction file")}, ${count(report.agents, "agent")} and ${count(report.skills, "skill")} ${report.dryRun ? "that can be brought along" : "from this project"}:`);
     for (const entry of [...report.instructions, ...report.agents, ...report.skills]) lines.push(`  ${entry.from}  ->  ${entry.to}`);
   }
   for (const entry of report.skipped) lines.push(`  not imported: ${entry.from} — ${entry.reason}`);
@@ -174,9 +181,7 @@ async function importAgents(root, configDir, report, names) {
           ? ["# The source did not restrict this agent's tools, so neither does this file. Name them with 'tools: [...]' to make it read-only, for example."]
           : [YAML.stringify({ tools: mapped.tools }, { flowCollectionPadding: false }).trimEnd()]),
       ];
-      await mkdir(dirname(promptPath), { recursive: true });
       await writeNew(promptPath, body.trim() + "\n");
-      await mkdir(dirname(manifestPath), { recursive: true });
       await writeNew(manifestPath, lines.join("\n") + "\n");
       report.agents.push({ from: path, to: `.etnpilot/agents/${name}.yaml` });
     }
@@ -227,14 +232,14 @@ async function importSkills(root, configDir, report) {
         report.skipped.push({ from: `${directory}/${entry.name}`, reason: `.etnpilot/skills/${name} already exists` });
         continue;
       }
-      const copied = await copyTree(source, target, report, `${directory}/${entry.name}`);
+      const copied = await copyTree(source, target, report, `${directory}/${entry.name}`, dry);
       if (copied === 0) continue;
       report.skills.push({ from: `${directory}/${entry.name}`, to: `.etnpilot/skills/${name}` });
     }
   }
 }
 
-async function copyTree(source, target, report, label) {
+async function copyTree(source, target, report, label, dryRun = false) {
   let copied = 0;
   async function visit(from, to, depth) {
     for (const entry of await readdir(from, { withFileTypes: true })) {
@@ -254,8 +259,10 @@ async function copyTree(source, target, report, label) {
         report.notes.push(`${label}: '${entry.name}' is over 1 MiB and was not copied.`);
         continue;
       }
-      await mkdir(dirname(targetPath), { recursive: true });
-      await writeFile(targetPath, await readFile(sourcePath), { flag: "wx" });
+      if (!dryRun) {
+        await mkdir(dirname(targetPath), { recursive: true });
+        await writeFile(targetPath, await readFile(sourcePath), { flag: "wx" });
+      }
       copied += 1;
     }
   }
@@ -334,7 +341,10 @@ async function exists(path) {
   return Boolean(await lstat(path).catch(() => undefined));
 }
 
+let dry = false;
+
 async function writeNew(path, content) {
+  if (dry) return !(await exists(path));
   await mkdir(dirname(path), { recursive: true });
   return writeFile(path, content, { encoding: "utf8", flag: "wx" }).then(() => true, (error) => {
     if (error.code === "EEXIST") return false;

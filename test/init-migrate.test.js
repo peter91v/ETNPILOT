@@ -108,3 +108,24 @@ test("--no-import (importExisting: false) starts from nothing", async () => {
   assert.equal(result.imported, undefined);
   assert.deepEqual(await readdir(join(root, ".etnpilot/instructions")), []);
 });
+
+test("the first-run screens say what they found, and what was brought along", async () => {
+  const { describeProject, createProject } = await import("../src/runtime/first-run.js");
+  const { renderFirstRun } = await import("../src/tui/first-run.js");
+  const { renderSetupPage } = await import("../src/ui/setup-page.js");
+  const root = await existingProject();
+
+  const status = await describeProject({ root });
+  assert.ok(status.importable.agents.length >= 2);
+  assert.deepEqual(await readdir(root).then((names) => names.includes(".etnpilot")), false, "describing writes nothing");
+
+  const screen = renderFirstRun(status, { width: 100, height: 40, color: false }).join("\n");
+  assert.match(screen, /Found here, and brought along/);
+  assert.match(screen, /CLAUDE\.md/);
+  assert.match(renderFirstRun(status, { width: 100, height: 40, color: false, importing: false }).join("\n"), /not brought along/);
+  assert.match(renderSetupPage("t", status), /CLAUDE\.md/);
+
+  const created = await createProject({ root, importExisting: false });
+  assert.equal(created.imported, undefined);
+  assert.deepEqual(await readdir(join(root, ".etnpilot/instructions")), []);
+});
