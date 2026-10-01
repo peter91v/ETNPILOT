@@ -267,3 +267,27 @@ test("rotation can be set or switched off", async () => {
   assert.equal(off.rotateBytes, 0);
   await assert.rejects(createTelemetry({ root: "/tmp/x", config: { observability: { enabled: true, rotateBytes: -1 } } }), /positive/);
 });
+
+test("usage is totalled by model and by UTC day, the way a provider's dashboard groups it", async () => {
+  const { mkdtemp } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-usage-"));
+  const file = join(root, "t.jsonl");
+  const days = [Date.UTC(2026, 9, 1, 23, 59), Date.UTC(2026, 9, 2, 0, 1), Date.UTC(2026, 9, 2, 12, 0)];
+  let at = 0;
+  const telemetry = new Telemetry({ file, now: () => days[at], pricing: { currency: "USD", models: { a: { inputPerMillion: 1, outputPerMillion: 2 }, b: { inputPerMillion: 10, outputPerMillion: 20 } } } });
+  for (const [index, model] of ["a", "a", "b"].entries()) {
+    at = index;
+    const accounting = telemetry.recordProviderUsage({ workflowRunId: "w", agentRunId: `r${index}`, provider: "p", model, usage: { inputTokens: 1000, outputTokens: 100, requests: 2 } });
+    const span = telemetry.startSpan("gen_ai.invoke_agent", { attributes: { "etnpilot.workflow.run_id": "w", "gen_ai.request.model": model } });
+    await span.end({ attributes: { ...telemetryProviderAttributes(accounting), "gen_ai.request.model": model } });
+  }
+  const summary = await summarizeTelemetryFile(file);
+  assert.deepEqual(Object.keys(summary.models).sort(), ["a", "b"]);
+  assert.equal(summary.models.a.calls, 2);
+  assert.equal(summary.models.a.inputTokens, 2000);
+  assert.deepEqual(Object.keys(summary.days), ["2026-10-01", "2026-10-02"]);
+  assert.equal(summary.days["2026-10-02"].inputTokens, 2000);
+  assert.ok(Math.abs(summary.models.b.estimatedCost - 0.012) < 1e-9);
+});

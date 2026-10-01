@@ -216,7 +216,7 @@ test("a setting that only accepts certain values offers them, and they are accep
   // provider to route to is whichever providers this project configures.
   assert.deepEqual(byPath["defaultProvider"].choices, {
     kind: "one",
-    values: ["github-copilot", "anthropic", "openai"],
+    values: ["github-copilot", "anthropic", "openai", "github-models"],
   });
   // A free-text setting is left alone rather than given a made-up list.
   assert.equal(byPath["git.committer.name"].choices, undefined);

@@ -240,3 +240,19 @@ test("lists with nothing usable in them are still not an answer", async () => {
   const report = await forgeProject(root, { config: {}, runModel: async () => ({ text: '{"agents":[{"name":"","prompt":""}],"skills":[],"instructions":[]}' }) });
   assert.match(report.notes.join("\n"), /could not be used \(it proposed nothing\)/);
 });
+
+test("with a preview nothing is written until the proposal is accepted", async () => {
+  const root = await repository();
+  await initializeProject(root, { forge: false, importExisting: false });
+  const config = await loadConfig(join(root, ".etnpilot/etnpilot.yaml"), {});
+  let shown;
+  const declined = await forgeProject(root, { config, runModel: answer(PLAN), preview: async (lines) => { shown = lines; return false; } });
+  assert.ok(shown.some((line) => /^agent cart-builder/.test(line)));
+  assert.ok(shown.some((line) => /^skill run-tests/.test(line)));
+  assert.equal(declined.agents.length, 0);
+  assert.match(declined.notes.join("\n"), /not accepted/);
+  await assert.rejects(readFile(join(root, ".etnpilot/agents/cart-builder.yaml"), "utf8"));
+  const accepted = await forgeProject(root, { config, runModel: answer(PLAN), preview: async () => true });
+  assert.ok(accepted.agents.length > 0);
+  assert.match(await readFile(join(root, ".etnpilot/agents/cart-builder.yaml"), "utf8"), /name: cart-builder/);
+});

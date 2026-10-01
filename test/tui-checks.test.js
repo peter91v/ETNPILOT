@@ -63,7 +63,7 @@ test("each check reports what it found, against a real project", async () => {
 
   // Every provider the project configures, against the policy in effect.
   const policy = await runProjectCheck("policy", { root });
-  assert.deepEqual(policy.findings.map((finding) => finding.label), ["github-copilot", "anthropic", "openai"]);
+  assert.deepEqual(policy.findings.map((finding) => finding.label), ["github-copilot", "anthropic", "openai", "github-models"]);
   assert.equal(policy.findings.every((finding) => finding.tone === "ok"), true, "the shipped project allows its own providers");
 
   // 'deps' names the ecosystem it found; a list of records joined as text

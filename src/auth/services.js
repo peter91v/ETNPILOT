@@ -15,6 +15,7 @@ export const SERVICES = Object.freeze({
     secret: "anthropic.apiKey",
     env: "ANTHROPIC_API_KEY",
     method: "key",
+    usedFor: "the anthropic provider",
     keyHelp: "Create a key at console.anthropic.com → API keys.",
     baseUrl: "https://api.anthropic.com",
     // Where a stored credential may be sent. A project's configuration names
@@ -28,6 +29,7 @@ export const SERVICES = Object.freeze({
     secret: "openai.apiKey",
     env: "OPENAI_API_KEY",
     method: "key",
+    usedFor: "the openai provider",
     keyHelp: "Create a key at platform.openai.com → API keys.",
     baseUrl: "https://api.openai.com/v1",
     hosts: ["api.openai.com"],
@@ -42,7 +44,10 @@ export const SERVICES = Object.freeze({
     host: "https://github.com",
     apiBase: "https://api.github.com",
     hosts: ["github.com", "api.github.com", "models.github.ai"],
-    keyHelp: "A personal access token from github.com/settings/tokens works too.",
+    // What this login is for: the 'github-models' provider (models served by
+    // GitHub, no SDK) and, where the SDK exists, the Copilot provider.
+    usedFor: "the github-models provider and GitHub Copilot",
+    keyHelp: "A personal access token from github.com/settings/tokens works too; for GitHub Models it needs the 'models' permission.",
     appHelp: "Register an OAuth App at github.com/settings/developers, tick 'Enable Device Flow', and pass its client id with --client-id.",
   },
   gitlab: {
@@ -55,6 +60,7 @@ export const SERVICES = Object.freeze({
     host: "https://gitlab.com",
     // The host a person signed in to is added when the login is stored.
     hosts: [],
+    usedFor: "merge requests, pipelines and publishing a run",
     keyHelp: "A personal access token (scope 'api') from your profile → Access tokens works too.",
     appHelp: "Create an application in GitLab (Preferences → Applications) with scope 'api', not confidential, and pass its id with --client-id. The device flow needs GitLab 17.9 or newer.",
   },

@@ -170,6 +170,7 @@ export async function authStatus({ env = process.env } = /** @type {any} */ ({})
       environmentVariable: service.env,
       stored: stored ?? undefined,
       clientId: app?.clientId ? true : false,
+      usedFor: service.usedFor,
       help: service.keyHelp,
       appHelp: service.appHelp,
       defaultHost: service.host,

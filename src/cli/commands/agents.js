@@ -20,7 +20,7 @@ export const agentsCommands = [
       if (unknown.length > 0) throw new Error(`Unknown step${unknown.length === 1 ? "" : "s"}: ${unknown.join(", ")}. Steps: ${SMOKE_STEPS.join(", ")}.`);
       console.log("etnpilot smoke: a few tiny real requests (a few cents at most). Nothing is written to the project.");
       const report = await runSmoke(root, {
-        config, provider: values.provider, model: values.model, skip,
+        config, provider: values.provider, model: values.model, skip, gitlab: values.gitlab,
         onStep: (id) => { if (!values.json && process.stdout.isTTY) process.stdout.write(`  … ${id}\r`); },
       });
       if (values.json) console.log(JSON.stringify(report, null, 2));
@@ -34,7 +34,24 @@ export const agentsCommands = [
       // AgentsForge on a project that already exists: the same request init makes.
       const root = resolve(values.root);
       const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"));
-      const report = await forgeProject(root, { config, dryRun: Boolean(values["dry-run"]), onProgress: (line) => console.log(line) });
+      const preview = values.preview
+        ? async (lines) => {
+          console.log("AgentsForge proposes:");
+          for (const line of lines) console.log(`  - ${line}`);
+          if (!process.stdin.isTTY) {
+            console.log("(No terminal to ask on, so nothing is written. Run it on a terminal to accept.)");
+            return false;
+          }
+          const { createInterface } = await import("node:readline/promises");
+          const asker = createInterface({ input: process.stdin, output: process.stdout });
+          try {
+            return /^y(es)?$/i.test((await asker.question("Write these? [y/N] ")).trim());
+          } finally {
+            asker.close();
+          }
+        }
+        : undefined;
+      const report = await forgeProject(root, { config, dryRun: Boolean(values["dry-run"]), preview, onProgress: (line) => console.log(line) });
       if (values["dry-run"]) {
         console.log(`AgentsForge would send a digest of ${report.sent.files} files (${Math.round(report.sent.bytes / 1024)} KiB; ${report.sent.leftOut} credential files left out). Included in part:`);
         for (const path of report.sent.included) console.log(`  ${path}`);

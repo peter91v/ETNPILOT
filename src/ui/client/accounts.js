@@ -57,7 +57,8 @@ function accountCard(service) {
     lines.push(el("p", { text: (stored.kind === "oauth" ? "Signed in " : "Key kept ") + who + since }));
     if (stored.expiresAt) lines.push(el("p", { class: "muted", text: "Renewed by itself before it runs out." }));
   }
-  const body = [...lines];
+  const body = [el("p", { class: "muted", text: "Used for: " + service.usedFor })];
+  body.push(...lines);
   const activeFlow = deviceSignIn && deviceSignIn.service === service.id ? deviceSignIn : undefined;
   if (activeFlow) body.push(deviceBox(service, activeFlow));
   else if (service.method === "device") body.push(...deviceControls(service, draft, busy));
@@ -80,27 +81,33 @@ function keyControls(service, draft, busy) {
   ];
 }
 
+// Browser sign-in needs an OAuth application someone registered once; a pasted
+// token needs nothing. So until the application's id is known the token comes
+// first and the browser sign-in is the folded alternative, and afterwards the
+// other way round.
 function deviceControls(service, draft, busy) {
-  const controls = [];
+  const oauth = [];
   if (!service.clientId) {
-    controls.push(field("client-" + service.id, "OAuth application id", draft.clientId, (value) => { draft.clientId = value; }, "Needed once"));
-    controls.push(el("p", { class: "muted", text: service.appHelp }));
+    oauth.push(field("client-" + service.id, "OAuth application id", draft.clientId, (value) => { draft.clientId = value; }, "Needed once"));
+    oauth.push(el("p", { class: "muted", text: service.appHelp }));
   }
   if (service.id === "gitlab") {
-    controls.push(field("host-gitlab", "GitLab address", draft.host, (value) => { draft.host = value; }, accountsData.projectGitLabHost || service.defaultHost));
+    oauth.push(field("host-gitlab", "GitLab address", draft.host, (value) => { draft.host = value; }, accountsData.projectGitLabHost || service.defaultHost));
   }
-  controls.push(el("div", { class: "card-actions" }, [
+  oauth.push(el("div", { class: "card-actions" }, [
     button(service.stored ? "Sign in again" : "Sign in with " + service.label, { class: "btn tonal", disabled: busy, onClick: () => startDeviceSignIn(service) }),
   ]));
   const token = el("input", { attrs: { id: "token-" + service.id, type: "password", autocomplete: "off", placeholder: "Paste a token", value: draft.value } });
   token.addEventListener("input", () => { draft.value = token.value; });
-  controls.push(el("details", { class: "fold" }, [
-    el("summary", { text: "Use a token instead" }),
+  const tokenParts = [
     el("div", { class: "field" }, [el("label", { text: service.label + " token", attrs: { for: "token-" + service.id } }), token]),
     el("p", { class: "muted", text: service.help }),
-    el("div", { class: "card-actions" }, [button("Check and save", { class: "btn", disabled: busy, onClick: () => saveAccountKey(service) })]),
-  ]));
-  return controls;
+    el("div", { class: "card-actions" }, [button("Check and save", { class: service.clientId ? "btn" : "btn tonal", disabled: busy, onClick: () => saveAccountKey(service) })]),
+  ];
+  if (service.clientId) {
+    return [...oauth, el("details", { class: "fold" }, [el("summary", { text: "Use a token instead" }), ...tokenParts])];
+  }
+  return [...tokenParts, el("details", { class: "fold" }, [el("summary", { text: "Use browser sign-in (needs an OAuth app)" }), ...oauth])];
 }
 
 function deviceBox(service, flow) {

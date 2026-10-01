@@ -212,6 +212,20 @@ export async function summarizeTelemetryFile(path, { workflowRunId, root = "", c
   const unpriced = new Map();
   const priced = new Set();
   const pricingSources = new Map();
+  // The same totals by model and by (UTC) day, which is how a provider's
+  // dashboard groups them, so the two can be compared line by line.
+  const byModel = new Map();
+  const byDay = new Map();
+  const tally = (map, key, attributes, cost) => {
+    const row = map.get(key) ?? { calls: 0, requests: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, estimatedCost: undefined };
+    row.calls += 1;
+    row.requests += attributes["etnpilot.provider.requests"] ?? 0;
+    row.inputTokens += attributes["gen_ai.usage.input_tokens"] ?? 0;
+    row.outputTokens += attributes["gen_ai.usage.output_tokens"] ?? 0;
+    row.cacheReadTokens += attributes["gen_ai.usage.cache_read.input_tokens"] ?? 0;
+    if (cost !== undefined) row.estimatedCost = (row.estimatedCost ?? 0) + cost;
+    map.set(key, row);
+  };
   let spans = 0;
   for (const line of content.split("\n").filter(Boolean)) {
     const payload = JSON.parse(line);
@@ -236,6 +250,9 @@ export async function summarizeTelemetryFile(path, { workflowRunId, root = "", c
             pricingSources.set(JSON.stringify(provenance), provenance);
           }
           const retrospectiveCost = retroactive(attributes, summary, model, { root, autoUpdate: config.observability?.pricing?.autoUpdate, pricing: config.observability?.pricing });
+          const day = span.startTimeUnixNano ? new Date(Number(BigInt(span.startTimeUnixNano) / 1_000_000n)).toISOString().slice(0, 10) : "unknown";
+          tally(byModel, model, attributes, attributes["etnpilot.cost.estimated"] ?? retrospectiveCost);
+          tally(byDay, day, attributes, attributes["etnpilot.cost.estimated"] ?? retrospectiveCost);
           if (attributes["etnpilot.cost.estimated"] !== undefined) {
             summary.estimatedCost = (summary.estimatedCost ?? 0) + attributes["etnpilot.cost.estimated"];
             summary.pricedInvocations += 1;
@@ -263,6 +280,8 @@ export async function summarizeTelemetryFile(path, { workflowRunId, root = "", c
     spans,
     workflowRunId,
     ...summary,
+    models: Object.fromEntries([...byModel].sort((a, b) => b[1].inputTokens - a[1].inputTokens)),
+    days: Object.fromEntries([...byDay].sort((a, b) => a[0].localeCompare(b[0]))),
     ...(pricingSources.size ? { pricingSources: [...pricingSources.values()], pricing: pricingSources.size === 1 ? [...pricingSources.values()][0] : { source: "multiple rate observations", status: "mixed" } } : {}),
     // A cost is recorded when the call happens, so a rate set afterwards
     // never reaches a call already on disk. Naming the models says which rate

@@ -9,6 +9,7 @@ import { queueCommands } from "./commands/queue.js";
 import { receiptsCommands } from "./commands/receipts.js";
 import { securityCommands } from "./commands/security.js";
 import { serversCommands } from "./commands/servers.js";
+import { usageCommands } from "./commands/usage.js";
 import { defaultWaitForShutdown, shouldOpenBrowser } from "./shared.js";
 
 // 'diagnose' moved to the runtime layer, because the TUI and the page run the
@@ -28,6 +29,7 @@ export const COMMANDS = [
   ...receiptsCommands,
   ...securityCommands,
   ...opsCommands,
+  ...usageCommands,
 ];
 
 export const CLI_OPTIONS = Object.freeze({
@@ -61,6 +63,8 @@ export const CLI_OPTIONS = Object.freeze({
   skip: { type: "string" },
   "key-stdin": { type: "boolean", default: false },
   "no-verify": { type: "boolean", default: false },
+  preview: { type: "boolean", default: false },
+  gitlab: { type: "boolean", default: false },
   port: { type: "string" },
   status: { type: "string" },
   limit: { type: "string" },
@@ -116,8 +120,8 @@ Usage:
   etnpilot config set <path> <value> [--global] [--root directory]
   etnpilot config unset <path> [--global] [--root directory]
   etnpilot config diff [--root directory]
-  etnpilot smoke [--provider name] [--model id] [--skip key,reply,tools,stream,toolstream,forge] [--json]
-  etnpilot forge [--root directory] [--dry-run]
+  etnpilot smoke [--provider name] [--model id] [--skip key,reply,tools,stream,toolstream,forge] [--gitlab] [--json]
+  etnpilot forge [--root directory] [--dry-run | --preview]
   etnpilot content lock [--root directory]
   etnpilot content verify [--root directory]
   etnpilot webhook serve [--root directory] [--host address] [--port number]
@@ -146,6 +150,7 @@ ${TRUST_USAGE}
   etnpilot scan secrets [--root directory]
   etnpilot attest <receipt-file> [--out file] [--root directory]
   etnpilot telemetry summary [workflow-run-id] [--root directory]
+  etnpilot usage [--json] [--root directory]       tokens, requests and cost by model and by day
   etnpilot doctor [--root directory]
   etnpilot check [name...] [--root directory]
   etnpilot chat [--agent name] [--resume <id>|last | --continue] [--root directory]

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { authStatus } from "../auth/login.js";
 import { Harness } from "../core/harness.js";
+import { GitLabClient } from "../gitlab/client.js";
 import { chooseProvider, forgeProject } from "../forge/forge.js";
 import { registerConfiguredProviders, resolveConfiguredApiKey } from "../providers/register.js";
 import { createSecretResolver } from "../secrets/resolver.js";
@@ -13,10 +14,10 @@ import { createSecretResolver } from "../secrets/resolver.js";
 // pass or fail with the reason, ending in a block that can be pasted back as it
 // is. It spends a few cents at most and never writes to the project.
 
-export const SMOKE_STEPS = Object.freeze(["key", "reply", "tools", "stream", "toolstream", "forge"]);
+export const SMOKE_STEPS = Object.freeze(["key", "reply", "tools", "stream", "toolstream", "forge", "gitlab"]);
 const MARKER = "etnpilot-smoke-7421";
 
-export async function runSmoke(root, { config, env = process.env, provider: wanted, model, skip = [], fetchImpl, factories, onStep = () => {} } = /** @type {any} */ ({})) {
+export async function runSmoke(root, { config, env = process.env, provider: wanted, model, skip = [], gitlab = false, fetchImpl, factories, onStep = () => {} } = /** @type {any} */ ({})) {
   /** @type {{ provider: string | undefined, model: string | undefined, steps: any[], tokens: { input: number, output: number } }} */
   const report = { provider: undefined, model, steps: [], tokens: { input: 0, output: 0 } };
   const chosen = wanted
@@ -113,6 +114,20 @@ export async function runSmoke(root, { config, env = process.env, provider: want
       if (pieces.length < 2) throw new Error(`the text arrived in ${pieces.length} piece(s), not as a stream`);
       return `${calls} tool call(s) while streaming ${pieces.length} pieces, ${account(result)}`;
     },
+    // Reads only: who the token is, and that the project can be seen. Writing to
+    // a project is what scripts/gitlab-smoke.mjs does, on a project made for it.
+    gitlab: async () => {
+      const git = config?.git;
+      if (!git?.baseUrl || !git?.project) throw new Error("'git.baseUrl' and 'git.project' are not set in this project");
+      const token = await resolver.get("gitlab.apiToken", { fallback: { provider: "env", key: "ETNPILOT_GITLAB_TOKEN" }, baseUrl: git.baseUrl });
+      if (!token) {
+        throw Object.assign(new Error(resolver.refusals.get("gitlab.apiToken") ?? "no GitLab token resolves"), { code: "missing_gitlab_token" });
+      }
+      const client = new GitLabClient({ baseUrl: git.baseUrl, token, fetchImpl });
+      const me = await client.request("GET", "/user");
+      const project = await client.project(git.project);
+      return `signed in as ${me.username}, project ${project.path_with_namespace ?? git.project} is visible (default branch ${project.default_branch ?? "?"})`;
+    },
     forge: async () => {
       const dry = await forgeProject(root, /** @type {any} */ ({ config, env, dryRun: true }));
       const sent = dry.sent ?? { files: 0, bytes: 0, leftOut: 0 };
@@ -121,6 +136,7 @@ export async function runSmoke(root, { config, env = process.env, provider: want
   };
 
   for (const id of SMOKE_STEPS) {
+    if (id === "gitlab" && !gitlab) continue;
     if (skip.includes(id)) { report.steps.push({ id, status: "skip" }); continue; }
     const started = Date.now();
     onStep(id);
@@ -159,6 +175,7 @@ function hint(error, chosen) {
   const service = serviceOf(chosen.config);
   if (error.code === "missing_api_key" && service) return `etnpilot login ${service}`;
   if (error.code === "http_401" || error.code === "http_403") return service ? `the key was refused; sign in again with 'etnpilot login ${service}'` : "the key was refused";
+  if (error.code === "missing_gitlab_token") return "etnpilot login gitlab";
   if (error.code === "use_responses_api") return "set providers.<name>.api to responses";
   return undefined;
 }

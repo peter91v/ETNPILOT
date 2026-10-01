@@ -12,6 +12,15 @@
   "bin": {
     "etnpilot": "bin/etnpilot.js"
   },
+  "files": [
+    "bin/",
+    "src/",
+    "docs/",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md",
+    "SECURITY.md"
+  ],
   "scripts": {
     "test": "node --test test/*.test.js",
     "check": "node scripts/check-syntax.mjs && npm run lint && npm run typecheck && node --test test/*.test.js",

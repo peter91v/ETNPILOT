@@ -78,6 +78,8 @@ export async function forgeProject(root, {
   fetchImpl,
   factories,
   dryRun = false,
+  // async (lines) => boolean: shown what would be written, before anything is.
+  preview,
   onProgress = () => {},
   configDir = join(root, ".etnpilot"),
   signal,
@@ -128,8 +130,24 @@ export async function forgeProject(root, {
     report.notes.push("AgentsForge found nothing missing: the agents, skills and instructions this project has already cover what it saw. Nothing was written.");
     return report;
   }
+  if (preview) {
+    const approved = await preview(describePlan(plan));
+    if (!approved) {
+      report.notes.push("Nothing was written: the proposal was not accepted.");
+      return report;
+    }
+  }
   await writePlan(plan, { root, configDir, report, provider: report.provider });
   return report;
+}
+
+// What a plan would add, one line each, for a person to accept or not.
+export function describePlan(plan) {
+  const lines = [];
+  for (const agent of plan.agents) lines.push(`agent ${agent.name} (${agent.tools.join(", ")})${agent.description ? ` — ${agent.description}` : ""}`);
+  for (const skill of plan.skills) lines.push(`skill ${skill.name}${skill.description ? ` — ${skill.description}` : ""}`);
+  for (const instruction of plan.instructions) lines.push(`instruction ${instruction.name}${instruction.scope ? ` (only in ${instruction.scope}/)` : ""}`);
+  return lines;
 }
 
 export function summarizeForge(report) {

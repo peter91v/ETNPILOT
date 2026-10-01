@@ -1,0 +1,39 @@
+name: Live check
+
+# Real requests against a real provider, started by hand. It spends a few cents
+# and needs the maintainer's key as a repository secret, so it never runs on
+# its own and never on a pull request from a fork.
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: Provider name from the project configuration
+        default: openai
+      model:
+        description: Model id (blank = the configured one)
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: etnpilot smoke
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ETNPILOT_TRUST: all
+        run: |
+          mkdir -p /tmp/live/.etnpilot
+          node bin/etnpilot.js init /tmp/live --no-forge --no-import
+          args="--root /tmp/live --provider ${{ inputs.provider }}"
+          if [ -n "${{ inputs.model }}" ]; then args="$args --model ${{ inputs.model }}"; fi
+          node bin/etnpilot.js smoke $args
