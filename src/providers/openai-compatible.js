@@ -112,16 +112,18 @@ export function createOpenAICompatibleProvider({
     name,
     capabilities: tools ? ["chat", "tools"] : ["chat"],
     async invoke(context) {
-      if (useResponses) return invokeResponses(context);
+      // Which of the two APIs answered is part of the result, because it is
+      // the one thing a person cannot see and a smoke test must report.
+      if (useResponses) return { ...(await invokeResponses(context)), api: "responses" };
       try {
-        return await invokeChat(context);
+        return { ...(await invokeChat(context)), api: "chat" };
       } catch (error) {
         // The server named /responses as the way: switch, once, and say nothing
         // of it to the person — the same request, on the API that accepts it.
         // Only before any tool ran, so nothing is done twice.
         if (api === "auto" && error?.code === "use_responses_api" && (error.toolCalls ?? []).length === 0) {
           useResponses = true;
-          return invokeResponses(context);
+          return { ...(await invokeResponses(context)), api: "responses" };
         }
         throw error;
       }
