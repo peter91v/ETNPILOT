@@ -14,6 +14,7 @@
 import { renderChatMarkdown } from "./markdown.js";
 import { CLIENT_CHAT } from "./page/client-chat.js";
 import { CLIENT_CORE } from "./page/client-core.js";
+import { CLIENT_PROJECT } from "./page/client-project.js";
 import { CLIENT_RUNS } from "./page/client-runs.js";
 import { CLIENT_SHELL } from "./page/client-shell.js";
 import { CLIENT_WORKTREES } from "./page/client-worktrees.js";
@@ -44,6 +45,7 @@ ${renderChatMarkdown.toString()}
 ${CLIENT_CHAT}
 ${CLIENT_RUNS}
 ${CLIENT_WORKTREES}
+${CLIENT_PROJECT}
 ${CLIENT_SHELL}
 </script>
 </body>

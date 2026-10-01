@@ -16,7 +16,67 @@ function closeModal(id) {
 
 // The agents are the project's own, read when the dialog opens: a name typed
 // by hand is a run that fails a minute later.
+// Whether a run started now can get past its first step. Asked while the person
+// is still choosing, so the way out is offered instead of an error afterwards.
+let runReadiness = { ready: true };
+
+function showRunReadiness(readiness) {
+  runReadiness = readiness;
+  const banner = $("run-banner");
+  const row = $("run-inplace-row");
+  $("run-inplace-box").checked = false;
+  row.hidden = true;
+  if (readiness.ready) {
+    banner.hidden = true;
+    $("run-submit").disabled = false;
+    return;
+  }
+  banner.className = "banner";
+  banner.hidden = false;
+  const titles = { "not-a-checkout": "This is not a git checkout", "content-not-locked": "Read the project content, then lock it" };
+  $("run-banner-title").textContent = titles[readiness.code] ?? "The project is not committed yet";
+  $("run-banner-text").textContent = readiness.message + ((readiness.fixes ?? []).includes("in-place")
+    ? " Commit it, or work in this directory instead."
+    : " Run the command below in the project's terminal, then start again.");
+  $("run-banner-commands").textContent = (readiness.commands ?? []).join("\\n");
+  $("run-copy").hidden = (readiness.commands ?? []).length === 0;
+  $("run-inplace").hidden = !(readiness.fixes ?? []).includes("in-place");
+  // Starting would only fail, so it waits for one of the two ways out.
+  $("run-submit").disabled = true;
+}
+
+function chooseInPlace() {
+  $("run-banner").className = "banner info";
+  // An information mark, not the warning triangle: nothing is wrong any more.
+  $("run-banner").querySelector("svg").innerHTML = '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.5v.01"/>';
+  $("run-banner-title").textContent = "Working in this directory";
+  $("run-banner-text").textContent = "The run changes your checkout directly. Every write and command still asks you first, and the receipt records where it ran.";
+  $("run-banner-commands").textContent = "";
+  $("run-copy").hidden = true;
+  $("run-inplace").hidden = true;
+  $("run-inplace-box").checked = true;
+  $("run-submit").disabled = false;
+  describeRunChoice();
+}
+
+async function copyRunCommands() {
+  const text = $("run-banner-commands").textContent;
+  try {
+    await navigator.clipboard.writeText(text);
+    toast("Copied. Run it in the project's terminal, then start the run again.");
+  } catch {
+    // No clipboard here (plain http on a phone): select the text so it can be copied by hand.
+    const range = document.createRange();
+    range.selectNodeContents($("run-banner-commands"));
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    toast("Select and copy the commands shown.", "warn");
+  }
+}
+
 async function prepareRunModal() {
+  api("/api/runs/readiness").then(showRunReadiness, () => showRunReadiness({ ready: true }));
   const select = $("run-agent");
   select.replaceChildren(el("option", { text: "the project's own workflow", attrs: { value: "" } }));
   describeRunChoice();
@@ -31,10 +91,18 @@ async function prepareRunModal() {
       attrs: { value: agent.name, ...(agent.error ? { disabled: "disabled" } : {}) },
     }));
   }
+  // Named workflows the project has, when it has any; choosing an agent
+  // instead makes the choice of workflow moot, so the field steps aside.
+  const named = (workflowData ?? (await api("/api/workflows").catch(() => ({ workflows: [] })))).workflows.filter((workflow) => (workflow.errors ?? []).length === 0);
+  const flows = $("run-workflow");
+  flows.replaceChildren(el("option", { text: "the project's own workflow", attrs: { value: "" } }));
+  for (const workflow of named) flows.append(el("option", { text: workflow.name, attrs: { value: workflow.name } }));
+  $("run-workflow-field").hidden = named.length === 0;
   describeRunChoice();
 }
 
 function describeRunChoice() {
+  $("run-workflow").disabled = $("run-agent").value !== "";
   const chosen = $("run-agent").value;
   const agent = (agents?.agents ?? []).find((candidate) => candidate.name === chosen);
   const steps = agents?.steps ?? [];
@@ -45,7 +113,8 @@ function describeRunChoice() {
       : agents?.defaultAgent
         ? "The project's default agent is '" + agents.defaultAgent + "'"
         : "The project runs its default agent")
-      + ". The run works in its own worktree and asks this page for anything it needs approved.";
+      + (($("run-inplace-box").checked ? ". The run works directly in this directory" : ". The run works in its own worktree")
+        + " and asks this page for anything it needs approved.");
     return;
   }
   hint.textContent = "Runs '" + chosen + "' instead of the configured steps"
@@ -68,7 +137,7 @@ async function startRun(event) {
   try {
     const started = await api("/api/runs/start", {
       method: "POST",
-      body: JSON.stringify({ task, agent: $("run-agent").value }),
+      body: JSON.stringify({ task, agent: $("run-agent").value, ...($("run-agent").value === "" && $("run-workflow").value !== "" ? { workflow: $("run-workflow").value } : {}), ...($("run-inplace-box").checked ? { worktree: false } : {}) }),
     });
     $("run-task").value = "";
     clearError();
@@ -79,10 +148,14 @@ async function startRun(event) {
     // whole poll to say where it is makes it look like nothing happened.
     for (const delay of [800, 2000, 4000]) setTimeout(() => refresh(), delay);
   } catch (error) {
-    fail(error);
-    toast(error.message, "bad");
+    // The server refused with a way out: show it where the choice is made.
+    if (error.details?.code) showRunReadiness({ ready: false, message: error.message, ...error.details });
+    else {
+      fail(error);
+      toast(error.message, "bad");
+    }
   } finally {
-    submit.disabled = false;
+    submit.disabled = !runReadiness.ready && !$("run-inplace-box").checked;
   }
 }
 
@@ -192,6 +265,11 @@ async function refresh({ force = false } = {}) {
       usageSignature = finished;
       void loadUsage();
     }
+    // Once at the start, so the overview can say content waits to be reviewed.
+    if (contentData === undefined && !projectLoading) {
+      projectLoading = true;
+      void loadProjectViews().finally(() => { projectLoading = false; });
+    }
   } catch (error) {
     fail(error);
   }
@@ -199,6 +277,7 @@ async function refresh({ force = false } = {}) {
 
 let usageSignature;
 let lastStateSignature;
+let projectLoading = false;
 // How many receipts the list asks for; 'Show more' raises it.
 let runLimit = 20;
 
@@ -259,8 +338,13 @@ $("menu").addEventListener("click", toggleSidebar);
 $("scrim").addEventListener("click", closeSidebar);
 $("fab-run").addEventListener("click", () => { openModal("run-modal"); void prepareRunModal(); });
 $("open-run").addEventListener("click", () => { openModal("run-modal"); void prepareRunModal(); });
-$("run-agent").addEventListener("change", describeRunChoice);
 $("run-form").addEventListener("submit", startRun);
+$("run-inplace").addEventListener("click", chooseInPlace);
+$("workflow-save").addEventListener("click", () => { void saveWorkflow(); });
+$("agent-save").addEventListener("click", () => { void saveAgent(); });
+$("lock-confirm").addEventListener("click", () => { void confirmLock(); });
+$("run-agent").addEventListener("change", describeRunChoice);
+$("run-copy").addEventListener("click", () => { void copyRunCommands(); });
 $("open-palette").addEventListener("click", () => {
   $("palette-input").value = "";
   paletteIndex = 0;

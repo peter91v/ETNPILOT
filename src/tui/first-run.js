@@ -16,6 +16,8 @@ export function renderFirstRun(status, {
   color = true,
   message,
   busy = false,
+  importing = true,
+  forging = true,
 } = {}) {
   const style = createStyle({ color });
   const templates = status.templates ?? [];
@@ -49,6 +51,16 @@ export function renderFirstRun(status, {
       }
     }
   }
+  if (status.importable) {
+    lines.push("", importing ? style.ink("Found here, and brought along:") : style.muted("Found here, not brought along (i turns it on):"));
+    for (const line of status.importable.lines.slice(1)) lines.push(style.dim(truncate(line, Math.max(20, width - 2))));
+  }
+  if (status.forge) {
+    lines.push("", forging
+      ? style.ink(`AgentsForge will read this repository and ask ${status.forge.provider} to write agents, skills and instructions for it.`)
+      : style.muted("AgentsForge is off (f turns it on)."));
+    if (forging) lines.push(style.dim("  A bounded digest is sent; credential files are never read. Unreviewed until 'etnpilot content lock'."));
+  }
   lines.push("", style.dim("It writes '.etnpilot/': the configuration, one agent manifest and its prompt."));
   lines.push(style.dim("Nothing outside that directory is touched, and nothing is committed for you."));
   if (busy) lines.push("", style.warn("Creating…"));
@@ -57,7 +69,7 @@ export function renderFirstRun(status, {
     for (const piece of wrap(message, width - 2)) lines.push(style.warn(piece));
   }
   while (lines.length < height - 1) lines.push("");
-  const keys = [["↑↓", "choose"], ["enter", "create it"], ["q", "leave"]];
+  const keys = [["↑↓", "choose"], ["enter", "create it"], ...(status.importable ? [["i", importing ? "don't bring files along" : "bring files along"]] : []), ...(status.forge ? [["f", forging ? "no AgentsForge" : "AgentsForge"]] : []), ["q", "leave"]];
   lines.push(keys.map(([key, label]) => `${style.accent(key)} ${style.dim(label)}`).join(style.dim("  ")));
   return lines.slice(0, height).map((line) => truncate(line, width));
 }
@@ -74,6 +86,8 @@ export function createFirstRunApp({
   let cursor = 0;
   let message;
   let busy = false;
+  let importing = true;
+  let forging = true;
   let created;
   let stopped = false;
   let onExit;
@@ -82,6 +96,7 @@ export function createFirstRunApp({
     get status() { return status; },
     get cursor() { return cursor; },
     get created() { return created; },
+    get importing() { return importing; },
 
     async refresh() {
       status = await describeProject({ root });
@@ -96,6 +111,8 @@ export function createFirstRunApp({
         cursor,
         message,
         busy,
+        importing,
+        forging,
       });
     },
 
@@ -110,13 +127,15 @@ export function createFirstRunApp({
       const templates = status.templates ?? [];
       if (key === "\u001B[B" || key === "j") cursor = clamp(cursor + 1, templates.length);
       else if (key === "\u001B[A" || key === "k") cursor = clamp(cursor - 1, templates.length);
+      else if (key === "i" && status.importable) importing = !importing;
+      else if (key === "f" && status.forge) forging = !forging;
       else if (key === "\r" || key === "\n") {
         const template = templates[clamp(cursor, templates.length)];
         if (!template) return true;
         busy = true;
         app.paint();
         try {
-          created = await createProject({ root, template: template.id });
+          created = await createProject({ root, template: template.id, importExisting: importing, forge: status.forge && forging ? "auto" : false });
           return false;
         } catch (error) {
           // A refusal belongs on the screen that asked, with the reason.

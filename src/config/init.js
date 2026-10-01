@@ -1,4 +1,6 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { importExistingProject, importedAgentNames } from "./migrate.js";
+import { chooseProvider, forgeProject } from "../forge/forge.js";
 import { join } from "node:path";
 import YAML from "yaml";
 
@@ -57,6 +59,11 @@ providers:
     model: gpt-5
     apiKeySecret: openai.apiKey
     tools: true
+    # Which OpenAI API is spoken. 'auto' starts on /chat/completions and switches
+    # by itself, once, when a model says it needs /responses for tools (newer
+    # models do). 'responses' always speaks it; 'chat' never does. Answers are
+    # not streamed on /responses yet.
+    # api: auto
     # Uncomment for a reasoning model that refuses function tools on
     # /v1/chat/completions ("set reasoning_effort to 'none'"). It turns that
     # model's reasoning off, which is why it is not on by default.
@@ -372,6 +379,15 @@ tools: [read_file, list_files, search_files, codegraph.codegraph_explore, write_
 # effort: medium
 `;
 
+const DELEGATION_PROMPT = `
+Other agents are available to you through spawn_subagent, each with a
+description of what it is for. Plan first. Hand a piece of work to the agent
+whose job it is, and give it the whole task, because it cannot see this
+conversation. Read what it reports back before you rely on it: it reports its
+own work, and checking is yours. Do the small things yourself rather than
+delegating them.
+`;
+
 const STARTER_PROMPT = `You implement one requested change at a time in the current repository.
 
 Read before you write, keep the change minimal and reviewable, and run the
@@ -426,7 +442,7 @@ export function renderProjectConfig(template = "default") {
   return String(document);
 }
 
-export async function initializeProject(root, { template = "default" } = {}) {
+export async function initializeProject(root, { template = "default", importExisting = true, forge = "auto", env = process.env, onProgress } = {}) {
   const config = renderProjectConfig(template);
   const configDir = join(root, ".etnpilot");
   await Promise.all([
@@ -446,7 +462,67 @@ export async function initializeProject(root, { template = "default" } = {}) {
     writeIfAbsent(join(configDir, "agents", "orchestrator.yaml"), STARTER_AGENT),
     writeIfAbsent(join(configDir, "prompts", "orchestrator.md"), STARTER_PROMPT),
   ]);
-  return { root, configDir, template };
+  // A project that already has instructions, agents or skills for another
+  // coding agent keeps them: they are copied in, never over anything here.
+  const imported = importExisting ? await importExistingProject(root, { configDir }) : undefined;
+  const forged = await runForge(root, configDir, { forge, env, onProgress });
+  // Agents that were imported or forged are only reachable if something may
+  // hand work to them; what that changed is said where the person is reading.
+  const wiring = { notes: [] };
+  await wireOrchestrator(configDir, wiring);
+  (imported ?? forged ?? { notes: [] }).notes.push(...wiring.notes);
+  return { root, configDir, template, ...(imported ? { imported } : {}), ...(forged ? { forged } : {}) };
+}
+
+// Imported agents are only reachable if some agent may hand work to them, and
+// the starter orchestrator lists none. When that file is still exactly what
+// 'init' wrote it, it is ours to complete: it gets the imported agents as
+// subagents and the tool to call them. A file anyone has touched is theirs;
+// the summary says what to add instead.
+// AgentsForge, when there is a key for it. It never fails the init: whatever
+// goes wrong is a line in the report, and the project is created regardless.
+async function runForge(root, configDir, { forge, env, onProgress }) {
+  if (forge === false) return undefined;
+  const explicit = forge !== "auto";
+  // The test runner stays offline by itself; a test that wants the forge says so.
+  if (!explicit && process.env.NODE_TEST_CONTEXT) return undefined;
+  try {
+    const { loadConfig } = await import("./load.js");
+    const config = await loadConfig(join(configDir, "etnpilot.yaml"), env);
+    const options = typeof forge === "object" && forge !== null ? forge : {};
+    if (!options.runModel && !(await chooseProvider(config, root, env))) {
+      return { agents: [], skills: [], instructions: [], skipped: [], notes: ["AgentsForge did not run: no API key found (ANTHROPIC_API_KEY or OPENAI_API_KEY). Set one and run 'etnpilot forge'."] };
+    }
+    return await forgeProject(root, { config, env, configDir, onProgress, ...options });
+  } catch (error) {
+    return { agents: [], skills: [], instructions: [], skipped: [], notes: [`AgentsForge failed: ${error.message}. The project was created without it; 'etnpilot forge' tries again.`] };
+  }
+}
+
+export async function wireOrchestrator(configDir, report) {
+  const names = await importedAgentNames(configDir);
+  if (names.length === 0) return;
+  const path = join(configDir, "agents", "orchestrator.yaml");
+  const current = await readFile(path, "utf8").catch(() => undefined);
+  if (current === STARTER_AGENT) {
+    const wired = STARTER_AGENT
+      .replace("subagents: []", `subagents: [${names.join(", ")}]`)
+      .replace("write_file, edit_file, run_command]", "write_file, edit_file, run_command, spawn_subagent]");
+    await writeFile(path, wired, "utf8");
+    // The prompt says "you implement"; with agents to hand work to it also needs
+    // to say when. Only when it is still the starter's own text.
+    const promptPath = join(configDir, "prompts", "orchestrator.md");
+    if (await readFile(promptPath, "utf8").catch(() => undefined) === STARTER_PROMPT) {
+      await writeFile(promptPath, `${STARTER_PROMPT}${DELEGATION_PROMPT}`, "utf8");
+    }
+    report.notes.push(`The starter orchestrator can now hand work to: ${names.join(", ")}.`);
+  } else if (current !== undefined) {
+    const listed = YAML.parse(current)?.subagents ?? [];
+    const missing = names.filter((name) => !listed.includes(name));
+    if (missing.length > 0) {
+      report.notes.push(`.etnpilot/agents/orchestrator.yaml was left as it is. To let it use ${missing.join(", ")}, add them under 'subagents' and 'spawn_subagent' under 'tools'.`);
+    }
+  }
 }
 
 async function writeIfAbsent(path, content) {

@@ -6,6 +6,7 @@ import { createWorkspaceTools, describeCall, lazySkills, skillsOf } from "./work
 import { collectChatStream } from "./sse.js";
 import { createResultEnvelope } from "./tool-results.js";
 import { compactConversation } from "./compaction.js";
+import { runResponsesTurn } from "./openai-responses.js";
 
 const DEFAULT_MAX_TOOL_ITERATIONS = 12;
 
@@ -35,6 +36,11 @@ export function createOpenAICompatibleProvider({
   // Read the answer as a stream and fold it into the same payload. Off by
   // default: it changes how a long answer travels, not what it says.
   stream = false,
+  // Which OpenAI API to speak. "chat" is /chat/completions. "responses" is
+  // /responses, which newer models need for function tools next to reasoning.
+  // "auto" starts on chat and switches, once, when the server says the model
+  // wants /responses.
+  api = "auto",
   // Which environment variable and which secret this provider was wired to,
   // so a message about a missing key names the one to set rather than the
   // adapter's generic default.
@@ -56,13 +62,11 @@ export function createOpenAICompatibleProvider({
   // and a 401 says less about a missing key than this does.
   const needsApiKey = !apiKey && !isLoopback(baseUrl);
 
-  return {
-    name,
-    capabilities: tools ? ["chat", "tools"] : ["chat"],
-    async invoke(context) {
-      context.signal?.throwIfAborted();
-      if (needsApiKey) throw missingApiKey(name, apiKeySource, "ETNPILOT_PROVIDER_API_KEY");
-      const workspaceTools = tools
+  if (!["auto", "chat", "responses"].includes(api)) throw new TypeError("api must be 'auto', 'chat' or 'responses'.");
+  const responsesEndpoint = `${baseUrl.replace(/\/$/, "")}/responses`;
+  let useResponses = api === "responses";
+
+  const makeTools = (context) => (tools
         ? toolsImpl ?? createWorkspaceTools({
           workingDirectory,
           limits: toolLimits,
@@ -73,12 +77,59 @@ export function createOpenAICompatibleProvider({
           // got all of them.
           allowed: context.agent.tools,
           canSpawn: (context.agent.subagents ?? []).length > 0,
+          subagents: context.subagents ?? [],
           extraTools: context.extraTools ?? extraTools,
           scopedInstructions: context.scopedInstructions,
           skills: skillsOf(context),
           fetchImpl,
         })
-        : undefined;
+        : undefined);
+
+  async function invokeResponses(context) {
+    context.signal?.throwIfAborted();
+    if (needsApiKey) throw missingApiKey(name, apiKeySource, "ETNPILOT_PROVIDER_API_KEY");
+    const workspaceTools = makeTools(context);
+    const envelope = createResultEnvelope(context.runId);
+    return runResponsesTurn({
+      context,
+      workspaceTools,
+      envelope,
+      wireTools: workspaceTools ? providerToolNames(workspaceTools.definitions) : undefined,
+      system: buildSystemMessage(context, workspaceTools ? envelope : undefined, workspaceTools),
+      model,
+      maxToolIterations,
+      retry,
+      contextTokens,
+      extraBody,
+      addUsage,
+      post: (body, requestContext) => request({ endpoint: responsesEndpoint, apiKey, fetchImpl, context: requestContext, body, name, reasoningEffortConfigured: false, stream: false }),
+    });
+  }
+
+  return {
+    name,
+    capabilities: tools ? ["chat", "tools"] : ["chat"],
+    async invoke(context) {
+      if (useResponses) return invokeResponses(context);
+      try {
+        return await invokeChat(context);
+      } catch (error) {
+        // The server named /responses as the way: switch, once, and say nothing
+        // of it to the person — the same request, on the API that accepts it.
+        // Only before any tool ran, so nothing is done twice.
+        if (api === "auto" && error?.code === "use_responses_api" && (error.toolCalls ?? []).length === 0) {
+          useResponses = true;
+          return invokeResponses(context);
+        }
+        throw error;
+      }
+    },
+  };
+
+  async function invokeChat(context) {
+      context.signal?.throwIfAborted();
+      if (needsApiKey) throw missingApiKey(name, apiKeySource, "ETNPILOT_PROVIDER_API_KEY");
+      const workspaceTools = makeTools(context);
       const envelope = createResultEnvelope(context.runId);
       const messages = [
         { role: "system", content: buildSystemMessage(context, workspaceTools ? envelope : undefined, workspaceTools) },
@@ -175,8 +226,7 @@ export function createOpenAICompatibleProvider({
       }
       throw new ProviderError("Provider tool loop did not terminate.", { code: "tool_loop_error" });
       } catch (cause) { const error = cause instanceof Error && Object.isExtensible(cause) ? cause : new ProviderError(String(cause), { cause }); error.usage = { ...usage }; error.model = responseModel ?? context.agent.model ?? model; error.toolCalls = toolCalls; throw error; }
-    },
-  };
+  }
 }
 
 // Only these may be passed through: everything else in the body is either
@@ -241,7 +291,7 @@ async function request({ endpoint, apiKey, fetchImpl, context, body, name, reaso
       `Provider request failed (${response.status})${detail ? `: ${detail}` : "."}`
       + reasoningEffortAdvice({ status: response.status, detail, body, name, reasoningEffortConfigured }),
       {
-        code: `http_${response.status}`,
+        code: response.status === 400 && /\/v1\/responses/.test(detail ?? "") && Array.isArray(body.tools) ? "use_responses_api" : `http_${response.status}`,
         retryable,
         retryAfterMs: retryAfterMs(response.headers?.get?.("retry-after")),
         // A failed call that already ran tools is not safe to replay blindly.
@@ -281,8 +331,9 @@ function reasoningEffortAdvice({ status, detail, body, name, reasoningEffortConf
   return `\nThis provider sends no reasoning_effort, so that is the server's own default for`
     + ` '${body.model}'. To keep the workspace tools, set 'providers.${name}.reasoningEffort'`
     + ` to 'none' (etnpilot config set providers.${name}.reasoningEffort none — that stays local),`
-    + ` which turns this model's reasoning off. The other route the server names,`
-    + ` /v1/responses, is a different API shape this adapter does not speak.`;
+    + ` which turns this model's reasoning off. The other route the server names is`
+    + ` /v1/responses: this adapter speaks it too, and switches to it by itself unless`
+    + ` 'providers.${name}.api' is set to 'chat'.`;
 }
 
 // Every id this endpoint returns, including embedding, image, audio and
@@ -369,7 +420,8 @@ function isLoopback(baseUrl) {
 }
 
 function bodyHasToolResults(body) {
-  return (body.messages ?? []).some((message) => message.role === "tool");
+  return (body.messages ?? []).some((message) => message.role === "tool")
+    || (body.input ?? []).some((item) => item?.type === "function_call_output");
 }
 
 function buildSystemMessage(context, envelope, tools) {

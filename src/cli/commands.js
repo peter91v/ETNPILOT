@@ -2,7 +2,9 @@ import { recoverWorkspaceLease } from "../runtime/workspace-lease.js";
 import { access } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { CodeGraph } from "../codegraph/codegraph.js";
-import { initializeProject } from "../config/init.js";
+import { initializeProject, wireOrchestrator } from "../config/init.js";
+import { forgeProject, summarizeForge } from "../forge/forge.js";
+import { summarizeImport } from "../config/migrate.js";
 import { loadConfig } from "../config/load.js";
 import {
   describeSettings,
@@ -53,6 +55,7 @@ export const CLI_OPTIONS = Object.freeze({
   depth: { type: "string" },
   root: { type: "string", short: "r", default: "." },
   agent: { type: "string", short: "a" },
+  workflow: { type: "string", short: "w" },
   "in-place": { type: "boolean", default: false },
   worktree: { type: "boolean", default: false },
   "no-worktree": { type: "boolean", default: false },
@@ -92,6 +95,9 @@ export const CLI_OPTIONS = Object.freeze({
   provider: { type: "string" },
   out: { type: "string", short: "o" },
   template: { type: "string", short: "t" },
+  "no-import": { type: "boolean" },
+  "no-forge": { type: "boolean" },
+  "dry-run": { type: "boolean" },
   global: { type: "boolean", default: false },
   changed: { type: "boolean", default: false },
   "record-fixtures": { type: "string" },
@@ -102,8 +108,8 @@ export const CLI_OPTIONS = Object.freeze({
 export const USAGE = `ETNPilot
 
 Usage:
-  etnpilot init [directory] [--template default|minimal|regulated]
-  etnpilot run <task> [--agent name] [--root directory] [--approvals terminal|inbox]
+  etnpilot init [directory] [--template default|minimal|regulated] [--no-import] [--no-forge]
+  etnpilot run <task> [--agent name | --workflow name] [--root directory] [--approvals terminal|inbox]
     [--events jsonl]
     [--worktree | --no-worktree] [--cleanup-worktree] [--publish] [--dry-run]
     [--record-fixtures file | --fixtures file]
@@ -123,6 +129,7 @@ Usage:
   etnpilot config set <path> <value> [--global] [--root directory]
   etnpilot config unset <path> [--global] [--root directory]
   etnpilot config diff [--root directory]
+  etnpilot forge [--root directory] [--dry-run]
   etnpilot content lock [--root directory]
   etnpilot content verify [--root directory]
   etnpilot webhook serve [--root directory] [--host address] [--port number]
@@ -168,9 +175,16 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
   }
 
   if (command === "init") {
-    const result = await initializeProject(resolve(subcommand ?? "."), { template: values.template });
+    const result = await initializeProject(resolve(subcommand ?? "."), {
+      template: values.template,
+      importExisting: !values["no-import"],
+      forge: values["no-forge"] ? false : "auto",
+      onProgress: (line) => console.log(line),
+    });
     console.log(`Initialized ETNPilot in ${result.root} (template: ${result.template}).`);
-    console.log("Next: review '.etnpilot/', commit it, then run 'etnpilot run \"<task>\"'.");
+    for (const line of result.imported ? summarizeImport(result.imported) : []) console.log(line);
+    for (const line of result.forged ? summarizeForge(result.forged) : []) console.log(line);
+    console.log("Next: review '.etnpilot/', run 'etnpilot content lock' to approve what you reviewed, commit it, then run 'etnpilot run \"<task>\"'.");
   } else if (command === "run") {
     if (values.worktree && (values["no-worktree"] || values["in-place"])) {
       throw new Error("Choose either --worktree or --no-worktree, not both.");
@@ -194,6 +208,7 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
       root: resolve(values.root),
       input: task,
       agent: values.agent,
+      ...(values.workflow ? { workflow: values.workflow } : {}),
       ...(streaming
         ? { onEvent: (event) => console.log(JSON.stringify(event)) }
         : {}),
@@ -325,6 +340,22 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     const changes = await diffSettings({ root: resolve(values.root) });
     if (changes.length === 0) console.log("No local settings. This project behaves as it was committed.");
     else console.log(JSON.stringify(changes, null, 2));
+  } else if (command === "forge") {
+    // AgentsForge on a project that already exists: the same request init makes.
+    const root = resolve(values.root);
+    const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"));
+    const report = await forgeProject(root, { config, dryRun: Boolean(values["dry-run"]), onProgress: (line) => console.log(line) });
+    if (values["dry-run"]) {
+      console.log(`AgentsForge would send a digest of ${report.sent.files} files (${Math.round(report.sent.bytes / 1024)} KiB; ${report.sent.leftOut} credential files left out). Included in part:`);
+      for (const path of report.sent.included) console.log(`  ${path}`);
+      console.log("Nothing was sent.");
+    } else {
+      const wiring = { notes: [] };
+      await wireOrchestrator(join(root, ".etnpilot"), wiring);
+      report.notes.push(...wiring.notes);
+      for (const line of summarizeForge(report)) console.log(line);
+      if (report.agents.length + report.skills.length + report.instructions.length > 0) console.log("Review what was written, then run 'etnpilot content lock'.");
+    }
   } else if (command === "content" && subcommand === "lock") {
     const root = resolve(values.root);
     const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"));
@@ -370,6 +401,8 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
         return 0;
       }
       console.log(`Created ${setup.created.configFile} (${setup.created.template}).`);
+      for (const line of setup.created.importLines ?? []) console.log(line);
+      if (setup.created.importLines?.length) console.log("Review what came along, then run 'etnpilot content lock'.");
     }
     const state = await openProjectState({ root });
     const app = createTuiApp({ state, actor: values.actor });

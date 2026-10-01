@@ -48,6 +48,7 @@ async function executeProject({
   root = process.cwd(),
   input,
   agent,
+  workflow: workflowName,
   worktree,
   inPlace = false,
   baseRef,
@@ -95,6 +96,7 @@ async function executeProject({
   // bus contains a listener that throws.
   if (onEvent) harness.events.on("*", onEvent);
   let config;
+  let namedWorkflows = new Map();
   let gitLabToken;
   let receiptSigner;
   let receiptStore;
@@ -149,7 +151,7 @@ async function executeProject({
     receiptStore = new JsonlReceiptStore(receiptPath, { signer: receiptSigner });
     harness.telemetry = telemetry;
     harness.receiptStore = receiptStore;
-    ({ config, content: contentEvidence } = await loadProject(harness, workspace.path, env, {
+    ({ config, content: contentEvidence, workflows: namedWorkflows } = await loadProject(harness, workspace.path, env, {
       signal,
       secretResolver: secrets,
       fetchImpl,
@@ -241,12 +243,14 @@ async function executeProject({
     workflow = normalizeWorkflow(config.workflow, {
       requested: agent,
       fallback: config.defaultAgent ?? "orchestrator",
+      named: workflowName ? selectNamedWorkflow(namedWorkflows, workflowName) : undefined,
     });
     if (agentOverride && agent) applyAgentOverride(harness, agent, agentOverride);
     assertWorkflowAgents(harness, workflow);
     await harness.events.emit("workflow.planned", {
       runId,
       steps: workflow.steps.map((step) => step.id),
+      ...(workflowName && !agent ? { workflow: workflowName } : {}),
     });
   } catch (error) {
     codegraph?.graph.close();
@@ -454,6 +458,7 @@ async function executeProject({
     terminal: true,
     runId,
     mode: dryRun ? "dry-run" : "execute",
+    ...(workflowName && !agent ? { workflow: workflowName } : {}),
     status: summary.status,
     durationMs: Date.now() - startedAt,
     workspace: { ...workspace, ...(sandbox ? { sandbox: sandbox.describe() } : {}) },
@@ -802,12 +807,27 @@ function applyAgentOverride(harness, name, override) {
   harness.agents.replace(name, Object.freeze(next));
 }
 
-function normalizeWorkflow(workflow = {}, { requested, fallback } = {}) {
+// A workflow chosen by name is one of the project's pinned workflow files; a
+// name that is not among them is refused with the names that are.
+function selectNamedWorkflow(workflows, name) {
+  const found = workflows.get(name);
+  if (!found) {
+    const available = [...workflows.keys()];
+    const error = new Error(`There is no workflow called '${name}'.${available.length > 0 ? ` The project has: ${available.join(", ")}.` : " The project has none in '.etnpilot/workflows/'."}`);
+    error.code = "unknown_workflow";
+    throw error;
+  }
+  return found;
+}
+
+function normalizeWorkflow(workflow = {}, { requested, fallback, named } = {}) {
   // Asking for an agent by name means running that agent. Letting the
   // configured steps win would make '--agent', the issue trigger's agent, and
   // the run prompt quietly decorative wherever a project defines a workflow.
   const steps = requested
     ? [{ id: "agent", type: "agent", agent: requested }]
+    : named?.steps?.length
+      ? named.steps
     : workflow.steps?.length
       ? workflow.steps
       : [{ id: "agent", type: "agent", agent: fallback }];

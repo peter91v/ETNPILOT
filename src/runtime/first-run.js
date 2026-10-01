@@ -1,6 +1,9 @@
 import { access, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { initializeProject, PROJECT_TEMPLATES } from "../config/init.js";
+import YAML from "yaml";
+import { initializeProject, PROJECT_TEMPLATES, renderProjectConfig } from "../config/init.js";
+import { chooseProvider, summarizeForge } from "../forge/forge.js";
+import { importExistingProject, summarizeImport } from "../config/migrate.js";
 import { git } from "../git/command.js";
 
 // What to show somebody who opened a surface in a directory with no project in
@@ -42,6 +45,16 @@ export async function describeProject({ root = process.cwd() } = {}) {
       () => ({ inside: false }),
     )
     : { inside: false };
+  // What creating the project would bring along from other coding agents'
+  // files here. Read-only: nothing is written until a person chooses.
+  const importable = directory && !exists
+    ? await importExistingProject(projectRoot, { dryRun: true }).catch(() => undefined)
+    : undefined;
+  // Whether AgentsForge would have a key to work with, so the page can say so
+  // before it asks anyone anything. The key's value is never read into the answer.
+  const forgeProvider = directory && !exists
+    ? await chooseProvider(YAML.parse(renderProjectConfig()), projectRoot, process.env).catch(() => undefined)
+    : undefined;
   return {
     root: projectRoot,
     configFile,
@@ -49,16 +62,26 @@ export async function describeProject({ root = process.cwd() } = {}) {
     directory,
     checkout,
     templates: projectTemplates(),
+    ...(forgeProvider ? { forge: { provider: forgeProvider.name, model: forgeProvider.config.model } } : {}),
+    ...(importable && importable.instructions.length + importable.agents.length + importable.skills.length > 0
+      ? { importable: { ...importable, lines: summarizeImport(importable) } }
+      : {}),
   };
 }
 
 // Creates the project a surface offered. The template name comes from a person
 // choosing one of the rows above, and is checked against the same list, so a
 // name from anywhere else cannot reach 'initializeProject'.
-export async function createProject({ root = process.cwd(), template = "default" } = {}) {
+export async function createProject({ root = process.cwd(), template = "default", importExisting = true, forge = "auto" } = {}) {
   if (!Object.hasOwn(PROJECT_TEMPLATES, template)) {
     throw new TypeError(`Unknown project template '${template}'. Available: ${Object.keys(PROJECT_TEMPLATES).join(", ")}.`);
   }
-  const created = await initializeProject(resolve(root), { template });
-  return { ...created, configFile: join(created.configDir, "etnpilot.yaml") };
+  const created = await initializeProject(resolve(root), { template, importExisting, forge });
+  return {
+    ...created,
+    configFile: join(created.configDir, "etnpilot.yaml"),
+    ...(created.imported || created.forged
+      ? { importLines: [...(created.imported ? summarizeImport(created.imported) : []), ...(created.forged ? summarizeForge(created.forged) : [])] }
+      : {}),
+  };
 }

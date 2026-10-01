@@ -12,6 +12,8 @@ export function renderSetupPage(token, status) {
     configFile: status.configFile,
     checkout: status.checkout,
     templates: status.templates,
+    importLines: status.importable?.lines ?? [],
+    forge: status.forge ?? null,
   });
   return `<!doctype html>
 <html lang="en">
@@ -126,6 +128,17 @@ export function renderSetupPage(token, status) {
   <p>Choose what to create. It writes <code>.etnpilot/</code> — the configuration, one agent manifest
      and its prompt. Nothing outside that directory is touched, and nothing is committed for you.</p>
   <div class="templates" id="templates"></div>
+  <section class="notice" id="found" hidden>
+    <label class="footnote"><input type="checkbox" id="import" checked>
+      Bring these along from this project's other coding-agent files</label>
+    <ul id="found-list"></ul>
+    <p class="footnote">Copied, never over anything. Unreviewed until you run <code>etnpilot content lock</code>.</p>
+  </section>
+  <section class="notice" id="forge" hidden>
+    <label class="footnote"><input type="checkbox" id="forge-on" checked>
+      <span id="forge-label"></span></label>
+    <p class="footnote">It sends a bounded digest of this repository (layout, build files, a few source files; credential files are never read, secret-looking text is blanked) and writes agents, skills and instructions that fit it. Unreviewed until <code>etnpilot content lock</code>.</p>
+  </section>
   <div class="actions">
     <button class="btn state" id="create">Create it</button>
     <span class="footnote" id="status"></span>
@@ -139,6 +152,19 @@ const STATUS = ${data};
 let chosen = STATUS.templates[0]?.id;
 
 document.getElementById("root").textContent = STATUS.root;
+if (STATUS.forge) {
+  document.getElementById("forge-label").textContent = "Let AgentsForge write agents, skills and instructions for this repository, using " + STATUS.forge.provider + (STATUS.forge.model ? " (" + STATUS.forge.model + ")" : "") + ", the key it found";
+  document.getElementById("forge").hidden = false;
+}
+if (STATUS.importLines.length > 0) {
+  const list = document.getElementById("found-list");
+  for (const line of STATUS.importLines) {
+    const item = document.createElement("li");
+    item.textContent = line.trim();
+    list.append(item);
+  }
+  document.getElementById("found").hidden = false;
+}
 if (!STATUS.checkout.inside) {
   const box = document.getElementById("checkout");
   box.textContent = "This is not a git checkout. A project can still be created; a run needs one, "
@@ -183,18 +209,38 @@ async function create() {
   const status = document.getElementById("status");
   const error = document.getElementById("error");
   button.disabled = true;
-  status.textContent = "Creating…";
+  status.textContent = STATUS.forge && document.getElementById("forge-on").checked ? "Creating, and asking " + STATUS.forge.provider + " about this repository — this can take a minute…" : "Creating…";
   error.hidden = true;
   try {
     const response = await fetch("/api/project/create", {
       method: "POST",
       headers: { "x-etnpilot-token": TOKEN, "content-type": "application/json" },
-      body: JSON.stringify({ template: chosen }),
+      body: JSON.stringify({ template: chosen, importExisting: document.getElementById("import").checked, forge: STATUS.forge ? document.getElementById("forge-on").checked : false }),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error ?? ("request failed (" + response.status + ")"));
     // The server is serving the review page now; this one has nothing left
     // to say, so it gets out of the way.
+    // What came along is shown before the page moves on: it is the part of
+    // creating a project that is not obvious from the button.
+    const lines = payload.importLines ?? [];
+    if (lines.length > 0) {
+      const list = document.getElementById("found-list");
+      list.replaceChildren();
+      for (const line of lines) {
+        const item = document.createElement("li");
+        item.textContent = line.trim();
+        list.append(item);
+      }
+      document.getElementById("found").hidden = false;
+      document.getElementById("import").parentElement.hidden = true;
+      document.getElementById("forge").hidden = true;
+      status.textContent = "Created " + payload.configFile + ".";
+      button.textContent = "Open the review page";
+      button.disabled = false;
+      button.onclick = () => location.reload();
+      return;
+    }
     status.textContent = "Created " + payload.configFile + ". Opening the review page…";
     location.reload();
   } catch (failure) {
@@ -206,7 +252,7 @@ async function create() {
   }
 }
 
-document.getElementById("create").addEventListener("click", () => { void create(); });
+document.getElementById("create").addEventListener("click", () => { if (!document.getElementById("create").onclick) void create(); });
 renderTemplates();
 </script>
 </body>

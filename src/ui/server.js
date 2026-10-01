@@ -92,7 +92,7 @@ export async function createReviewServer({
       if (request.method === "POST" && url.pathname === "/api/project/create") {
         if (state) throw badRequest("This directory already has a project.");
         const body = await readJsonBody(request);
-        const created = await createProject({ root, template: String(body.template ?? "default") })
+        const created = await createProject({ root, template: String(body.template ?? "default"), importExisting: body.importExisting !== false, forge: body.forge === false ? false : "auto" })
           .catch((error) => { throw error instanceof TypeError ? badRequest(error.message) : error; });
         state = await openProjectState({ root, env });
         // Now there is somewhere to keep it, so the link survives a restart
@@ -247,13 +247,66 @@ export async function createReviewServer({
       }
       // A run is not awaited: the answer says it started, and everything the
       // run then needs appears in this same page's approvals.
+      if (request.method === "GET" && url.pathname === "/api/content") {
+        return send(response, 200, await state.content());
+      }
+      if (request.method === "GET" && url.pathname === "/api/content/file") {
+        const found = await state.contentFile(url.searchParams.get("path") ?? "");
+        if (!found) return send(response, 404, { error: "That is not a file of the project content." });
+        return send(response, 200, found);
+      }
+      // Locks what the person saw: the digest comes back with the request, and
+      // content that is not the same any more is refused rather than locked.
+      if (request.method === "POST" && url.pathname === "/api/content/lock") {
+        const body = await readJsonBody(request);
+        return send(response, 200, await state.lockContent(String(body.manifestDigest ?? "")));
+      }
+      if (request.method === "GET" && url.pathname === "/api/agents/detail") {
+        return send(response, 200, await state.agentDetails());
+      }
+      if (request.method === "POST" && url.pathname === "/api/agents") {
+        const body = await readJsonBody(request);
+        return send(response, 201, await state.createAgent(body));
+      }
+      // Change or remove one agent or workflow, by name. The name is the file's:
+      // anything that is not a plain project name is refused before a path exists.
+      const named = /^\/api\/(agents|workflows)\/([a-z0-9][a-z0-9_-]{0,63})$/.exec(url.pathname);
+      if (named && request.method === "PUT") {
+        const body = await readJsonBody(request);
+        return send(response, 200, named[1] === "agents" ? await state.updateAgent(named[2], body) : await state.updateWorkflow(named[2], body));
+      }
+      if (named && request.method === "DELETE") {
+        return send(response, 200, await state.removeContent(named[1] === "agents" ? "agent" : "workflow", named[2]));
+      }
+      if (request.method === "GET" && url.pathname === "/api/workflows") {
+        return send(response, 200, await state.workflows());
+      }
+      if (request.method === "POST" && url.pathname === "/api/workflows") {
+        const body = await readJsonBody(request);
+        return send(response, 201, await state.createWorkflow(body));
+      }
+      if (request.method === "GET" && url.pathname === "/api/runs/readiness") {
+        return send(response, 200, await state.readiness());
+      }
       if (request.method === "POST" && url.pathname === "/api/runs/start") {
         const body = await readJsonBody(request);
         const task = typeof body.task === "string" ? body.task.trim() : "";
         if (task === "") throw badRequest("A run needs a task to work on.");
         const agent = typeof body.agent === "string" && body.agent.trim() !== "" ? body.agent.trim() : undefined;
-        state.startRun({ input: task, agent });
-        return send(response, 202, { started: true, task, ...(agent ? { agent } : {}) });
+        const inPlace = body.worktree === false;
+        // Refuse here, with a way out, what would only fail after the 202.
+        if (!inPlace) {
+          const readiness = await state.readiness();
+          if (!readiness.ready) {
+            const refusal = new Error(readiness.message);
+            refusal.statusCode = 409;
+            refusal.details = { code: readiness.code, fixes: readiness.fixes, commands: readiness.commands };
+            throw refusal;
+          }
+        }
+        const workflow = typeof body.workflow === "string" && body.workflow.trim() !== "" ? body.workflow.trim() : undefined;
+        state.startRun({ input: task, agent, ...(workflow && !agent ? { workflow } : {}), ...(inPlace ? { worktree: false } : {}) });
+        return send(response, 202, { started: true, task, ...(agent ? { agent } : {}), ...(workflow && !agent ? { workflow } : {}), ...(inPlace ? { inPlace: true } : {}) });
       }
       // Whether a receipt is what it claims. It rereads and rehashes the whole
       // file, so it is a route of its own that the page's poll never calls —
@@ -379,6 +432,7 @@ function errorBody(error) {
     error: error.message,
     ...(error.path ? { path: error.path } : {}),
     ...(error.reason ? { reason: error.reason } : {}),
+    ...(error.details ?? {}),
   };
 }
 
