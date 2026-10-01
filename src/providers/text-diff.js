@@ -1,3 +1,4 @@
+// @ts-check
 // A unified diff, so a person can read what they are approving.
 //
 // Until now a write asked for a decision with a path and a byte count. That is
@@ -20,7 +21,7 @@ const DEFAULT_LIMITS = Object.freeze({
   maxDiffLines: 400,
 });
 
-export function unifiedDiff(before, after, { path = "file", ...options } = {}) {
+export function unifiedDiff(before, after, { path = "file", ...options } = /** @type {any} */ ({})) {
   const limits = { ...DEFAULT_LIMITS, ...options };
   if (before === after) return { unchanged: true, text: "", path };
 

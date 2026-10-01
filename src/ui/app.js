@@ -1,3 +1,4 @@
+// @ts-check
 // The app (UI-3). Three decisions the roadmap left open, taken here with
 // their reasons, because each one is a claim this project would then have to
 // keep:
@@ -25,7 +26,7 @@
 // showed yesterday's approvals to somebody deciding today would be worse
 // offline than absent, so a navigation without a network says so.
 
-export function renderManifest({ project = "" } = {}) {
+export function renderManifest({ project = "" } = /** @type {any} */ ({})) {
   return {
     name: project ? `ETNPilot — ${project}` : "ETNPilot Review",
     short_name: "ETNPilot",
@@ -51,7 +52,7 @@ export function renderManifest({ project = "" } = {}) {
 
 // Drawn rather than fetched: this page loads nothing from a network, and that
 // has to hold for the thing sitting on a home screen too.
-export function renderIcon({ maskable = false } = {}) {
+export function renderIcon({ maskable = false } = /** @type {any} */ ({})) {
   // A maskable icon has to survive being cropped to a circle, so the mark sits
   // inside the 40% safe area with the background bleeding to the edges.
   const scale = maskable ? 0.52 : 0.74;

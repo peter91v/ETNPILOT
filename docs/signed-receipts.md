@@ -103,3 +103,18 @@ verification.
 Signatures prove that the holder of the trusted private key produced the receipt and that its signed
 contents have not changed. They do not prove that an agent's decision was correct, and they do not
 replace operating-system access controls for receipt files or signing keys.
+
+## Limits worth knowing
+
+- **Verification reads line by line**, so a long run is not impossible to check. A single line (one tool call's
+  output) may be at most 8 MiB. The run list shows a receipt it cannot read as *unreadable* with the reason, instead
+  of leaving the run out. The detail view holds a whole receipt and is limited to 64 MiB; `etnpilot receipt verify`
+  has no such limit.
+- **Without a public key**, `receipt verify` checks the chain's integrity only, and says so in a `notes` field: a
+  chain cut off at its end still verifies unless `--require-terminal` is given, and nothing is known about who wrote it.
+- **The signing key lives next to the receipts by default** (`.etnpilot/keys/`). Whoever can write the receipts can
+  sign with it. For receipts that must stand against the machine's own user, keep the key elsewhere
+  (`receipts.signing.privateKeySecret` with the Vault plugin).
+- **No rotation or revocation.** A key is trusted for every receipt it signed, whenever. A start and end date per
+  key (checked against the entry's own time, which the local clock supplies) is a sensible next step, but a time
+  from the same machine proves little; an external time stamp would be the real answer.

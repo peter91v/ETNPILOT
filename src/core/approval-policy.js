@@ -1,5 +1,6 @@
+// @ts-check
 export class ApprovalPolicy {
-  constructor({ allow = ["read"], requireHuman = ["write", "shell", "network"] } = {}, { policy, dryRun = false } = {}) {
+  constructor({ allow = ["read"], requireHuman = ["write", "shell", "network"] } = {}, { policy, dryRun = false } = /** @type {any} */ ({})) {
     this.allow = new Set(allow);
     this.requireHuman = new Set(requireHuman);
     this.policy = policy;

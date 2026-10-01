@@ -1,3 +1,4 @@
+// @ts-check
 import { randomBytes } from "node:crypto";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
@@ -23,7 +24,7 @@ export function mintToken() {
 // Reads the token this project already has, or writes one. 'rotate' throws the
 // old one away, which is what a person does when a link has been somewhere it
 // should not have been.
-export async function readOrCreateToken(root, { rotate = false, persist = true } = {}) {
+export async function readOrCreateToken(root, { rotate = false, persist = true } = /** @type {any} */ ({})) {
   const path = tokenFile(root);
   if (!rotate) {
     const existing = await readFile(path, "utf8").catch((error) => {

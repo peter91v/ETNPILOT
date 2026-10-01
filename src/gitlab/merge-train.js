@@ -1,3 +1,4 @@
+// @ts-check
 import { git } from "../git/command.js";
 import { escapeControlCharacters } from "../core/text-safety.js";
 
@@ -14,7 +15,7 @@ export async function inspectMergeTrain({
   head = "HEAD",
   ownBranch,
   limit = 10,
-} = {}) {
+} = /** @type {any} */ ({})) {
   if (!client || !project || !cwd) {
     throw new TypeError("A merge-train inspection requires a client, project, and working directory.");
   }

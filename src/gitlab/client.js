@@ -1,3 +1,4 @@
+// @ts-check
 export class GitLabClient {
   constructor({ baseUrl, token, fetchImpl = globalThis.fetch, statusRetryDelayMs = 100, timeoutMs = 30_000 }) {
     if (!baseUrl) throw new TypeError("GitLab baseUrl is required.");
@@ -30,7 +31,7 @@ export class GitLabClient {
     });
   }
 
-  mergeRequests(project, { state = "opened", targetBranch, perPage = 50 } = {}) {
+  mergeRequests(project, { state = "opened", targetBranch, perPage = 50 } = /** @type {any} */ ({})) {
     return this.requestAll(
       "GET",
       `/projects/${encodeURIComponent(project)}/merge_requests`,
@@ -47,7 +48,7 @@ export class GitLabClient {
     return this.request("POST", `/projects/${encodeURIComponent(project)}/merge_requests/${iid}/notes`, { body });
   }
 
-  issueNotes(project, iid, { sort = "desc", orderBy = "created_at", perPage = 100 } = {}) {
+  issueNotes(project, iid, { sort = "desc", orderBy = "created_at", perPage = 100 } = /** @type {any} */ ({})) {
     return this.requestAll(
       "GET",
       `/projects/${encodeURIComponent(project)}/issues/${iid}/notes`,
@@ -64,7 +65,7 @@ export class GitLabClient {
     return this.request("POST", `/projects/${encodeURIComponent(project)}/issues/${iid}/notes`, { body });
   }
 
-  async setCommitStatus(project, sha, { state, name = "etnpilot", description, ref, targetUrl, pipelineId } = {}) {
+  async setCommitStatus(project, sha, { state, name = "etnpilot", description, ref, targetUrl, pipelineId } = /** @type {any} */ ({})) {
     if (!sha) throw new TypeError("A commit SHA is required.");
     if (!["pending", "running", "success", "failed", "canceled", "skipped"].includes(state)) {
       throw new TypeError(`Unsupported GitLab commit status: '${state}'.`);
@@ -93,7 +94,7 @@ export class GitLabClient {
 
   // GitLab caps list responses, so collection endpoints follow their pages
   // instead of silently returning only the first one.
-  async requestAll(method, path, query, { perPage = 100, maxPages = 20 } = {}) {
+  async requestAll(method, path, query, { perPage = 100, maxPages = 20 } = /** @type {any} */ ({})) {
     const collected = [];
     for (let page = 1; page <= maxPages; page += 1) {
       const batch = await this.request(method, path, { ...(query ?? {}), per_page: perPage, page });
@@ -163,7 +164,7 @@ async function describeError(response) {
 }
 
 export class GitLabApiError extends Error {
-  constructor(message, { status, body, cause } = {}) {
+  constructor(message, { status, body, cause } = /** @type {any} */ ({})) {
     super(message, { cause });
     this.name = "GitLabApiError";
     this.status = status;

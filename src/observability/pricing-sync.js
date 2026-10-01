@@ -1,3 +1,4 @@
+// @ts-check
 import { readRegularFile, readResponseBytes } from "../runtime/bounded-io.js";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -23,27 +24,53 @@ export function normalizeModelKey(id) {
   return String(id).toLowerCase().replace(/^[a-z0-9-]+\//, "").replace(/\./g, "-").replace(/-\d{4}-\d{2}-\d{2}$/, "");
 }
 
+// Vendors whose own listing is the list price. Another reseller listing the same
+// model under its own prefix ('azure/gpt-5') can differ, so it never replaces one.
+const FIRST_PARTY = new Set(["openai", "anthropic", "google", "x-ai", "mistralai", "deepseek", "meta-llama", "qwen", "cohere"]);
+
+// A price worth believing: not negative, not absurd, and not zero unless the model
+// is listed as free. A zero or tiny rate would make a budget unable to trigger, and
+// the catalogue is a third party's.
+const MAX_PER_MILLION = 1000;
+
 // OpenRouter quotes USD per token as strings; the table speaks per million.
 export function ratesFromCatalog(catalog) {
   const rates = {};
+  const owner = {};
   if (!Array.isArray(catalog?.data) || catalog.data.length > 10_000) throw new Error("Invalid or oversized price catalog.");
   for (const entry of catalog.data) {
     const input = Number(entry?.pricing?.prompt);
     const output = Number(entry?.pricing?.completion);
     if (!entry?.id || !Number.isFinite(input) || !Number.isFinite(output) || input < 0 || output < 0) continue;
+    const free = /:free$/.test(String(entry.id));
+    if (!free && (input === 0 || output === 0)) continue;
+    if (input * 1e6 > MAX_PER_MILLION || output * 1e6 > MAX_PER_MILLION) continue;
     const cacheRead = Number(entry.pricing.input_cache_read);
     const cacheWrite = Number(entry.pricing.input_cache_write);
-    rates[normalizeModelKey(entry.id)] = {
+    const key = normalizeModelKey(entry.id);
+    const prefix = String(entry.id).toLowerCase().split("/")[0];
+    const firstParty = FIRST_PARTY.has(prefix);
+    const rate = {
       inputPerMillion: round(input * 1e6),
       outputPerMillion: round(output * 1e6),
       ...(Number.isFinite(cacheRead) && cacheRead >= 0 && entry.pricing.input_cache_read !== undefined ? { cacheReadPerMillion: round(cacheRead * 1e6) } : {}),
       ...(Number.isFinite(cacheWrite) && cacheWrite >= 0 && entry.pricing.input_cache_write !== undefined ? { cacheWritePerMillion: round(cacheWrite * 1e6) } : {}),
     };
+    const held = rates[key];
+    if (held) {
+      // The vendor's own listing wins and is never replaced by a reseller's. Between
+      // two resellers, the dearer: a budget that is too cautious is a nuisance, one
+      // that is too loose is not.
+      if (owner[key] && !firstParty) continue;
+      if (!owner[key] && !firstParty && rate.inputPerMillion + rate.outputPerMillion <= held.inputPerMillion + held.outputPerMillion) continue;
+    }
+    rates[key] = rate;
+    owner[key] = firstParty;
   }
   return rates;
 }
 
-export async function refreshPricing({ root, config, fetchImpl = globalThis.fetch, now = Date.now, url = CATALOG_URL, timeoutMs = 3000 } = {}) {
+export async function refreshPricing({ root, config, fetchImpl = globalThis.fetch, now = Date.now, url = CATALOG_URL, timeoutMs = 3000 } = /** @type {any} */ ({})) {
   const pricing = config?.observability?.pricing;
   // On unless switched off, so projects created before the key existed get it
   // too. The test runner is the one place that stays offline by itself; tests

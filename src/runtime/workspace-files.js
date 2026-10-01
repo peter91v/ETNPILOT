@@ -11,7 +11,7 @@ export const digestBytes = (bytes) => createHash("sha256").update(bytes).digest(
 
 // Directory descriptors keep path traversal anchored while an approval waits.
 // Platforms without a directory-descriptor namespace fail closed for writes.
-export async function workspaceFile(root, name, { maxBytes, missing = false, truncate = false, directory = false } = {}) {
+export async function workspaceFile(root, name, { maxBytes, missing = false, truncate = false, directory = false } = /** @type {any} */ ({})) {
   const workspace = await realpath(root);
   const destination = resolve(workspace, name);
   const local = relative(workspace, destination);

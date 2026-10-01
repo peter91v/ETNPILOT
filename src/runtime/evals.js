@@ -62,7 +62,7 @@ function normalizeCase(value) {
 // Runs the checks against the workspace a run left behind. Every one reports
 // what it found, not only whether it passed: 'fileContains failed' is not
 // something anybody can act on.
-export async function judge(workspace, expect, { runCommand } = {}) {
+export async function judge(workspace, expect, { runCommand } = /** @type {any} */ ({})) {
   const results = [];
   for (const check of expect) {
     results.push({ ...check, ...await applyCheck(workspace, check, { runCommand }) });
@@ -172,7 +172,7 @@ export function formatEvalTable(results) {
 // Sets up a throwaway project for one case and runs it. The project is a real
 // one — git checkout, policy, approvals, receipts — because a measurement
 // taken against a simplified harness measures the simplification.
-export async function prepareEvalWorkspace(evalCase, root, { provider = "scripted" } = {}) {
+export async function prepareEvalWorkspace(evalCase, root, { provider = "scripted" } = /** @type {any} */ ({})) {
   const { initializeProject } = await import("../config/init.js");
   const { setSetting } = await import("../config/settings.js");
   const { writeContentLock } = await import("../content/provenance.js");
@@ -230,7 +230,7 @@ export function evalApprovalHandler() {
 }
 
 // One case, end to end, in a directory of its own.
-export async function runEvalCase(evalCase, { root, provider = "scripted", runProject: run } = {}) {
+export async function runEvalCase(evalCase, { root, provider = "scripted", runProject: run } = /** @type {any} */ ({})) {
   const startedAt = Date.now();
   await prepareEvalWorkspace(evalCase, root, { provider });
   const runner = run ?? (await import("./project-runner.js")).runProject;

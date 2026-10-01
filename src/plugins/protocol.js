@@ -1,3 +1,4 @@
+// @ts-check
 const INTEGER_LIMITS = Object.freeze({
   setupTimeoutMs: [100, 120_000],
   callTimeoutMs: [100, 3_600_000],
@@ -24,7 +25,7 @@ export const DEFAULT_PLUGIN_LIMITS = Object.freeze({
 });
 
 export class PluginProcessError extends Error {
-  constructor(message, { code = "plugin_process_error", plugin, cause } = {}) {
+  constructor(message, { code = "plugin_process_error", plugin, cause } = /** @type {any} */ ({})) {
     super(message, cause ? { cause } : undefined);
     this.name = "PluginProcessError";
     this.code = code;
@@ -41,7 +42,7 @@ export function normalizePluginLimits(value = {}, defaults = DEFAULT_PLUGIN_LIMI
   }
   const mode = value.memoryMonitoring ?? defaults.memoryMonitoring ?? "required";
   if (!["required", "heap-only"].includes(mode)) throw new TypeError("Plugin memoryMonitoring must be required or heap-only.");
-  const normalized = { memoryMonitoring: mode };
+  const normalized = /** @type {any} */ ({ memoryMonitoring: mode });
   for (const [name, [minimum, maximum]] of Object.entries(INTEGER_LIMITS)) {
     const candidate = value[name] ?? defaults[name];
     if (!Number.isSafeInteger(candidate) || candidate < minimum || candidate > maximum) {

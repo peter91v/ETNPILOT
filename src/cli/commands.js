@@ -9,6 +9,7 @@ import { queueCommands } from "./commands/queue.js";
 import { receiptsCommands } from "./commands/receipts.js";
 import { securityCommands } from "./commands/security.js";
 import { serversCommands } from "./commands/servers.js";
+import { modelsCommands } from "./commands/models.js";
 import { usageCommands } from "./commands/usage.js";
 import { defaultWaitForShutdown, shouldOpenBrowser } from "./shared.js";
 
@@ -30,6 +31,7 @@ export const COMMANDS = [
   ...securityCommands,
   ...opsCommands,
   ...usageCommands,
+  ...modelsCommands,
 ];
 
 export const CLI_OPTIONS = Object.freeze({
@@ -65,6 +67,7 @@ export const CLI_OPTIONS = Object.freeze({
   "no-verify": { type: "boolean", default: false },
   preview: { type: "boolean", default: false },
   gitlab: { type: "boolean", default: false },
+  command: { type: "string" },
   port: { type: "string" },
   status: { type: "string" },
   limit: { type: "string" },
@@ -142,7 +145,7 @@ Usage:
   etnpilot secret check <name> [--root directory]
 ${AUTH_USAGE}
 ${TRUST_USAGE}
-  etnpilot policy check (--kind kind [--path path | --url url] | --provider name)
+  etnpilot policy check (--kind kind [--path path | --url url | --command "npm test"] | --provider name)
     [--agent name] [--root directory]
   etnpilot pipeline status [ref] [--root directory]
   etnpilot deps check [--root directory]
@@ -150,6 +153,7 @@ ${TRUST_USAGE}
   etnpilot scan secrets [--root directory]
   etnpilot attest <receipt-file> [--out file] [--root directory]
   etnpilot telemetry summary [workflow-run-id] [--root directory]
+  etnpilot models [--provider name] [--json]       what the provider offers this account, with known prices
   etnpilot usage [--json] [--root directory]       tokens, requests and cost by model and by day
   etnpilot doctor [--root directory]
   etnpilot check [name...] [--root directory]
@@ -161,7 +165,7 @@ Exit codes:
   1  the command failed, or a run, verification, or policy check was rejected
 `;
 
-export async function runCli(positionals, values, { waitForShutdown = defaultWaitForShutdown } = {}) {
+export async function runCli(positionals, values, { waitForShutdown = defaultWaitForShutdown } = /** @type {any} */ ({})) {
   const [command, subcommand, ...rest] = positionals;
 
   if (values.help || !command) {

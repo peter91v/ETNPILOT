@@ -31,7 +31,7 @@ export async function runChat({
   interactive = Boolean(input.isTTY && output.isTTY),
   runner,
   providerFactories,
-} = {}) {
+} = /** @type {any} */ ({})) {
   if (!interactive) {
     throw new Error("Chat needs an interactive terminal. For a single request use 'etnpilot run'.");
   }
@@ -112,7 +112,7 @@ export async function runChat({
       if (/^(a|always)$/.test(answer)) return { kind: "approve-for-run" };
       return { kind: "reject", reason: "Rejected by the user." };
     });
-    queue = operation.catch(() => {});
+    queue = operation.then(() => {}, () => {});
     return operation;
   };
 

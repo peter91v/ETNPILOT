@@ -1,11 +1,12 @@
+// @ts-check
 import { createInterface } from "node:readline/promises";
 import { sanitizeForDisplay } from "./text-safety.js";
 
-export function createTerminalApprovalHandler({ input = process.stdin, output = process.stdout } = {}) {
+export function createTerminalApprovalHandler({ input = process.stdin, output = process.stdout } = /** @type {any} */ ({})) {
   let pending = Promise.resolve();
   return (request, context) => {
     const operation = pending.then(() => askForApproval(request, context, { input, output }));
-    pending = operation.catch(() => {});
+    pending = operation.then(() => {}, () => {});
     return operation;
   };
 }
@@ -47,7 +48,7 @@ export function describeRequest(request) {
   return lines.length > 0 ? `\n${lines.join("\n")}` : "";
 }
 
-export function display(value, { allowNewlines = false } = {}) {
+export function display(value, { allowNewlines = false } = /** @type {any} */ ({})) {
   // A diff is lines; escaping its newlines turns it into one unreadable row.
   // Every other control character is still escaped.
   const { text, truncated } = sanitizeForDisplay(value ?? "", { maxLength: 8192, allowNewlines });

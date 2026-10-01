@@ -1,7 +1,8 @@
+// @ts-check
 export class EventBus {
   #listeners = new Map();
 
-  constructor({ onListenerError } = {}) {
+  constructor({ onListenerError } = /** @type {any} */ ({})) {
     this.onListenerError = onListenerError;
   }
 

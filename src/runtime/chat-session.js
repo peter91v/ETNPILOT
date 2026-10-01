@@ -222,7 +222,7 @@ async function runChatTurnUnlocked({
   attachments = [],
   now = () => new Date(),
   ...runOptions
-} = {}) {
+} = /** @type {any} */ ({})) {
   if (typeof text !== "string" || text.trim() === "") throw new TypeError("A chat turn needs some text.");
   const id = sessionId ?? createSessionId();
   assertId(id);
@@ -300,7 +300,7 @@ async function runChatTurnUnlocked({
 // receipt whose chain holds, and that receipt says it belongs to this turn of
 // this session. The second half matters: a session file pointing turn 3 at some
 // other, perfectly valid, run would otherwise verify.
-export async function verifySession(root, sessionId, { verifyReceipt, readEntries } = {}) {
+export async function verifySession(root, sessionId, { verifyReceipt, readEntries } = /** @type {any} */ ({})) {
   const { turns } = await readSession(root, sessionId);
   const results = [];
   for (const turn of turns) {
@@ -381,7 +381,7 @@ export async function compactionCheck(root, sessionId) {
   return { ok: true, prior, covered, fresh };
 }
 
-async function compactSessionUnlocked({ root, sessionId, agent, runner, now = () => new Date(), ...runOptions } = {}) {
+async function compactSessionUnlocked({ root, sessionId, agent, runner, now = () => new Date(), ...runOptions } = /** @type {any} */ ({})) {
   const check = await compactionCheck(root, sessionId);
   if (!check.ok) return check;
   const { prior, covered, fresh } = check;

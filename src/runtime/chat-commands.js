@@ -1,3 +1,4 @@
+// @ts-check
 import { listSessions, readSession } from "./chat-session.js";
 
 // The slash commands of a conversation, in one place.

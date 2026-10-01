@@ -15,7 +15,7 @@ const MCP_TOOLS = new Set([
 ]);
 
 export class CodeGraph {
-  constructor(projectRoot = process.cwd(), { importer = importCodeGraph } = {}) {
+  constructor(projectRoot = process.cwd(), { importer = importCodeGraph } = /** @type {any} */ ({})) {
     this.projectRoot = resolve(projectRoot);
     this.importer = importer;
     this.graph = undefined;
@@ -32,7 +32,7 @@ export class CodeGraph {
     return this;
   }
 
-  async indexDirectory(root = this.projectRoot, { signal } = {}) {
+  async indexDirectory(root = this.projectRoot, { signal } = /** @type {any} */ ({})) {
     const projectRoot = resolve(root);
     if (projectRoot !== this.projectRoot) {
       this.close();
@@ -91,7 +91,7 @@ export class CodeGraph {
       }));
   }
 
-  impact(paths, { maxDepth = 20 } = {}) {
+  impact(paths, { maxDepth = 20 } = /** @type {any} */ ({})) {
     if (!Array.isArray(paths) || paths.length === 0) throw new TypeError("At least one changed path is required.");
     if (!Number.isInteger(maxDepth) || maxDepth < 0) throw new TypeError("maxDepth must be a non-negative integer.");
     const graph = this.#requireGraph();

@@ -117,3 +117,22 @@ test("the Copilot advice does not send people to a provider the policy will deny
   assert.match(advice, /another provider this project configures/);
   assert.match(advice, /etnpilot doctor/);
 });
+
+test("doctor warns when an environment key would go to a host that is not the vendor's", async () => {
+  const root = await project([
+    "providers:",
+    "  proxy:",
+    "    type: openai-compatible",
+    "    baseUrl: https://llm.internal.example/v1",
+    "    apiKeySecret: openai.apiKey",
+    "  openai:",
+    "    type: openai-compatible",
+    "    baseUrl: https://api.openai.com/v1",
+    "    apiKeySecret: openai.apiKey",
+    "",
+  ].join("\n"));
+  const report = await diagnose(root);
+  const text = (report.warnings ?? []).join("\n");
+  assert.match(text, /Provider 'proxy' sends the key 'openai.apiKey' to llm.internal.example/);
+  assert.doesNotMatch(text, /Provider 'openai' sends/);
+});

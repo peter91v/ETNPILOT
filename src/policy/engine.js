@@ -14,7 +14,7 @@ export class PolicyEngine {
   constructor(config = {}, {
     caseInsensitivePaths = CASE_INSENSITIVE_FILESYSTEM,
     resolveSymlinks = true,
-  } = {}) {
+  } = /** @type {any} */ ({})) {
     this.caseInsensitivePaths = caseInsensitivePaths === true;
     this.resolveSymlinks = resolveSymlinks !== false;
     if (!config || Array.isArray(config) || typeof config !== "object") {
@@ -28,7 +28,7 @@ export class PolicyEngine {
           name: "policy.operations",
           effects: OPERATION_EFFECTS,
           defaultEffect: "deny",
-          matchers: ["kinds", "agents", "paths", "hosts"],
+          matchers: ["kinds", "agents", "paths", "hosts", "commands"],
         });
     this.providers = config.providers === undefined
       ? undefined
@@ -51,6 +51,7 @@ export class PolicyEngine {
       agents: stringValue(context.agent),
       paths: path.value,
       hosts: stringValue(host)?.toLowerCase(),
+      commands: request.kind === "shell" ? commandText(request) : undefined,
     };
     const match = selectDecision(this.operations, facts, {
       pathOutsideWorkspace: path.outside,
@@ -113,18 +114,27 @@ function normalizeSection(section, { name, effects, defaultEffect, matchers }) {
   return Object.freeze({ default: effect, rules: Object.freeze(rules), matchers: Object.freeze(matchers) });
 }
 
-function selectDecision(section, facts, { pathOutsideWorkspace = false, caseInsensitivePaths = false } = {}) {
+function selectDecision(section, facts, { pathOutsideWorkspace = false, caseInsensitivePaths = false } = /** @type {any} */ ({})) {
   const matches = section.rules.filter((rule) => section.matchers.every((matcher) => {
     if (rule[matcher] === undefined) return true;
     if (facts[matcher] === undefined) return false;
     if (matcher === "paths" && pathOutsideWorkspace) return false;
     const ignoreCase = matcher === "hosts" || (matcher === "paths" && caseInsensitivePaths);
+    if (matcher === "commands") return rule[matcher].some((pattern) => commandMatch(pattern, facts[matcher]));
     return rule[matcher].some((pattern) => globMatch(pattern, facts[matcher], ignoreCase));
   }));
   if (matches.length === 0) return { effect: section.default, default: true };
-  return matches.reduce((selected, candidate) => (
+  const strictest = (rules) => rules.reduce((selected, candidate) => (
     EFFECT_PRIORITY[candidate.effect] > EFFECT_PRIORITY[selected.effect] ? candidate : selected
   ));
+  const chosen = strictest(matches);
+  // A deny always stands. Otherwise a rule that names the exact command is
+  // more specific than one that covers every shell command, and is the one that
+  // decides: that is what lets "npm test needs no question, anything else does"
+  // be written down. Without it a general 'human' rule would outrank any allow.
+  if (chosen.effect === "deny") return chosen;
+  const named = matches.filter((rule) => rule.commands !== undefined);
+  return named.length > 0 ? strictest(named) : chosen;
 }
 
 function operationDecision(match) {
@@ -148,7 +158,7 @@ function policyReason(subject, match) {
     : `${subject} is denied by policy rule '${match.id}'.`;
 }
 
-function normalizeRequestPath(value, workspace, { resolveSymlinks = true } = {}) {
+function normalizeRequestPath(value, workspace, { resolveSymlinks = true } = /** @type {any} */ ({})) {
   if (typeof value !== "string" || value.length === 0) return { value: undefined, outside: false };
   const root = workspace ? resolve(workspace) : undefined;
   if (isAbsolute(value)) {
@@ -200,6 +210,31 @@ function parseHost(value) {
   } catch {
     return undefined;
   }
+}
+
+// The command as one line: its arguments joined by single spaces. A command is a
+// list, never a shell string, so there is nothing to split or unquote — which is
+// also why 'npm test' cannot match 'npm test; rm -rf /': that is one argument.
+function commandText(request) {
+  if (Array.isArray(request.toolArguments) && request.toolArguments.every((part) => typeof part === "string")) {
+    return request.toolArguments.join(" ");
+  }
+  return stringValue(request.fullCommandText);
+}
+
+// '*' is one word (no spaces, slashes allowed), '**' is anything. Anchored at
+// both ends, so a rule for 'npm test' allows exactly that and not 'npm test --x'.
+function commandMatch(pattern, value) {
+  let source = "";
+  for (let index = 0; index < pattern.length; index += 1) {
+    const character = pattern[index];
+    if (character === "*" && pattern[index + 1] === "*") {
+      source += ".*";
+      index += 1;
+    } else if (character === "*") source += "[^ ]*";
+    else source += character.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
+  }
+  return new RegExp(`^${source}$`).test(value);
 }
 
 function globMatch(pattern, value, caseInsensitive = false) {

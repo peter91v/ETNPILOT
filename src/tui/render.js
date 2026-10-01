@@ -952,7 +952,7 @@ const HELP_SECTIONS = Object.freeze([
 
 // The settings list and its editor. Which entries are on screen is a pure
 // function of the filter, so the app selects exactly what a person can see.
-export function settingEntries(state, { filter = "" } = {}) {
+export function settingEntries(state, { filter = "" } = /** @type {any} */ ({})) {
   const entries = state.settings?.entries ?? [];
   const needle = filter.trim().toLowerCase();
   if (!needle) return entries;

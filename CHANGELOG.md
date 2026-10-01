@@ -6,6 +6,13 @@ pre-1.0, so breaking changes may appear in any release.
 
 ## [Unreleased]
 
+### Checks and hygiene (follow-up to the review)
+
+- The type check covers 102 of the files in `src/` (was 12); the rest are listed in `docs/typecheck.md`.
+- `etnpilot doctor` warns when a key from the environment would go to a host that is not the vendor's own.
+- Seeded random-input tests for the policy's path handling and the diff parser (`test/fuzz.test.js`).
+- `CODEOWNERS` for the security-relevant paths, and a pull request template that asks what leaves the machine.
+
 ### Security — a review of the repository (docs/review-2026-10.md)
 
 - **A stored login goes only to the hosts it was issued for**, over https. Before, a repository's configuration

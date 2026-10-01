@@ -1,3 +1,4 @@
+// @ts-check
 import { randomUUID } from "node:crypto";
 
 // What a tool result looks like to the model.

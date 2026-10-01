@@ -17,7 +17,7 @@ export async function createGitLabWebhookServer({
   run,
   now,
   onError = (error) => console.error(error),
-} = {}) {
+} = /** @type {any} */ ({})) {
   const projectRoot = resolve(root);
   const config = await loadConfig(join(projectRoot, ".etnpilot", "etnpilot.yaml"), env);
   const secrets = createSecretResolver({ root: projectRoot, config, env });
@@ -198,7 +198,7 @@ export async function createGitLabWebhookServer({
     queueWorker,
     approvalInbox,
     drain: (options) => queueWorker.waitForIdle(options),
-    listen({ host = webhook.host ?? "127.0.0.1", port = webhook.port ?? 8787 } = {}) {
+    listen({ host = webhook.host ?? "127.0.0.1", port = webhook.port ?? 8787 } = /** @type {any} */ ({})) {
       return new Promise((resolveListen, reject) => {
         const onListenError = (error) => {
           server.off("listening", onListening);
@@ -218,7 +218,7 @@ export async function createGitLabWebhookServer({
         await new Promise((resolveClose, reject) => {
           server.close((error) => {
             if (error) return reject(error);
-            resolveClose();
+            resolveClose(undefined);
           });
         });
       }

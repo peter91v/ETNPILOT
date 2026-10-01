@@ -1,3 +1,4 @@
+// @ts-check
 import { swallow } from "../runtime/swallow.js";
 import { timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
@@ -32,7 +33,7 @@ export async function createReviewServer({
   getNetworkInterfaces = networkInterfaces,
   fetchImpl,
   allowedHosts = [],
-} = {}) {
+} = /** @type {any} */ ({})) {
   // Kept between starts, because an installed app holds a link: a token minted
   // per start locks that icon out at the next restart. A caller may still pass
   // one, which is what the tests do.
@@ -60,7 +61,7 @@ export async function createReviewServer({
       if (!hostAllowed(request.headers.host, namedHosts)) {
         return send(response, 421, { error: "unknown-host", message: "This server answers to its own address only. To use a name, start it with ETNPILOT_UI_HOSTS=<name>." });
       }
-      const url = new URL(request.url, "http://127.0.0.1");
+      const url = new URL(request.url ?? "/", "http://127.0.0.1");
       if (request.method === "OPTIONS") return send(response, 405, { error: "cross-origin-requests-are-not-served" });
       // Two ways in, and the second is the one an installed app has: a link
       // carries the token in its query, and opening it leaves a cookie behind
@@ -378,7 +379,7 @@ export async function createReviewServer({
     get state() { return state; },
     get inbox() { return state?.inbox; },
     get queue() { return state?.queue; },
-    listen({ host = "127.0.0.1", port = 8788 } = {}) {
+    listen({ host = "127.0.0.1", port = 8788 } = /** @type {any} */ ({})) {
       return new Promise((resolveListen, reject) => {
         const onError = (error) => {
           server.off("listening", onListening);
@@ -386,7 +387,7 @@ export async function createReviewServer({
         };
         const onListening = () => {
           server.off("error", onError);
-          const address = server.address();
+          const address = /** @type {import("node:net").AddressInfo} */ (server.address());
           // A link that only works on the machine that printed it is no help
           // on a tablet: when the port is open to the network, the address
           // given is one that can actually be reached from there.
@@ -410,7 +411,7 @@ export async function createReviewServer({
       // to are closed, rather than being left working for nobody.
       state?.stopRuns();
       if (server.listening) {
-        await new Promise((resolveClose, reject) => server.close((error) => (error ? reject(error) : resolveClose())));
+        await new Promise((resolveClose, reject) => server.close((error) => (error ? reject(error) : resolveClose(undefined))));
       }
       state?.close();
     },

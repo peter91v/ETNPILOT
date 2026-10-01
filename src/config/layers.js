@@ -1,3 +1,4 @@
+// @ts-check
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -58,7 +59,7 @@ export function localConfigFile(projectFile) {
   return join(dirname(resolve(projectFile)), "etnpilot.local.yaml");
 }
 
-export function layerPaths(projectFile, { env = process.env, layerRoot } = {}) {
+export function layerPaths(projectFile, { env = process.env, layerRoot } = /** @type {any} */ ({})) {
   const local = layerRoot
     ? join(resolve(layerRoot), ".etnpilot", "etnpilot.local.yaml")
     : localConfigFile(projectFile);
@@ -69,7 +70,7 @@ export function layerPaths(projectFile, { env = process.env, layerRoot } = {}) {
   ];
 }
 
-export async function readLayers(projectFile, { env = process.env, layerRoot, userLayers = true } = {}) {
+export async function readLayers(projectFile, { env = process.env, layerRoot, userLayers = true } = /** @type {any} */ ({})) {
   const wanted = layerPaths(projectFile, { env, layerRoot })
     .filter((layer) => userLayers || layer.source === "project");
   const layers = [];

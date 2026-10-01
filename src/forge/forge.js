@@ -83,7 +83,7 @@ export async function forgeProject(root, {
   onProgress = () => {},
   configDir = join(root, ".etnpilot"),
   signal,
-} = {}) {
+} = /** @type {any} */ ({})) {
   const report = { agents: [], skills: [], instructions: [], skipped: [], notes: [], sent: undefined, provider: undefined, usage: undefined, dryRun };
   onProgress("AgentsForge: reading the repository…");
   const survey = await surveyRepository(root);

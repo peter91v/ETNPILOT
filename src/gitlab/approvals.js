@@ -1,3 +1,4 @@
+// @ts-check
 import { setTimeout as delay } from "node:timers/promises";
 import { ApprovalStateError } from "../core/approval-inbox.js";
 import { escapeControlCharacters } from "../core/text-safety.js";
@@ -21,7 +22,7 @@ export function createGitLabApprovalHandler({
   onPending = () => {},
   onResolved = () => {},
   onError = () => {},
-} = {}) {
+} = /** @type {any} */ ({})) {
   if (!inbox) throw new TypeError("A GitLab approval handler requires the approval inbox.");
   if (!client || !project || !Number.isInteger(issueIid)) {
     throw new TypeError("A GitLab approval handler requires a client, project, and issue IID.");

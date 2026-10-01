@@ -1,3 +1,4 @@
+// @ts-check
 import { GitLabClient } from "../../gitlab/client.js";
 import { createSecretResolver } from "../../secrets/resolver.js";
 import { join, resolve } from "node:path";

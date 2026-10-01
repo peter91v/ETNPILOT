@@ -1,3 +1,4 @@
+// @ts-check
 import { truncate } from "./ansi.js";
 import { wrap } from "./render.js";
 

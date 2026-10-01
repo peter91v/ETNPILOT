@@ -1,3 +1,4 @@
+// @ts-check
 import YAML from "yaml";
 
 // A named workflow: a file under '.etnpilot/workflows/' holding the steps a run
@@ -17,7 +18,7 @@ export function slugName(value) {
 
 // Returns { ok, errors, workflow }: 'workflow' is the cleaned definition,
 // holding only fields a step is known to use.
-export function validateWorkflowDefinition(input, { agents = [], maxSteps = 50 } = {}) {
+export function validateWorkflowDefinition(input, { agents = [], maxSteps = 50 } = /** @type {any} */ ({})) {
   const errors = [];
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     return { ok: false, errors: ["The workflow must be an object with a name and steps."] };
@@ -102,7 +103,7 @@ function hasCycle(steps) {
   return visited !== steps.length;
 }
 
-export function renderWorkflowFile(workflow, { note } = {}) {
+export function renderWorkflowFile(workflow, { note } = /** @type {any} */ ({})) {
   const header = note ? `# ${note}\n` : "";
   return `${header}${YAML.stringify(workflow, { lineWidth: 0 })}`;
 }

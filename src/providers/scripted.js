@@ -1,3 +1,4 @@
+// @ts-check
 import { ProviderError } from "./router.js";
 import { createWorkspaceTools, WORKSPACE_TOOL_DEFINITIONS } from "./workspace-tools.js";
 
@@ -28,7 +29,7 @@ export function createScriptedProvider({
   toolLimits,
   sandbox,
   toolsImpl,
-} = {}) {
+} = /** @type {any} */ ({})) {
   if (!Array.isArray(steps)) throw new TypeError(`Provider '${name}' steps must be an array.`);
   if (!workingDirectory && !toolsImpl) throw new TypeError(`Provider '${name}' requires a workingDirectory.`);
   const script = steps.map((step, index) => {

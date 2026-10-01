@@ -17,7 +17,7 @@ export const WORKFLOW_JOB_STATUSES = Object.freeze([
 const STATUS_SET = new Set([...WORKFLOW_JOB_STATUSES, "all"]);
 
 export class WorkflowQueue {
-  constructor(databasePath, { now = Date.now } = {}) {
+  constructor(databasePath, { now = Date.now } = /** @type {any} */ ({})) {
     this.path = resolve(databasePath);
     this.now = now;
     mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
@@ -57,7 +57,7 @@ export class WorkflowQueue {
     `);
   }
 
-  enqueue({ kind, deliveryId, payload, metadata = {}, maxAttempts = 1, availableAt } = {}) {
+  enqueue({ kind, deliveryId, payload, metadata = {}, maxAttempts = 1, availableAt } = /** @type {any} */ ({})) {
     if (!kind || typeof kind !== "string") throw new TypeError("A workflow job kind is required.");
     if (!payload || typeof payload !== "object") throw new TypeError("A workflow job payload is required.");
     assertPositiveInteger(maxAttempts, "maxAttempts");
@@ -98,7 +98,7 @@ export class WorkflowQueue {
     return row ? fromRow(row) : undefined;
   }
 
-  list({ status = "all", limit = 100 } = {}) {
+  list({ status = "all", limit = 100 } = /** @type {any} */ ({})) {
     if (!STATUS_SET.has(status)) throw new TypeError(`Unsupported workflow job status: '${status}'.`);
     if (!Number.isInteger(limit) || limit < 1 || limit > 1000) {
       throw new TypeError("Workflow queue list limit must be 1..1000.");
@@ -109,7 +109,7 @@ export class WorkflowQueue {
     return rows.map(fromRow);
   }
 
-  claim(workerId, { leaseMs = 30_000 } = {}) {
+  claim(workerId, { leaseMs = 30_000 } = /** @type {any} */ ({})) {
     if (!workerId) throw new TypeError("A worker ID is required.");
     assertPositiveInteger(leaseMs, "leaseMs");
     const now = this.now();
@@ -132,7 +132,7 @@ export class WorkflowQueue {
     });
   }
 
-  heartbeat(id, workerId, { leaseMs = 30_000 } = {}) {
+  heartbeat(id, workerId, { leaseMs = 30_000 } = /** @type {any} */ ({})) {
     assertPositiveInteger(leaseMs, "leaseMs");
     const now = this.now();
     const result = this.database.prepare(`
@@ -168,7 +168,7 @@ export class WorkflowQueue {
     return this.#finish(id, workerId, "succeeded", { result });
   }
 
-  fail(id, workerId, error, { retryDelayMs = 0, safeToRetry = false } = {}) {
+  fail(id, workerId, error, { retryDelayMs = 0, safeToRetry = false } = /** @type {any} */ ({})) {
     if (!Number.isInteger(retryDelayMs) || retryDelayMs < 0) {
       throw new TypeError("retryDelayMs must be a non-negative integer.");
     }
@@ -198,7 +198,7 @@ export class WorkflowQueue {
     return this.get(id);
   }
 
-  requestCancel(id, { actor = "cli", reason } = {}) {
+  requestCancel(id, { actor = "cli", reason } = /** @type {any} */ ({})) {
     const job = this.get(id);
     if (!job) throw new WorkflowQueueStateError(`Unknown workflow job '${id}'.`, { code: "not_found" });
     if (["succeeded", "failed", "canceled", "orphaned"].includes(job.status)) {
@@ -239,7 +239,7 @@ export class WorkflowQueue {
     return Number(result.changes) === 1 ? this.get(id) : this.get(id);
   }
 
-  resume(id, { force = false } = {}) {
+  resume(id, { force = false } = /** @type {any} */ ({})) {
     const job = this.get(id);
     if (!job) throw new WorkflowQueueStateError(`Unknown workflow job '${id}'.`, { code: "not_found" });
     if (!["failed", "canceled", "orphaned"].includes(job.status)) {
@@ -322,7 +322,7 @@ export class WorkflowQueue {
 }
 
 export class WorkflowQueueStateError extends Error {
-  constructor(message, { code } = {}) {
+  constructor(message, { code } = /** @type {any} */ ({})) {
     super(message);
     this.name = "WorkflowQueueStateError";
     this.code = code;

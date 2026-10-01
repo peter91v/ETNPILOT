@@ -1,3 +1,4 @@
+// @ts-check
 import { readRegularFile } from "../runtime/bounded-io.js";
 import { randomBytes } from "node:crypto";
 import { appendFile, mkdir, readdir, rename, stat } from "node:fs/promises";
@@ -14,7 +15,7 @@ export async function createTelemetry({
   secretResolver,
   fetchImpl = globalThis.fetch,
   now = () => Date.now(),
-} = {}) {
+} = /** @type {any} */ ({})) {
   const options = normalizeConfig(config.observability);
   if (!options.enabled) return undefined;
   let headers = {};
@@ -45,7 +46,7 @@ export class Telemetry {
     fetchImpl = globalThis.fetch,
     now = () => Date.now(),
     rotateBytes = DEFAULT_ROTATE_BYTES,
-  } = {}) {
+  } = /** @type {any} */ ({})) {
     this.rotateBytes = rotateBytes;
     this.root = root;
     this.file = file;
@@ -62,7 +63,7 @@ export class Telemetry {
     this.errors = [];
   }
 
-  startSpan(name, { traceId, parentSpanId, kind = 1, attributes = {} } = {}) {
+  startSpan(name, { traceId, parentSpanId, kind = 1, attributes = {} } = /** @type {any} */ ({})) {
     if (typeof name !== "string" || name.length === 0) throw new TypeError("Span name is required.");
     if (traceId !== undefined && !/^[a-f0-9]{32}$/.test(traceId)) {
       throw new TypeError("traceId must be 32 lowercase hexadecimal characters.");
@@ -88,7 +89,7 @@ export class Telemetry {
     return Object.freeze({
       traceId: span.traceId,
       spanId: span.spanId,
-      end: async ({ status = "ok", attributes: finalAttributes = {} } = {}) => {
+      end: async ({ status = "ok", attributes: finalAttributes = {} } = /** @type {any} */ ({})) => {
         if (ended) throw new Error(`Span '${name}' has already ended.`);
         ended = true;
         const completed = {
@@ -103,7 +104,7 @@ export class Telemetry {
     });
   }
 
-  recordProviderUsage({ workflowRunId, agentRunId, provider, model, usage = {}, invocationComplete = true }) {
+  recordProviderUsage({ workflowRunId, agentRunId, provider, model, usage = /** @type {any} */ ({}), invocationComplete = true }) {
     const normalized = normalizeUsage(usage);
     const key = workflowRunId ?? agentRunId;
     const rate = this.pricing.models[model]
@@ -196,7 +197,7 @@ async function telemetryParts(path) {
   return [...archives, file];
 }
 
-export async function summarizeTelemetryFile(path, { workflowRunId, root = "", config = {} } = {}) {
+export async function summarizeTelemetryFile(path, { workflowRunId, root = "", config = {} } = /** @type {any} */ ({})) {
   const pieces = [];
   for (const part of await telemetryParts(path)) {
     pieces.push(await readRegularFile(part, 64 * 1024 * 1024).then((bytes) => bytes.toString("utf8")).catch((error) => {
@@ -308,7 +309,7 @@ function retroactive(attributes, summary, model, context) {
   }, rate);
 }
 
-function normalizeConfig(config = {}) {
+function normalizeConfig(config = /** @type {any} */ ({})) {
   if (!config || Array.isArray(config) || typeof config !== "object") {
     throw new TypeError("observability must be an object.");
   }
@@ -573,7 +574,7 @@ function emptySummary(currency) {
     cacheWriteTokens: 0,
     providerUnits: 0,
     requests: 0,
-    estimatedCost: undefined,
+    estimatedCost: /** @type {number | undefined} */ (undefined),
     currency,
     invocations: 0,
     pricedInvocations: 0,

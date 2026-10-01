@@ -1,3 +1,4 @@
+// @ts-check
 import { createHash, randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -13,7 +14,7 @@ const DECISIONS = new Set(["approved", "rejected", "approved-for-run"]);
 const STATUSES = new Set(["pending", "approved", "rejected", "approved-for-run", "expired", "all"]);
 
 export class ApprovalInbox {
-  constructor(databasePath, { now = Date.now, redact = false, maxDetailLength = 8192 } = {}) {
+  constructor(databasePath, { now = Date.now, redact = false, maxDetailLength = 8192 } = /** @type {any} */ ({})) {
     this.path = resolve(databasePath);
     this.now = now;
     // Full fidelity by default: an operator can only approve what they see.
@@ -52,7 +53,7 @@ export class ApprovalInbox {
     this.database.exec("CREATE INDEX IF NOT EXISTS approvals_workflow_job ON approvals(workflow_job_id, created_at);");
   }
 
-  create(request, context = {}, { timeoutMs = 24 * 60 * 60_000, serviceInstanceId } = {}) {
+  create(request, context = {}, { timeoutMs = 24 * 60 * 60_000, serviceInstanceId } = /** @type {any} */ ({})) {
     if (!Number.isInteger(timeoutMs) || timeoutMs < 1) throw new TypeError("Approval timeoutMs must be positive.");
     const createdAt = this.now();
     const record = {
@@ -98,7 +99,7 @@ export class ApprovalInbox {
     return row ? fromRow(row) : undefined;
   }
 
-  list({ status = "pending", limit = 100 } = {}) {
+  list({ status = "pending", limit = 100 } = /** @type {any} */ ({})) {
     if (!STATUSES.has(status)) throw new TypeError(`Unsupported approval status: '${status}'.`);
     if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw new TypeError("Approval list limit must be 1..1000.");
     this.expire();
@@ -108,7 +109,7 @@ export class ApprovalInbox {
     return rows.map(fromRow);
   }
 
-  decide(id, decision, { actor = "cli", reason, scope } = {}) {
+  decide(id, decision, { actor = "cli", reason, scope } = /** @type {any} */ ({})) {
     if (!DECISIONS.has(decision)) throw new TypeError(`Unsupported approval decision: '${decision}'.`);
     const decidedAt = this.now();
     this.expire();
@@ -151,7 +152,7 @@ export function createInboxApprovalHandler({
   signal,
   onPending = () => {},
   onResolved = () => {},
-} = {}) {
+} = /** @type {any} */ ({})) {
   if (!inbox) throw new TypeError("An approval inbox is required.");
   if (!Number.isInteger(pollIntervalMs) || pollIntervalMs < 10) {
     throw new TypeError("Approval pollIntervalMs must be at least 10.");
@@ -210,9 +211,9 @@ export function createInboxApprovalHandler({
 // A reviewer approves what they can read in full: the whole command and the
 // whole URL, not an abbreviated summary. The fingerprint is taken over the
 // original request, so display limits can never change what was identified.
-export function summarizeApprovalRequest(request = {}, { redact = false, maxLength = 8192 } = {}) {
+export function summarizeApprovalRequest(request = {}, { redact = false, maxLength = 8192 } = /** @type {any} */ ({})) {
   const details = {};
-  const present = (value, { allowNewlines = false } = {}) => {
+  const present = (value, { allowNewlines = false } = /** @type {any} */ ({})) => {
     const sanitized = sanitizeForDisplay(redact ? redactSecrets(value) : value, { maxLength, allowNewlines });
     if (sanitized.truncated) details.truncated = true;
     return sanitized.text;
@@ -251,7 +252,7 @@ function stringify(value) {
 }
 
 export class ApprovalStateError extends Error {
-  constructor(message, { code } = {}) {
+  constructor(message, { code } = /** @type {any} */ ({})) {
     super(message);
     this.name = "ApprovalStateError";
     this.code = code;

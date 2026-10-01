@@ -1,7 +1,8 @@
+// @ts-check
+import { readLines } from "./jsonl.js";
 import { join, resolve } from "node:path";
 import { loadReceiptVerifiers } from "../core/receipt-signing.js";
-import { readFile, readdir, stat } from "node:fs/promises";
-import { readRegularFile } from "./bounded-io.js";
+import { readdir, stat } from "node:fs/promises";
 import { refreshPricing } from "../observability/pricing-sync.js";
 import { summarizeTelemetryFile } from "../observability/telemetry.js";
 import { swallow } from "./swallow.js";
@@ -28,7 +29,7 @@ export async function countRuns(directory) {
   return entries.filter((name) => name.endsWith(".jsonl")).length;
 }
 
-export async function readRuns(directory, { limit = 20, cache = receiptCache } = {}) {
+export async function readRuns(directory, { limit = 20, cache = receiptCache } = /** @type {any} */ ({})) {
   const entries = await readdir(directory).catch((error) => {
     if (error.code === "ENOENT") return [];
     throw error;
@@ -47,24 +48,42 @@ export async function readRuns(directory, { limit = 20, cache = receiptCache } =
       runs.push(hit.run);
       continue;
     }
-    const content = await readFile(path, "utf8").catch(() => "");
-    const lines = content.split("\n").filter(Boolean);
-    if (lines.length === 0) continue;
-    const parsed = [];
-    for (const line of lines) {
-      try {
-        parsed.push(JSON.parse(line));
-      } catch {
-        // A malformed line is reported by 'etnpilot receipt verify'.
+    // Streamed, because a receipt is as long as the run was. Only what the list
+    // shows is kept: how many entries, the first mode, the last sealed record and
+    // the approvals; a line is parsed when it can matter.
+    let entryCount = 0;
+    let firstMode;
+    let sealed;
+    let approvals = 0;
+    let failure;
+    try {
+      for await (const line of readLines(path)) {
+        if (line === "") continue;
+        entryCount += 1;
+        const sealing = line.includes('"terminal":true');
+        const approving = line.includes('"approvals":[') && !line.includes('"approvals":[]');
+        if (!sealing && !approving && firstMode !== undefined) continue;
+        let entry;
+        try {
+          entry = JSON.parse(line);
+        } catch {
+          // A malformed line is reported by 'etnpilot receipt verify'.
+          continue;
+        }
+        if (firstMode === undefined && typeof entry.mode === "string") firstMode = entry.mode;
+        if (entry.terminal === true) sealed = entry;
+        if (approving) approvals += (entry.approvals ?? []).length;
       }
+    } catch (error) {
+      failure = error;
     }
-    if (parsed.length === 0) continue;
-    // The last line is not the terminal record: a run that stopped before it
-    // could seal leaves an ordinary entry there, and reading that entry's own
-    // status, hash and duration as the run's reports a step's success as the
-    // run's. What is sealed is what carries 'terminal: true', and nothing
-    // else.
-    const sealed = parsed.findLast((entry) => entry.terminal === true);
+    if (failure) {
+      // A receipt that cannot be read is a row that says so, not a run that
+      // is missing from the list.
+      runs.push({ runId: file.replace(/\.jsonl$/, ""), status: "unreadable", mode: "execute", terminal: false, entries: 0, signed: false, approvals: 0, receiptFile: file, unreadable: failure.message });
+      continue;
+    }
+    if (entryCount === 0) continue;
     const run = {
       // A receipt carries two kinds of id: each agent invocation writes its
       // own, and the workflow writes the run's. The run's is what every
@@ -73,15 +92,15 @@ export async function readRuns(directory, { limit = 20, cache = receiptCache } =
       // to write a line.
       runId: sealed?.runId ?? file.replace(/\.jsonl$/, ""),
       status: sealed?.status ?? "incomplete",
-      mode: sealed?.mode ?? parsed.find((entry) => typeof entry.mode === "string")?.mode ?? "execute",
+      mode: sealed?.mode ?? firstMode ?? "execute",
       terminal: Boolean(sealed),
-      entries: lines.length,
+      entries: entryCount,
       hash: sealed?.hash,
       signed: Boolean(sealed?.proof),
       durationMs: sealed?.durationMs,
       branch: sealed?.workspace?.branch,
       sandbox: sealed?.workspace?.sandbox?.image,
-      approvals: countApprovals(lines),
+      approvals,
       receiptFile: file,
     };
     // Only a sealed receipt is worth keeping: an unsealed one is still being
@@ -95,7 +114,7 @@ export async function readRuns(directory, { limit = 20, cache = receiptCache } =
 // Why a run ended the way it did, from what the receipt already holds. Both
 // surfaces ask this module rather than each reading the entries their own way,
 // so neither can give a different answer about the same run.
-export function describeOutcome(receipt, { running = false } = {}) {
+export function describeOutcome(receipt, { running = false } = /** @type {any} */ ({})) {
   const terminal = receipt?.terminal ?? {};
   const summary = terminal.summary ?? {};
   const steps = Object.entries(summary.steps ?? {}).map(([id, step]) => ({ id, ...step }));
@@ -312,7 +331,7 @@ function publicationReason(publication) {
 // Verifying is a different question from reading: the chain and the signature,
 // rather than what the run did. A receipt whose chain is broken still reads —
 // that is exactly why this answer has to be available next to it.
-export async function verifyProjectReceipt(directory, file, { root, config } = {}) {
+export async function verifyProjectReceipt(directory, file, { root, config } = /** @type {any} */ ({})) {
   assertReceiptName(file);
   const configured = config?.receipts?.signing?.publicKeyFile;
   const verifiers = configured
@@ -333,7 +352,7 @@ export async function verifyProjectReceipt(directory, file, { root, config } = {
 // A reason code is for a program; this is the sentence a person reads. Every
 // failure here means someone or something changed a sealed record, so it says
 // which line and what kind of change it was, not 'invalid'.
-function describeVerification(report, { signaturesChecked = false } = {}) {
+function describeVerification(report, { signaturesChecked = false } = /** @type {any} */ ({})) {
   if (report.valid) {
     const chain = `${report.entries} ${report.entries === 1 ? "entry" : "entries"}, each hashed onto the one before it`;
     const signatures = signaturesChecked
@@ -390,11 +409,22 @@ export async function withCurrentPricing(receipt, { root, config, runId }) {
   return { ...receipt, outcome: { ...receipt.outcome, usage: merged } };
 }
 
+// A run's receipt in full, for its detail view. The file as a whole is limited to
+// 64 MiB, because here every entry is held; listing and verifying are not limited
+// that way (see readRuns and verifyReceiptFile). A run past the limit says so and
+// points at the command that does not need to hold it.
+const DETAIL_LIMIT_BYTES = 64 * 1024 * 1024;
+
 export async function readReceipt(directory, file) {
   assertReceiptName(file);
-  const content = await readRegularFile(join(directory, file), 16 * 1024 * 1024).then((bytes) => bytes.toString("utf8"));
+  const path = join(directory, file);
+  const size = (await stat(path)).size;
+  if (size > DETAIL_LIMIT_BYTES) {
+    throw Object.assign(new Error(`This receipt is ${Math.round(size / 1024 / 1024)} MiB, more than the ${DETAIL_LIMIT_BYTES / 1024 / 1024} MiB the detail view holds. 'etnpilot receipt verify ${file}' checks it without loading it.`), { statusCode: 413 });
+  }
   const entries = [];
-  for (const line of content.split("\n").filter(Boolean)) {
+  for await (const line of readLines(path)) {
+    if (line === "") continue;
     try {
       entries.push(JSON.parse(line));
     } catch {
@@ -405,25 +435,13 @@ export async function readReceipt(directory, file) {
   return { ...receipt, outcome: describeOutcome(receipt) };
 }
 
-function countApprovals(lines) {
-  let total = 0;
-  for (const line of lines) {
-    try {
-      total += (JSON.parse(line).approvals ?? []).length;
-    } catch {
-      // A malformed line is reported by 'etnpilot receipt verify', not here.
-    }
-  }
-  return total;
-}
-
 // The worktrees this repository has, with ETNPilot's own marked and the
 // branches they hold. A run works in one of these, so what is on disk is part
 // of the same evidence as the receipt it wrote.
 // A unified diff, read as the lines it touches: every line carries the number
 // it has on each side, so a surface can show where a change is rather than
 // only what it says.
-export function parseDiff(text, { limit = 2000 } = {}) {
+export function parseDiff(text, { limit = 2000 } = /** @type {any} */ ({})) {
   const lines = [];
   let oldLine = 0;
   let newLine = 0;

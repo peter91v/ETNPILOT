@@ -1,3 +1,4 @@
+// @ts-check
 import { spawn as spawnProcess } from "node:child_process";
 
 // Opening the review page where it was asked for. This is the one place that
@@ -8,7 +9,7 @@ import { spawn as spawnProcess } from "node:child_process";
 
 const EXIT_GRACE_MS = 700;
 
-export function browserCandidates({ platform = process.platform, env = process.env } = {}) {
+export function browserCandidates({ platform = process.platform, env = process.env } = /** @type {any} */ ({})) {
   const chosen = typeof env.BROWSER === "string" ? env.BROWSER.trim() : "";
   // BROWSER is the convention other tools follow; 'none' is how a person says
   // 'never open anything'.
@@ -32,7 +33,7 @@ export async function openInBrowser(url, {
   env = process.env,
   spawn = spawnProcess,
   graceMs = EXIT_GRACE_MS,
-} = {}) {
+} = /** @type {any} */ ({})) {
   if (typeof url !== "string" || !/^https?:\/\//.test(url)) {
     throw new TypeError("A http(s) URL is required to open a browser.");
   }

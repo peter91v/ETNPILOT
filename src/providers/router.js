@@ -1,8 +1,9 @@
+// @ts-check
 import { invocationMeter } from "./usage-meter.js";
 import { telemetryProviderAttributes } from "../observability/telemetry.js";
 
 export class ProviderError extends Error {
-  constructor(message, { code = "provider_error", retryable = false, safeToRetry = false, retryAfterMs, cause } = {}) {
+  constructor(message, { code = "provider_error", retryable = false, safeToRetry = false, retryAfterMs, cause } = /** @type {any} */ ({})) {
     super(message, { cause });
     this.name = "ProviderError";
     this.code = code;
@@ -15,7 +16,7 @@ export class ProviderError extends Error {
 }
 
 export class ProviderRouter {
-  constructor(registry, config = {}, { policy, defaultProvider } = {}) {
+  constructor(registry, config = {}, { policy, defaultProvider } = /** @type {any} */ ({})) {
     this.registry = registry;
     this.policy = policy;
     // 'defaultProvider' is the project's plain answer to 'which provider?'.
@@ -167,7 +168,7 @@ export class ProviderRouter {
 
 // The route, on its own, so a command that only wants to report it does not
 // have to reimplement the order and drift from it.
-export function routeFor(agent, { rules = [], defaults = [] } = {}) {
+export function routeFor(agent, { rules = [], defaults = [] } = /** @type {any} */ ({})) {
   const exactRules = rules.filter((rule) => rule.agent === agent.name);
   const wildcardRules = rules.filter((rule) => rule.agent === "*");
   const matching = [...exactRules, ...wildcardRules];

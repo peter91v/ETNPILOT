@@ -70,14 +70,14 @@ export function projectConfigFile(root) {
   return join(resolve(root), ".etnpilot", "etnpilot.yaml");
 }
 
-export function scopeFile(scope, { root, env = process.env } = {}) {
+export function scopeFile(scope, { root, env = process.env } = /** @type {any} */ ({})) {
   assertScope(scope);
   return scope === "global"
     ? globalConfigFile(env)
     : layerPaths(projectConfigFile(root), { env }).find((layer) => layer.source === "user-local").path;
 }
 
-export async function describeSettings({ root = process.cwd(), env = process.env } = {}) {
+export async function describeSettings({ root = process.cwd(), env = process.env } = /** @type {any} */ ({})) {
   const projectFile = projectConfigFile(root);
   const layers = await readLayers(projectFile, { env });
   const merged = mergeLayers(layers);
@@ -102,7 +102,7 @@ export async function describeSettings({ root = process.cwd(), env = process.env
   };
 }
 
-export async function diffSettings({ root = process.cwd(), env = process.env } = {}) {
+export async function diffSettings({ root = process.cwd(), env = process.env } = /** @type {any} */ ({})) {
   const projectFile = projectConfigFile(root);
   const layers = await readLayers(projectFile, { env });
   const project = layers.find((layer) => layer.source === "project");
@@ -117,11 +117,11 @@ export async function diffSettings({ root = process.cwd(), env = process.env } =
   }));
 }
 
-export async function setSetting(path, value, { root = process.cwd(), env = process.env, scope = "local" } = {}) {
+export async function setSetting(path, value, { root = process.cwd(), env = process.env, scope = "local" } = /** @type {any} */ ({})) {
   return writeSetting(path, { present: true, value }, { root, env, scope });
 }
 
-export async function unsetSetting(path, { root = process.cwd(), env = process.env, scope = "local" } = {}) {
+export async function unsetSetting(path, { root = process.cwd(), env = process.env, scope = "local" } = /** @type {any} */ ({})) {
   return writeSetting(path, { present: false }, { root, env, scope });
 }
 

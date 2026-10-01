@@ -1,3 +1,4 @@
+// @ts-check
 import { createStyle, pad, screen, truncate } from "./ansi.js";
 import { clamp, wrap } from "./render.js";
 import { splitKeys } from "./app.js";
@@ -18,7 +19,7 @@ export function renderFirstRun(status, {
   busy = false,
   importing = true,
   forging = true,
-} = {}) {
+} = /** @type {any} */ ({})) {
   const style = createStyle({ color });
   const templates = status.templates ?? [];
   const lines = [
@@ -81,7 +82,7 @@ export function createFirstRunApp({
   root = process.cwd(),
   output = process.stdout,
   input = process.stdin,
-} = {}) {
+} = /** @type {any} */ ({})) {
   let status;
   let cursor = 0;
   let message;

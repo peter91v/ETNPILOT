@@ -1,3 +1,4 @@
+// @ts-check
 import { GitLabClient } from "../gitlab/client.js";
 import { RUN_BRANCH_PREFIX } from "./project-runner.js";
 import { WorktreeManager } from "../git/worktrees.js";
@@ -108,7 +109,7 @@ export async function readWorktrees({ root, config }) {
 // target, because what lands before ours is what breaks ours. Read straight
 // from GitLab: a merge request's state lives there and nowhere else, and the
 // receipt is sealed before publishing, so it cannot carry this.
-export async function readMergeRequests({ root, config, env }, { state = "opened", fetchImpl, limit = 50 } = {}) {
+export async function readMergeRequests({ root, config, env }, { state = "opened", fetchImpl, limit = 50 } = /** @type {any} */ ({})) {
   const project = config?.git?.project;
   if (!project) {
     return {

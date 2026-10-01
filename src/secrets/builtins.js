@@ -1,8 +1,9 @@
+// @ts-check
 import { realpath, readFile, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import { defineSecretProvider } from "./provider.js";
 
-export function createEnvironmentSecretProvider(name, config = {}, { env = process.env } = {}) {
+export function createEnvironmentSecretProvider(name, config = {}, { env = process.env } = /** @type {any} */ ({})) {
   const allowed = config.allow === undefined ? undefined : new Set(validateAllowedNames(config.allow, name));
   return defineSecretProvider({
     apiVersion: 1,
@@ -16,7 +17,7 @@ export function createEnvironmentSecretProvider(name, config = {}, { env = proce
   });
 }
 
-export function createFileSecretProvider(name, config = {}, { root = process.cwd() } = {}) {
+export function createFileSecretProvider(name, config = {}, { root = process.cwd() } = /** @type {any} */ ({})) {
   if (!config.root) throw new TypeError(`File secret provider '${name}' requires root.`);
   const providerRoot = resolve(root, config.root);
   const requireOwnerOnly = config.requireOwnerOnly !== false;

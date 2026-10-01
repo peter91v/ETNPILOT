@@ -1,3 +1,4 @@
+// @ts-check
 export * from "./receipt-views.js";
 export * from "./project-reads.js";
 import { checkRunReadiness, readAgents, readMergeRequests, readUsage, readWorktrees, worktreeManager } from "./project-reads.js";
@@ -29,7 +30,7 @@ const HELD_OPEN = Object.freeze(["queue.database", "approval.inbox.database"]);
 // What every surface reads: approvals waiting, the queue, and finished runs
 // taken from their receipt files. One implementation, so the terminal, the
 // TUI and the page can never disagree about what is true.
-export async function openProjectState({ root = process.cwd(), env = process.env } = {}) {
+export async function openProjectState({ root = process.cwd(), env = process.env } = /** @type {any} */ ({})) {
   const projectRoot = resolve(root);
   const config = await loadConfig(join(projectRoot, ".etnpilot", "etnpilot.yaml"), env);
   const inbox = new ApprovalInbox(
@@ -46,7 +47,7 @@ export async function openProjectState({ root = process.cwd(), env = process.env
   // the TUI and the page both need to say what is running, and closing either
   // one must stop what it started rather than stranding it.
   const running = new Set();
-  const runErrors = [];
+  const runErrors = /** @type {any[]} */ ([]);
   const self = {
     root: projectRoot,
     get config() { return current; },
@@ -76,7 +77,7 @@ export async function openProjectState({ root = process.cwd(), env = process.env
       }),
       // Files a person can name with '@': what git tracks, minus what the read
       // policy refuses them. The same set search_files searches.
-      async files(query = "", { limit = 50 } = {}) {
+      async files(query = "", { limit = 50 } = /** @type {any} */ ({})) {
         const listed = await git(["ls-files", "-z"], { cwd: projectRoot, trim: false }).catch(() => ({ stdout: "" }));
         const policy = new PolicyEngine(current.policy);
         const needle = String(query).toLowerCase();
@@ -92,7 +93,7 @@ export async function openProjectState({ root = process.cwd(), env = process.env
       },
       // One turn of a conversation, started the way any run from a surface is:
       // its approvals land in the inbox this page already shows. Not awaited.
-      async send({ sessionId, text, agent, model, provider, effort, providerFactories } = {}) {
+      async send({ sessionId, text, agent, model, provider, effort, providerFactories } = /** @type {any} */ ({})) {
         if (typeof text !== "string" || text.trim() === "") throw new TypeError("A message is required.");
         const id = sessionId ?? createSessionId();
         if ([...running].some((record) => record.session === id)) {
@@ -105,7 +106,7 @@ export async function openProjectState({ root = process.cwd(), env = process.env
         if (!names.includes(chosen)) throw new TypeError(`Unknown agent '${chosen}'. This project has: ${names.join(", ")}.`);
         if (provider) {
           const verdict = new PolicyEngine(current.policy).evaluateProvider(provider, { agent: chosen });
-          if (verdict.allowed === false) throw new Error(verdict.reason ?? `The policy does not allow provider '${provider}'.`);
+          if (verdict.allowed === false) throw new Error(/** @type {any} */ (verdict).reason ?? `The policy does not allow provider '${provider}'.`);
           if (!current.providers?.[provider]) throw new TypeError(`No provider '${provider}' is configured.`);
         }
         const policy = new PolicyEngine(current.policy);
@@ -137,7 +138,7 @@ export async function openProjectState({ root = process.cwd(), env = process.env
       },
       // Asks the model to summarise the older turns, as a run of its own. The
       // answer is not awaited; it lands in the session as a 'compact' line.
-      async compact(id, { agent, model, provider, effort, providerFactories } = {}) {
+      async compact(id, { agent, model, provider, effort, providerFactories } = /** @type {any} */ ({})) {
         const check = await compactionCheck(projectRoot, id);
         if (!check.ok) return check;
         if ([...running].some((record) => record.session === id)) {
@@ -190,7 +191,7 @@ export async function openProjectState({ root = process.cwd(), env = process.env
       const all = await module.listModels({ baseUrl: providerConfig.baseUrl, apiKey });
       // Only ETNPilot's own judgment of which are chat-capable, for the
       // provider type whose listing endpoint does not separate them itself.
-      const models = type === "openai-compatible" ? all.filter((model) => module.looksLikeChatModel(model.id)) : all;
+      const models = type === "openai-compatible" ? all.filter((model) => /** @type {any} */ (module).looksLikeChatModel(model.id)) : all;
       return {
         available: true,
         models: models.map((model) => ({ ...model, knownPrice: knownPriceFor(type, model.id) })),
@@ -220,7 +221,7 @@ export async function openProjectState({ root = process.cwd(), env = process.env
     updateAgent: (name, input) => updateAgent({ root: projectRoot, config: current, name, input }),
     updateWorkflow: (name, input) => updateWorkflow({ root: projectRoot, config: current, name, input }),
     removeContent: (kind, name) => removeContent({ root: projectRoot, config: current, kind, name }),
-    startRun({ input, agent, workflow, signal, dryRun, providerFactories, via, session, worktree } = {}) {
+    startRun({ input, agent, workflow, signal, dryRun, providerFactories, via, session, worktree } = /** @type {any} */ ({})) {
       if (!input || !String(input).trim()) throw new TypeError("A task is required to start a run.");
       const inboxConfig = current.approval?.inbox ?? {};
       if (inboxConfig.enabled === false) {
@@ -234,7 +235,7 @@ export async function openProjectState({ root = process.cwd(), env = process.env
         if (signal.aborted) controller.abort();
         else signal.addEventListener("abort", () => controller.abort(), { once: true });
       }
-      const record = { task, agent, startedAt: new Date().toISOString(), controller, done: 0, ...(session ? { session } : {}) };
+      const record = /** @type {any} */ ({ task, agent, startedAt: new Date().toISOString(), controller, done: 0, ...(session ? { session } : {}) });
       const execute = via ?? runProject;
       const started = execute({
         root: projectRoot,
@@ -401,8 +402,8 @@ export async function openProjectState({ root = process.cwd(), env = process.env
 }
 
 export async function collectState(
-  { inbox, queue, runsDirectory, root, env, running = new Set(), runErrors = [] },
-  { runLimit = 20 } = {},
+  { inbox, queue, runsDirectory, root, env, running = new Set(), runErrors = /** @type {any[]} */ ([]) },
+  { runLimit = 20 } = /** @type {any} */ ({}),
 ) {
   return {
     generatedAt: new Date().toISOString(),

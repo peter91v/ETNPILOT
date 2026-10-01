@@ -1,3 +1,4 @@
+// @ts-check
 import { briefValue } from "../shared.js";
 import { describeSettings, diffSettings, parseSettingValue, setSetting, unsetSetting } from "../../config/settings.js";
 import { join, resolve } from "node:path";

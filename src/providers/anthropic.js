@@ -230,7 +230,7 @@ export function createAnthropicProvider({
 // The models this account can currently reach. Anthropic's own /v1/models
 // only lists what is currently offered — nothing retired — so unlike the
 // OpenAI-compatible listing this needs no chat/non-chat filter.
-export async function listModels({ baseUrl = DEFAULT_BASE_URL, apiKey, fetchImpl = globalThis.fetch } = {}) {
+export async function listModels({ baseUrl = DEFAULT_BASE_URL, apiKey, fetchImpl = globalThis.fetch } = /** @type {any} */ ({})) {
   const endpoint = `${baseUrl.replace(/\/$/, "")}/v1/models`;
   let response;
   try {

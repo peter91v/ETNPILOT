@@ -1,3 +1,4 @@
+// @ts-check
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
@@ -38,7 +39,7 @@ export async function scanForSecrets(root, {
   maxFileBytes = 1024 * 1024,
   rules = RULES,
   allow = [],
-} = {}) {
+} = /** @type {any} */ ({})) {
   const projectRoot = resolve(root);
   const candidates = paths ?? await trackedFiles(projectRoot);
   const allowed = new Set(allow);

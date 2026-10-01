@@ -1,0 +1,10 @@
+# Whoever owns these paths reviews changes to them. The security-relevant
+# code is listed on purpose: a change there should never merge unseen.
+*                         @peter91v
+/src/policy/              @peter91v
+/src/auth/                @peter91v
+/src/secrets/             @peter91v
+/src/trust/               @peter91v
+/src/plugins/             @peter91v
+/src/core/receipt-*.js    @peter91v
+/.github/                 @peter91v

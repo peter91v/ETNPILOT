@@ -1,3 +1,4 @@
+// @ts-check
 import { git } from "../git/command.js";
 import { GitLabClient } from "./client.js";
 

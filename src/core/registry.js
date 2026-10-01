@@ -1,3 +1,4 @@
+// @ts-check
 export class Registry {
   #entries = new Map();
 

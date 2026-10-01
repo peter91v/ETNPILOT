@@ -1,6 +1,7 @@
+// @ts-check
 import { Worker } from "node:worker_threads";
 
-export async function searchLines(data, { signal, timeoutMs = 1000 } = {}) {
+export async function searchLines(data, { signal, timeoutMs = 1000 } = /** @type {any} */ ({})) {
   signal?.throwIfAborted();
   const worker = new Worker(new URL("./search-worker.js", import.meta.url), {
     workerData: data, resourceLimits: { maxOldGenerationSizeMb: 32, stackSizeMb: 2 },

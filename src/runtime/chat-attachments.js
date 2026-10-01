@@ -1,3 +1,4 @@
+// @ts-check
 import { workspaceFile } from "./workspace-files.js";
 import { utf8Prefix } from "./bounded-io.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -43,7 +44,7 @@ export async function resolveAttachments(text, {
   root,
   authorize,
   limits = LIMITS,
-} = {}) {
+} = /** @type {any} */ ({})) {
   const workspace = await realpath(resolve(root));
   const attachments = [];
   const refused = [];

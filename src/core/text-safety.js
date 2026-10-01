@@ -3,7 +3,7 @@
 // a human ever sees them.
 const CONTROL_CHARACTERS = /[\p{Cc}\p{Cf}]/gu;
 
-export function escapeControlCharacters(value, { allowNewlines = false } = {}) {
+export function escapeControlCharacters(value, { allowNewlines = false } = /** @type {any} */ ({})) {
   return String(value).replaceAll(CONTROL_CHARACTERS, (character) => {
     const code = character.codePointAt(0);
     // A diff is only readable as lines. Every other control character stays
@@ -17,7 +17,7 @@ export function escapeControlCharacters(value, { allowNewlines = false } = {}) {
   });
 }
 
-export function sanitizeForDisplay(value, { maxLength = 8192, allowNewlines = false } = {}) {
+export function sanitizeForDisplay(value, { maxLength = 8192, allowNewlines = false } = /** @type {any} */ ({})) {
   if (!Number.isInteger(maxLength) || maxLength < 1) throw new TypeError("maxLength must be a positive integer.");
   const escaped = escapeControlCharacters(value, { allowNewlines });
   return escaped.length <= maxLength

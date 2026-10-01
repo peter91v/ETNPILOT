@@ -1,3 +1,4 @@
+// @ts-check
 import { estimateTokens } from "../providers/compaction.js";
 
 // The earlier turns of a conversation, as a provider needs them: plain text,

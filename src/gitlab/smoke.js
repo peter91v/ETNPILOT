@@ -1,8 +1,9 @@
+// @ts-check
 import { randomUUID } from "node:crypto";
 import { JsonlReceiptStore, verifyReceiptFile } from "../core/receipt-store.js";
 
 // Explicitly opt-in, dedicated test project only. A smoke never merges.
-export async function runGitLabSmoke({ client, project, receiptPath, confirmWrites = false, pipelineTimeoutMs = 60_000, pollIntervalMs = 5000, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = {}) {
+export async function runGitLabSmoke({ client, project, receiptPath, confirmWrites = false, pipelineTimeoutMs = 60_000, pollIntervalMs = 5000, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = /** @type {any} */ ({})) {
   if (!confirmWrites) throw new Error("GitLab smoke writes require explicit confirmation for an isolated test project.");
   const metadata = await client.project(project);
   if (!/etnpilot-smoke/i.test(metadata.path ?? metadata.name ?? "") || metadata.archived) throw new Error("Use an unarchived dedicated project whose name contains etnpilot-smoke.");

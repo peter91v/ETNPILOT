@@ -1,3 +1,4 @@
+// @ts-check
 import { ApprovalPolicy } from "../../core/approval-policy.js";
 import { Harness } from "../../core/harness.js";
 import { PolicyEngine } from "../../policy/engine.js";
@@ -57,7 +58,7 @@ export const securityCommands = [
       if (Boolean(values.kind) === Boolean(values.provider)) {
         throw new Error("Specify either --kind or --provider.");
       }
-      if (values.path && values.url) throw new Error("Choose either --path or --url.");
+      if ([values.path, values.url, values.command].filter(Boolean).length > 1) throw new Error("Choose one of --path, --url or --command.");
       const root = resolve(values.root);
       const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"));
       const policy = new PolicyEngine(config.policy);
@@ -67,6 +68,7 @@ export const securityCommands = [
             kind: values.kind,
             ...(values.path ? { fileName: values.path } : {}),
             ...(values.url ? { url: values.url } : {}),
+            ...(values.command ? { toolArguments: values.command.split(" ").filter(Boolean) } : {}),
           }, { agent: values.agent, workspace: root });
       const report = result ?? { configured: false, reason: "No policy section is configured." };
       console.log(JSON.stringify(report, null, 2));

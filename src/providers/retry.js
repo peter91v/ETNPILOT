@@ -1,3 +1,4 @@
+// @ts-check
 import { ProviderError } from "./router.js";
 
 // Retrying the same provider, before giving up on it.
@@ -24,7 +25,7 @@ export async function withRetry(operation, {
   signal,
   sleep = defaultSleep,
   onAttempt,
-} = {}) {
+} = /** @type {any} */ ({})) {
   if (!Number.isInteger(attempts) || attempts < 1) throw new TypeError("attempts must be a positive integer.");
   const tried = [];
   for (let attempt = 1; ; attempt += 1) {
@@ -66,7 +67,7 @@ function defaultSleep(ms, signal) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       signal?.removeEventListener?.("abort", onAbort);
-      resolve();
+      resolve(undefined);
     }, ms);
     const onAbort = () => {
       clearTimeout(timer);

@@ -1,3 +1,4 @@
+// @ts-check
 import { readdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { readInstalledPackages } from "./dependencies.js";

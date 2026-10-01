@@ -1,3 +1,4 @@
+// @ts-check
 // Tolerates the markdown a model tends to wrap the line in ("**VERDICT:**").
 const VERDICT_LINE = /^[\s>*_-]*VERDICT[\s*_]*[:=][\s*_]*(approve|reject)\b/im;
 
@@ -14,7 +15,7 @@ export function parseVerdict(text) {
 
 // Two reviewers on the same provider are one opinion with two voices, so by
 // default only one approval per provider counts toward the quorum.
-export function evaluateQuorum(votes, { required, distinctProviders = true } = {}) {
+export function evaluateQuorum(votes, { required, distinctProviders = true } = /** @type {any} */ ({})) {
   const threshold = required ?? Math.floor(votes.length / 2) + 1;
   if (!Number.isInteger(threshold) || threshold < 1) {
     throw new TypeError("A quorum requires a positive integer of approvals.");

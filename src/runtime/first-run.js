@@ -1,3 +1,4 @@
+// @ts-check
 import { trustProject } from "../trust/trust.js";
 import { access, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -32,7 +33,7 @@ export function projectTemplates() {
 
 // Whether there is a project here, and what creating one would involve. It
 // never creates anything: a surface asks this first, and a person decides.
-export async function describeProject({ root = process.cwd() } = {}) {
+export async function describeProject({ root = process.cwd() } = /** @type {any} */ ({})) {
   const projectRoot = resolve(root);
   const configFile = join(projectRoot, ".etnpilot", "etnpilot.yaml");
   const exists = await access(configFile).then(() => true, () => false);
@@ -73,7 +74,7 @@ export async function describeProject({ root = process.cwd() } = {}) {
 // Creates the project a surface offered. The template name comes from a person
 // choosing one of the rows above, and is checked against the same list, so a
 // name from anywhere else cannot reach 'initializeProject'.
-export async function createProject({ root = process.cwd(), template = "default", importExisting = true, forge = "auto" } = {}) {
+export async function createProject({ root = process.cwd(), template = "default", importExisting = true, forge = "auto" } = /** @type {any} */ ({})) {
   if (!Object.hasOwn(PROJECT_TEMPLATES, template)) {
     throw new TypeError(`Unknown project template '${template}'. Available: ${Object.keys(PROJECT_TEMPLATES).join(", ")}.`);
   }

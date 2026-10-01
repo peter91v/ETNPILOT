@@ -1,3 +1,4 @@
+// @ts-check
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -9,7 +10,7 @@ const FIXTURE_VERSION = 1;
 // re-executed offline. Prompts and answers are redacted before they are
 // written, because a fixture file is meant to be shareable evidence, not a
 // second copy of the project's secrets.
-export function createFixtureRecorder({ path, redact = true } = {}) {
+export function createFixtureRecorder({ path, redact = true } = /** @type {any} */ ({})) {
   if (!path) throw new TypeError("A fixture recorder requires a path.");
   const exchanges = [];
 
@@ -57,7 +58,7 @@ export async function loadFixtures(path) {
 // Replays recorded answers in the order they were recorded, per agent. A
 // changed prompt means the fixture no longer describes this run, which is
 // reported rather than quietly replayed.
-export function createFixturePlayer(document, { strict = true } = {}) {
+export function createFixturePlayer(document, { strict = true } = /** @type {any} */ ({})) {
   const queues = new Map();
   for (const exchange of document.exchanges) {
     const queue = queues.get(exchange.agent) ?? [];
@@ -94,7 +95,7 @@ export function createFixturePlayer(document, { strict = true } = {}) {
 
 // Every configured provider type resolves to the same replaying provider, so
 // a recorded run re-executes without reaching any of them.
-export function fixtureProviderFactories(document, { types = [], ...options } = {}) {
+export function fixtureProviderFactories(document, { types = [], ...options } = /** @type {any} */ ({})) {
   const player = createFixturePlayer(document, options);
   return {
     player,

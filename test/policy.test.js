@@ -73,8 +73,8 @@ test("policy configuration rejects ambiguous or unsupported rules", () => {
     /unsupported effect/,
   );
   assert.throws(
-    () => new PolicyEngine({ operations: { rules: [{ id: "bad", effect: "allow", commands: ["npm test"] }] } }),
-    /unknown field 'commands'/,
+    () => new PolicyEngine({ operations: { rules: [{ id: "bad", effect: "allow", runs: ["npm test"] }] } }),
+    /unknown field 'runs'/,
   );
 });
 
@@ -137,4 +137,36 @@ test("policy follows symbolic links before matching paths", async (t) => {
   }, { resolveSymlinks: false });
   assert.equal(lexical.evaluateOperation({ kind: "read", fileName: "src/innocent.txt" }, { workspace }).kind, "approve-once");
   t.diagnostic("symlink resolution turns a bypass into a denial");
+});
+
+test("a command rule matches the command as a whole, never a prefix, and 'npm test; rm' is one word", () => {
+  const policy = new PolicyEngine({
+    operations: {
+      default: "deny",
+      rules: [
+        { id: "tests", effect: "allow", kinds: ["shell"], commands: ["npm test", "npm run *", "git status"] },
+        { id: "never-force", effect: "deny", kinds: ["shell"], commands: ["git push **--force**", "rm **"] },
+        { id: "other-shell", effect: "human", kinds: ["shell"] },
+      ],
+    },
+  });
+  const decide = (...command) => policy.evaluateOperation({ kind: "shell", toolArguments: command, fullCommandText: command.join(" ") }, { workspace: "/w" });
+  assert.equal(decide("npm", "test").kind, "approve-once");
+  assert.equal(decide("npm", "run", "build").kind, "approve-once");
+  assert.equal(decide("git", "status").kind, "approve-once");
+  // Anything longer, or different, goes to a person.
+  assert.equal(decide("npm", "test", "--watch").kind, "human-required");
+  assert.equal(decide("npm", "test;", "rm", "-rf").kind, "human-required");
+  assert.equal(decide("npm", "run", "build", "&&", "rm").kind, "human-required");
+  assert.equal(decide("sh", "-c", "npm test").kind, "human-required");
+  // A deny wins over an allow that also matches.
+  assert.equal(decide("git", "push", "origin", "main", "--force").kind, "reject");
+  assert.equal(decide("rm", "-rf", "/").kind, "reject");
+  // A command rule says nothing about other kinds of operation.
+  assert.equal(policy.evaluateOperation({ kind: "read", fileName: "a.txt" }, { workspace: "/w" }).kind, "reject");
+});
+
+test("a command rule needs something to match: a request with no command text matches none", () => {
+  const policy = new PolicyEngine({ operations: { default: "deny", rules: [{ id: "x", effect: "allow", commands: ["npm test"] }] } });
+  assert.equal(policy.evaluateOperation({ kind: "shell" }, {}).kind, "reject");
 });

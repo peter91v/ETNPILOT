@@ -1,3 +1,4 @@
+// @ts-check
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -7,7 +8,7 @@ const SPEC_VERSION = "1.5";
 
 // A CycloneDX document describing what is installed, so a reviewer can answer
 // "what shipped" without trusting the agent's summary of it.
-export async function generateSbom(root, { packages, serialNumber, timestamp = new Date() } = {}) {
+export async function generateSbom(root, { packages, serialNumber, timestamp = new Date() } = /** @type {any} */ ({})) {
   const projectRoot = resolve(root);
   const manifest = await readJson(join(projectRoot, "package.json"));
   const installed = packages ?? (await readProjectPackages(projectRoot)).packages;

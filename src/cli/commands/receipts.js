@@ -1,3 +1,4 @@
+// @ts-check
 import { agentRawResponses, openProjectState } from "../../runtime/project-state.js";
 import { basename, resolve } from "node:path";
 import { buildRunAttestation } from "../../supply/attestation.js";
@@ -99,7 +100,12 @@ export const receiptsCommands = [
         requireSignatures,
         requireTerminal,
       });
-      console.log(JSON.stringify(result, null, 2));
+      // Which question was asked, stated on the answer: without a public key the
+      // chain's own integrity is checked and nothing more.
+      const notes = [];
+      if (!requireSignatures) notes.push("Signatures were not required: this checks that the chain is intact, not who wrote it. Give --public-key (or set receipts.signing.publicKeyFile) to require them.");
+      if (!requireTerminal) notes.push("A sealed end was not required: a chain cut off at the end still verifies. --require-terminal checks that the run finished.");
+      console.log(JSON.stringify(notes.length > 0 && result.valid ? { ...result, notes } : result, null, 2));
       return result.valid ? 0 : 1;
     },
   },
