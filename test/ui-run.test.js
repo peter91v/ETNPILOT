@@ -234,6 +234,11 @@ test("a run in progress says which step it is in, and which agent", async () => 
     assert.deepEqual(run.steps, ["build"]);
     assert.equal(run.done, 0);
     assert.ok(Date.parse(run.stepSince) > 0);
+    // What the plan will use, and every agent that has actually run, with its state.
+    assert.deepEqual(run.plan, [{ id: "build", type: "agent", agents: ["worker"] }]);
+    assert.equal(run.agents.length, 1);
+    assert.equal(run.agents[0].name, "worker");
+    assert.equal(run.agents[0].status, "working");
 
     const pending = working.approvals.pending[0] ?? (await waitFor(call, (payload) => payload.approvals.pending.length === 1, "the approval")).approvals.pending[0];
     await call("/api/approvals/decide", { method: "POST", body: JSON.stringify({ id: pending.id, decision: "approve" }) });

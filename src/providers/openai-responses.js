@@ -13,7 +13,8 @@ import { describeCall } from "./workspace-tools.js";
 // whole conversation travels with every request, and the reasoning a model did
 // between two tool calls comes back as encrypted items that are handed back
 // as they arrived. That is also why a tool loop works without the server
-// remembering anything.
+// remembering anything. With 'stream' the text is shown as it arrives; the
+// answer the loop works from is still the finished response of the last event.
 
 export function responsesToolSchema(definitions) {
   return definitions.map((definition) => ({
@@ -36,7 +37,7 @@ export function responseText(payload) {
 
 // Chat-shaped history ({role, content}) is valid input here as it stands.
 export async function runResponsesTurn({
-  context, workspaceTools, envelope, wireTools, system, model, maxToolIterations, retry, contextTokens, extraBody = {}, post, addUsage,
+  context, workspaceTools, envelope, wireTools, system, model, maxToolIterations, retry, contextTokens, extraBody = {}, post, addUsage, stream = false,
 }) {
   const input = [
     ...(context.history ?? []).map((entry) => ({ role: entry.role, content: entry.content })),
@@ -60,6 +61,7 @@ export async function runResponsesTurn({
         input,
         store: false,
         include: ["reasoning.encrypted_content"],
+        ...(stream ? { stream: true } : {}),
         ...(effort ? { reasoning: { effort } } : {}),
         ...(wireTools && wireTools.definitions.length > 0 ? { tools: responsesToolSchema(wireTools.definitions), tool_choice: "auto" } : {}),
       };

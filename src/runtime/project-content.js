@@ -291,6 +291,18 @@ export async function updateAgent({ root, config, name, input }) {
   const subagents = Array.isArray(input?.subagents) ? input.subagents.map(String) : undefined;
   if (subagents?.some((agent) => !agentNames.includes(agent))) errors.push(`Agents that do not exist: ${subagents.filter((agent) => !agentNames.includes(agent)).join(", ")}.`);
   if (subagents?.includes(name)) errors.push("An agent cannot hand work to itself.");
+  if (subagents && !subagents.includes(name)) {
+    // Work handed round in a circle would never end: refuse the edge that closes one.
+    const graph = new Map();
+    for (const other of agentNames) {
+      if (other === name) { graph.set(other, subagents); continue; }
+      const text = await readFile(join(etn, "agents", `${other}.yaml`), "utf8").catch(() => "");
+      graph.set(other, (YAML.parse(text)?.subagents ?? []).map(String));
+    }
+    const reaches = (from, target, seen = new Set()) => from === target || (!seen.has(from) && seen.add(from) && (graph.get(from) ?? []).some((next) => reaches(next, target, seen)));
+    const loop = subagents.find((next) => (graph.get(next) ?? []).some((after) => reaches(after, name)));
+    if (loop) errors.push(`'${loop}' already hands work on to '${name}': that would go round in a circle.`);
+  }
   if (input?.effort !== undefined && input.effort !== "" && !EFFORTS.includes(input.effort)) errors.push("Effort is low, medium or high.");
   if (errors.length > 0) throw Object.assign(new Error(errors[0]), { statusCode: 400, details: { errors } });
 
@@ -306,11 +318,16 @@ export async function updateAgent({ root, config, name, input }) {
   if (input?.effort !== undefined) {
     if (EFFORTS.includes(input.effort)) document.set("effort", input.effort); else document.delete("effort");
   }
-  if (asked) {
-    const tools = [...new Set([...asked, ...(finalSkills.length > 0 ? ["load_skill"] : []), ...(finalSubagents.length > 0 ? ["spawn_subagent"] : [])])];
-    const node = document.createNode(tools);
-    node.flow = true;
-    document.set("tools", node);
+  // Handing work on needs the tool to do it, whichever way the list arrived; an
+  // agent with no list of tools already has every one.
+  const base = asked ?? (Array.isArray(current.tools) ? current.tools.map(String) : undefined);
+  if (base) {
+    const tools = [...new Set([...base, ...(finalSkills.length > 0 ? ["load_skill"] : []), ...(finalSubagents.length > 0 ? ["spawn_subagent"] : [])])];
+    if (asked || tools.length !== base.length) {
+      const node = document.createNode(tools);
+      node.flow = true;
+      document.set("tools", node);
+    }
   }
   await writeFile(path, String(document), "utf8");
   if (prompt !== undefined) {

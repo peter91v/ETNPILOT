@@ -271,4 +271,6 @@ The adapter now speaks `/v1/responses` as well (`providers.<name>.api`: `auto`, 
 before any tool has run, repeats the same request there and stays there. The Responses loop is stateless
 (`store: false`): the conversation travels with each request, the model's own output items, reasoning
 included as encrypted content, are handed back with the tool results, and the effort is sent as
-`reasoning.effort`. Usage is read from the same fields. Not yet: streaming answers on this route.
+`reasoning.effort`. Usage is read from the same fields. With `stream: true` the route streams too: the text pieces are shown as they
+arrive, and the finished response in the stream's last event is what the loop continues from, so tool calls and
+reasoning items are never reassembled from fragments.

@@ -116,7 +116,8 @@ function header(state, { style, width, view, project, active = [] }) {
     ? `${brand}  ${tabs}`
     : `${brand}  ${style.bold(style.accent(compact))}`;
   const working = active.find((run) => run.step);
-  const where = working ? ` ${working.step}${working.stepAgent ? `/${working.stepAgent}` : ""}` : "";
+  const names = working ? workingAgents(working) : [];
+  const where = working ? ` ${working.step}${names.length > 0 ? `/${names.join(",")}` : ""}` : "";
   // How many runs are going is the fact this line exists for; the project name
   // is context. Where the tabs leave room for only one of them, the count
   // stays — a seventh tab was enough to push it off the right at 100 columns,
@@ -243,7 +244,52 @@ function renderApprovalDetail(state, { style, width, height, cursor }) {
   return lines.slice(0, height);
 }
 
-function renderRuns(state, { style, width, height, cursor, now }) {
+// Every agent that is working now, not only the last to start.
+function workingAgents(run) {
+  const names = [...new Set((run.agents ?? []).filter((agent) => agent.status === "working").map((agent) => agent.name))];
+  return names.length > 0 ? names : (run.stepAgent ? [run.stepAgent] : []);
+}
+
+// What each run this window started is doing: its steps with what they use,
+// then the agents that have actually run, indented by who started whom.
+export function activeRunLines(active, { style, width, now }) {
+  const lines = [];
+  for (const run of active) {
+    const steps = run.steps ?? [];
+    const position = steps.length > 0 ? `step ${Math.min(steps.length, (run.done ?? 0) + 1)} of ${steps.length}` : "working";
+    lines.push(`${style.bold(style.warn("RUNNING"))} ${style.ink(truncate(run.task ?? "", Math.max(10, width - 24)))} ${style.dim(position)}`);
+    const plan = run.plan ?? steps.map((id) => ({ id, type: "agent", agents: [] }));
+    for (const [index, entry] of plan.entries()) {
+      const current = run.step === entry.id;
+      const mark = current ? style.warn("▶") : index < (run.done ?? 0) ? style.ok("✓") : style.dim("·");
+      const what = entry.type === "check" ? entry.command ?? "" : entry.type === "gate" ? "waits for you" : (entry.agents ?? []).join(", ");
+      lines.push(`  ${mark} ${current ? style.ink(pad(entry.id, 14)) : style.muted(pad(entry.id, 14))} ${style.dim(pad(entry.type, 7))} ${style.muted(truncate(what, Math.max(8, width - 28)))}`);
+    }
+    const agents = run.agents ?? [];
+    if (agents.length > 0) {
+      lines.push(`  ${style.dim("agents")}`);
+      const depthOf = (agent) => {
+        let depth = 0;
+        for (let at = agent; at?.parentRunId && depth < 6; depth += 1) at = agents.find((candidate) => candidate.runId === at.parentRunId);
+        return depth;
+      };
+      for (const agent of agents.slice(0, 8)) {
+        const tone = agent.status === "done" ? "ok" : agent.status === "failed" ? "bad" : "warn";
+        lines.push(`    ${"  ".repeat(depthOf(agent))}${style.tone(pad(agent.status, 8), tone)} ${style.ink(agent.name)}${agent.step ? style.dim(` in ${agent.step}`) : ""}`);
+      }
+      if (agents.length > 8) lines.push(`    ${style.dim(`… and ${agents.length - 8} more`)}`);
+    }
+    lines.push("");
+  }
+  return lines;
+}
+
+function renderRuns(state, { style, width, height, cursor, now, active = [] }) {
+  const live = activeRunLines(active, { style, width, now });
+  if (live.length > 0) {
+    const rest = renderRuns(state, { style, width, height: Math.max(4, height - live.length), cursor, now, active: [] });
+    return [...live, ...rest];
+  }
   const runs = state.runs ?? [];
   if (runs.length === 0) return [style.dim("No runs have been recorded yet.")];
   const columns = [

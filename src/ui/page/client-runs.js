@@ -241,21 +241,50 @@ function usageCards() {
 
 // What a run is doing right now: the step, the agent inside it, and how far
 // along the plan it is.
+// Every agent that is working, not only the last one to start: an orchestrator
+// and the agent it handed work to are both at it.
+function workingNow(run) {
+  const working = (run.agents ?? []).filter((agent) => agent.status === "working").map((agent) => agent.name);
+  if (working.length > 0) return (working.length === 1 ? "agent " : "agents ") + [...new Set(working)].join(", ");
+  return run.stepAgent ? "agent " + run.stepAgent : (run.agent ? "agent " + run.agent : "the project's own workflow");
+}
+
 function runningPanel(run) {
   const steps = run.steps ?? [];
   const position = steps.length > 0 ? " · step " + Math.min(steps.length, (run.done ?? 0) + 1) + " of " + steps.length : "";
   const body = [
     el("div", { class: "row" }, [
       pill(run.step ? "in " + run.step : "starting", "warn"),
-      el("span", { class: "grow", text: run.stepAgent ? "agent " + run.stepAgent : (run.agent ? "agent " + run.agent : "the project's own workflow") }),
+      el("span", { class: "grow", text: workingNow(run) }),
       timeSpan("since", run.stepSince ?? run.startedAt),
     ]),
   ];
+  // The steps with what each uses, and under them the agents that actually
+  // ran: a step names one agent, and an orchestrator hands work to others.
   if (steps.length > 0) {
-    body.push(el("div", { class: "row" }, steps.map((step, index) => pill(
-      step,
-      run.step === step ? "warn" : index < (run.done ?? 0) ? "ok" : "",
-    ))));
+    const plan = run.plan ?? steps.map((id) => ({ id, type: "agent", agents: [] }));
+    body.push(el("ol", { class: "flow" }, plan.map((entry, index) => {
+      const state = run.step === entry.id ? "warn" : index < (run.done ?? 0) ? "ok" : "";
+      const what = entry.type === "check" ? (entry.command ?? "") : entry.type === "gate" ? "waits for you" : (entry.agents ?? []).join(", ");
+      return el("li", { class: "flow-step type-" + entry.type + " is-" + (state === "warn" ? "running" : state === "ok" ? "done" : "waiting") }, [
+        el("span", { class: "flow-head" }, [pill(entry.id, state), el("span", { class: "flow-type", text: entry.type })]),
+        ...(what ? [el("span", { class: "flow-what", text: what })] : []),
+      ]);
+    })));
+  }
+  if ((run.agents ?? []).length > 0) {
+    body.push(el("h5", { class: "card-h", text: "Agents in this run" }));
+    const depthOf = (agent) => {
+      let depth = 0;
+      for (let at = agent; at?.parentRunId && depth < 8; depth += 1) at = run.agents.find((candidate) => candidate.runId === at.parentRunId);
+      return depth;
+    };
+    body.push(el("ul", { class: "live-agents" }, run.agents.map((agent) => el("li", { attrs: { style: "padding-left:" + (depthOf(agent) * 16) + "px" } }, [
+      pill(agent.status, agent.status === "done" ? "ok" : agent.status === "failed" ? "bad" : "warn"),
+      el("span", { class: "grow", text: agent.name }),
+      ...(agent.step ? [el("span", { class: "muted", text: "in " + agent.step })] : []),
+      timeSpan("since", agent.startedAt),
+    ]))));
   }
   if (run.error) body.push(el("p", { class: "notice bad", text: run.failedStep + ": " + run.error }));
   return panel(run.task, { meta: "working" + position, open: true, body });

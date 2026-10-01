@@ -217,3 +217,25 @@ test("the routes: edit and remove by name", async () => {
     await review.close?.();
   }
 });
+
+test("handing work to an agent is a switch on the other agent: its list and its tool change together", async () => {
+  const { updateAgent } = await import("../src/runtime/project-content.js");
+  const yaml = (await import("yaml")).default;
+  const { root, config } = await project();
+  await writeFile(join(root, ".etnpilot/agents/lead.yaml"), "name: lead\npromptRef: lead\nsubagents: []\ntools: [read_file]\n");
+  await writeFile(join(root, ".etnpilot/prompts/lead.md"), "lead\n");
+  await writeFile(join(root, ".etnpilot/agents/worker.yaml"), "name: worker\npromptRef: worker\nsubagents: []\ntools: [read_file]\n");
+  await writeFile(join(root, ".etnpilot/prompts/worker.md"), "work\n");
+
+  await updateAgent({ root, config, name: "lead", input: { subagents: ["worker"] } });
+  const lead = yaml.parse(await readFile(join(root, ".etnpilot/agents/lead.yaml"), "utf8"));
+  assert.deepEqual(lead.subagents, ["worker"]);
+  assert.deepEqual(lead.tools, ["read_file", "spawn_subagent"]);
+
+  // The edge that would close a circle is refused.
+  await assert.rejects(() => updateAgent({ root, config, name: "worker", input: { subagents: ["lead"] } }), /circle/);
+
+  // Taking it away leaves the tool it was given (the agent may use it for something else), and nothing else.
+  await updateAgent({ root, config, name: "lead", input: { subagents: [] } });
+  assert.deepEqual(yaml.parse(await readFile(join(root, ".etnpilot/agents/lead.yaml"), "utf8")).subagents, []);
+});
