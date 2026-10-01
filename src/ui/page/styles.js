@@ -347,6 +347,10 @@ export const STYLES = `
   .flow-step::before { content: ""; position: absolute; left: -7px; top: 12px; width: 12px; height: 12px; border-radius: 50%; background: var(--md-primary); }
   .flow-step.type-gate::before { background: var(--md-warning); }
   .flow-step.type-check::before { background: var(--md-secondary); }
+  /* While a run goes, the marker says how far it is, not what kind of step it is. */
+  .flow-step.is-done::before { background: var(--md-primary); }
+  .flow-step.is-running::before { background: var(--md-warning); }
+  .flow-step.is-waiting::before { background: var(--md-outline); }
   .flow-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
   .flow-id { font: var(--md-label-large); }
   .flow-type { color: var(--md-on-surface-variant); font: var(--md-label-medium); }
@@ -642,6 +646,8 @@ export const STYLES = `
   .chat-rule { margin: 0; text-align: center; font: var(--md-label-medium); }
   .attach-row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
   .attach-row.calls { justify-content: flex-start; }
+  .calls-fold summary { min-height: 40px; display: flex; align-items: center; cursor: pointer; color: var(--md-on-surface-variant); font: var(--md-label-large); }
+  .calls-fold[open] summary { margin-bottom: 8px; }
   .attach-row.calls .pill {
     width: auto; max-width: 100%; height: auto; min-height: 32px; padding: 6px 12px; white-space: normal;
     overflow-wrap: anywhere; align-items: flex-start; text-align: left;

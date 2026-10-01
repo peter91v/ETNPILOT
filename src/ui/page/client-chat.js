@@ -362,12 +362,35 @@ function message(who, text, { tone = "", meta, extra = [] } = {}) {
 
 // What the agent did, from the record and not from its own account of it. A
 // refusal by policy shows here even when the reply says only that it could not.
-function callChips(calls = []) {
-  if (calls.length === 0) return [];
-  return [el("div", { class: "attach-row calls" }, calls.map((call) => pill(
+//
+// A handful of calls is shown as they are. A long list of what went fine is
+// folded behind a count, because ten rows of "did read_file …" pushed the
+// answer off the screen — but a refusal or a failure is never folded: that is
+// the part someone needs to see.
+const VERBS = { read_file: "read", list_files: "listed", search_files: "searched", write_file: "wrote", edit_file: "edited", run_command: "ran", fetch_url: "fetched", spawn_subagent: "handed on", load_skill: "opened a skill" };
+const openCallFolds = new Set();
+
+function callChip(call) {
+  return pill(
     (call.ok ? "did " : call.refused ? "refused " : "failed ") + call.label + (call.ok ? "" : " — " + (call.error ?? "no reason recorded")),
     call.ok ? "" : "warn",
-  )))];
+  );
+}
+
+function callChips(calls = [], key) {
+  if (calls.length === 0) return [];
+  const fine = calls.filter((call) => call.ok);
+  const problems = calls.filter((call) => !call.ok);
+  if (fine.length <= 3) return [el("div", { class: "attach-row calls" }, calls.map(callChip))];
+  const counts = new Map();
+  for (const call of fine) counts.set(call.tool, (counts.get(call.tool) ?? 0) + 1);
+  const summary = fine.length + " actions: " + [...counts].map(([tool, count]) => count + " " + (VERBS[tool] ?? tool)).join(", ");
+  const fold = el("details", { class: "calls-fold", attrs: openCallFolds.has(key) ? { open: "open" } : {} }, [
+    el("summary", { text: summary }),
+    el("div", { class: "attach-row calls" }, fine.map(callChip)),
+  ]);
+  fold.addEventListener("toggle", () => { if (fold.open) openCallFolds.add(key); else openCallFolds.delete(key); });
+  return [...(problems.length > 0 ? [el("div", { class: "attach-row calls" }, problems.map(callChip))] : []), fold];
 }
 
 function attachmentChips(files, refused = []) {
@@ -421,7 +444,7 @@ function drawThread(thread) {
     if (turn.status === "succeeded") {
       thread.append(message(turn.agent ?? "agent", turn.reply ?? "", {
         tone: "agent",
-        extra: callChips(turn.calls),
+        extra: callChips(turn.calls, turn.turn),
         meta: (turn.undone ? "undone · " : "") + "turn " + turn.turn + (turn.runId ? " · run " + turn.runId.slice(0, 8) : "") + (turn.usage ? " · " + (turn.usage.inputTokens + turn.usage.outputTokens) + " tokens" : "") + (turn.historyOmitted ? " · " + turn.historyOmitted + " earlier exchange(s) left out" : ""),
       }));
     } else {

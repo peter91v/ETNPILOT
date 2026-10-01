@@ -266,7 +266,7 @@ function runningPanel(run) {
     body.push(el("ol", { class: "flow" }, plan.map((entry, index) => {
       const state = run.step === entry.id ? "warn" : index < (run.done ?? 0) ? "ok" : "";
       const what = entry.type === "check" ? (entry.command ?? "") : entry.type === "gate" ? "waits for you" : (entry.agents ?? []).join(", ");
-      return el("li", { class: "flow-step type-" + entry.type }, [
+      return el("li", { class: "flow-step type-" + entry.type + " is-" + (state === "warn" ? "running" : state === "ok" ? "done" : "waiting") }, [
         el("span", { class: "flow-head" }, [pill(entry.id, state), el("span", { class: "flow-type", text: entry.type })]),
         ...(what ? [el("span", { class: "flow-what", text: what })] : []),
       ]);
