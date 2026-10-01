@@ -39,6 +39,11 @@ unknown name is refused with the names that exist.
   asks, and which earlier steps a step waits for, with two starting patterns. What it saves is checked by the
   same function a run uses: unknown agents, a step waiting for itself, a circle, a missing command are
   refused with the step named. It writes the file; it does not lock it.
+- **New agent** opens a form: name, one line of purpose, the prompt, what it may do (ticked in plain words: reads
+  files, edits files, runs commands, reads web pages …), skills it can open, agents it can hand work to, and how
+  hard it thinks. `tools` is always written out, so ticking nothing means "only answers", never "every tool";
+  skills and handing work on add `load_skill` and `spawn_subagent` by themselves. Like a workflow it is written
+  as unreviewed content, never over an existing one, and not locked.
 - **Content** lists everything a run may use, grouped by type, with `locked`, `not reviewed yet` or `changed
   since the lock` on each and where it came from. Tapping one shows its text. **Lock what I reviewed** shows
   what will be locked and, on confirmation, locks exactly the content that was on screen: the request carries

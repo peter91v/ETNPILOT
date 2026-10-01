@@ -2,6 +2,7 @@ import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import YAML from "yaml";
 import { captureProjectContent, normalizeContentProvenance, writeContentLock } from "../content/provenance.js";
+import { WORKSPACE_TOOL_DEFINITIONS } from "../providers/workspace-tools.js";
 import { parseWorkflowFile, renderWorkflowFile, slugName, validateWorkflowDefinition } from "../workflow/definition.js";
 
 // What a person reviews before a run may use it, and the one act that makes
@@ -202,4 +203,56 @@ export async function createWorkflow({ root, config, input }) {
     throw error;
   });
   return { name: checked.workflow.name, path: `.etnpilot/workflows/${checked.workflow.name}.yaml`, unreviewed: true };
+}
+
+// ------------------------------------------------------------------------ agents
+
+const EFFORTS = ["low", "medium", "high"];
+
+// An agent made in the page. 'tools' is always written: leaving it out means
+// every tool, and a form that did that by omission would hand out the most
+// when someone ticked nothing.
+export async function createAgent({ root, config, input }) {
+  const errors = [];
+  const known = WORKSPACE_TOOL_DEFINITIONS.map((definition) => definition.name);
+  const name = slugName(input?.name);
+  if (!name) errors.push("An agent needs a name (letters, digits, dashes).");
+  const prompt = typeof input?.prompt === "string" ? input.prompt.replace(/\r\n/g, "\n").trim() : "";
+  if (!prompt) errors.push("An agent needs a prompt: what it is for, and how it reports back.");
+  if (prompt.length > 12_000) errors.push("The prompt is longer than 12,000 characters.");
+  const asked = Array.isArray(input?.tools) ? input.tools.map(String) : [];
+  const unknown = asked.filter((tool) => !known.includes(tool));
+  if (unknown.length > 0) errors.push(`Unknown tools: ${unknown.join(", ")}.`);
+  const etn = join(resolve(root), ".etnpilot");
+  const skillNames = (await readdir(join(etn, "skills"), { withFileTypes: true }).catch(() => [])).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+  const agentNames = (await readdir(join(etn, "agents")).catch(() => [])).filter((file) => /\.ya?ml$/.test(file)).map((file) => file.replace(/\.ya?ml$/, ""));
+  const skills = (Array.isArray(input?.skills) ? input.skills : []).map(String);
+  const missingSkills = skills.filter((skill) => !skillNames.includes(skill));
+  if (missingSkills.length > 0) errors.push(`Skills that do not exist: ${missingSkills.join(", ")}.`);
+  const subagents = (Array.isArray(input?.subagents) ? input.subagents : []).map(String);
+  const missingAgents = subagents.filter((agent) => !agentNames.includes(agent));
+  if (missingAgents.length > 0) errors.push(`Agents that do not exist: ${missingAgents.join(", ")}.`);
+  if (input?.effort !== undefined && input.effort !== "" && !EFFORTS.includes(input.effort)) errors.push("Effort is low, medium or high.");
+  if (name && (agentNames.includes(name) || await readFile(join(etn, "prompts", `${name}.md`), "utf8").then(() => true, () => false))) {
+    throw Object.assign(new Error(`An agent or prompt called '${name}' already exists.`), { statusCode: 409 });
+  }
+  if (errors.length > 0) throw Object.assign(new Error(errors[0]), { statusCode: 400, details: { errors } });
+
+  // Skills it has are opened with load_skill, and handing work on needs spawn_subagent.
+  const tools = [...new Set([...asked, ...(skills.length > 0 ? ["load_skill"] : []), ...(subagents.length > 0 ? ["spawn_subagent"] : [])])];
+  const description = typeof input?.description === "string" ? input.description.trim().slice(0, 240) : "";
+  const manifest = YAML.stringify({
+    name,
+    ...(description ? { description } : {}),
+    promptRef: name,
+    skills,
+    requires: ["chat"],
+    subagents,
+    ...(EFFORTS.includes(input?.effort) ? { effort: input.effort } : {}),
+  }).trimEnd() + "\n" + YAML.stringify({ tools }, { flowCollectionPadding: false }).trimEnd();
+  await mkdir(join(etn, "prompts"), { recursive: true });
+  await mkdir(join(etn, "agents"), { recursive: true });
+  await writeFile(join(etn, "prompts", `${name}.md`), `${prompt}\n`, { encoding: "utf8", flag: "wx" });
+  await writeFile(join(etn, "agents", `${name}.yaml`), `# Created in the page. Read it, then lock it under Content.\n${manifest}\n`, { encoding: "utf8", flag: "wx" });
+  return { name, path: `.etnpilot/agents/${name}.yaml`, promptPath: `.etnpilot/prompts/${name}.md`, unreviewed: true };
 }

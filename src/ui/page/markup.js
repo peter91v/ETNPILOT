@@ -131,6 +131,22 @@ export const MARKUP = `</head>
   </div>
 </div>
 
+<div class="backdrop" id="agent-modal" role="dialog" aria-modal="true" aria-labelledby="agent-modal-title">
+  <div class="modal wide">
+    <div class="modal-head">
+      <h2 class="modal-title" id="agent-modal-title">New agent</h2>
+      <button class="btn icon state" style="margin-left:auto" data-close="agent-modal" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body" id="agent-body"></div>
+    <div class="modal-footer">
+      <button type="button" class="btn link state" data-close="agent-modal">Cancel</button>
+      <button type="button" class="btn primary state" id="agent-save">Save agent</button>
+    </div>
+  </div>
+</div>
+
 <div class="backdrop" id="file-modal" role="dialog" aria-modal="true" aria-labelledby="file-title">
   <div class="modal wide">
     <div class="modal-head">

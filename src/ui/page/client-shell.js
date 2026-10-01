@@ -341,6 +341,7 @@ $("open-run").addEventListener("click", () => { openModal("run-modal"); void pre
 $("run-form").addEventListener("submit", startRun);
 $("run-inplace").addEventListener("click", chooseInPlace);
 $("workflow-save").addEventListener("click", () => { void saveWorkflow(); });
+$("agent-save").addEventListener("click", () => { void saveAgent(); });
 $("lock-confirm").addEventListener("click", () => { void confirmLock(); });
 $("run-agent").addEventListener("change", describeRunChoice);
 $("run-copy").addEventListener("click", () => { void copyRunCommands(); });

@@ -264,6 +264,10 @@ export async function createReviewServer({
       if (request.method === "GET" && url.pathname === "/api/agents/detail") {
         return send(response, 200, await state.agentDetails());
       }
+      if (request.method === "POST" && url.pathname === "/api/agents") {
+        const body = await readJsonBody(request);
+        return send(response, 201, await state.createAgent(body));
+      }
       if (request.method === "GET" && url.pathname === "/api/workflows") {
         return send(response, 200, await state.workflows());
       }

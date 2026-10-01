@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -131,4 +131,27 @@ test("the page has the Agents and Content views, the builder and the lock dialog
   // The script still parses with them in it.
   const script = html.slice(html.indexOf("<script>") + 8, html.lastIndexOf("</script>"));
   assert.doesNotThrow(() => new Function(script));
+});
+
+test("an agent made in the page is written with the tools that were ticked, and no more", async () => {
+  const { createAgent } = await import("../src/runtime/project-content.js");
+  const { root, config } = await project();
+  await mkdir(join(root, ".etnpilot/skills/release"), { recursive: true });
+  await writeFile(join(root, ".etnpilot/skills/release/SKILL.md"), "---\nname: release\n---\nSteps\n");
+
+  const made = await createAgent({ root, config, input: { name: "Doc Reader", description: "Reads docs", prompt: "You read the docs.", tools: ["read_file", "search_files"], skills: ["release"], subagents: ["orchestrator"], effort: "low" } });
+  assert.equal(made.path, ".etnpilot/agents/doc-reader.yaml");
+  const manifest = (await import("yaml")).default.parse(await readFile(join(root, made.path), "utf8"));
+  assert.deepEqual(manifest.tools, ["read_file", "search_files", "load_skill", "spawn_subagent"]);
+  assert.equal(manifest.effort, "low");
+  assert.match(await readFile(join(root, made.promptPath), "utf8"), /read the docs/);
+
+  // Ticking nothing is "only answers", written out; never "every tool".
+  const none = await createAgent({ root, config, input: { name: "talker", prompt: "Answer.", tools: [] } });
+  assert.deepEqual((await import("yaml")).default.parse(await readFile(join(root, none.path), "utf8")).tools, []);
+
+  await assert.rejects(() => createAgent({ root, config, input: { name: "doc-reader", prompt: "x", tools: [] } }), /already exists/);
+  const bad = await createAgent({ root, config, input: { name: "bad", prompt: "", tools: ["rm_rf"], skills: ["ghost"], subagents: ["nobody"], effort: "max" } }).catch((e) => e);
+  assert.equal(bad.statusCode, 400);
+  assert.ok(bad.details.errors.length >= 5, bad.details.errors.join(" | "));
 });

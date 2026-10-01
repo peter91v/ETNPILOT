@@ -77,7 +77,7 @@ function renderAgents() {
   }
   const agents = agentData.agents ?? [];
   host.append(panel("Agents", {
-    meta: agents.length + (agents.length === 1 ? " agent" : " agents"),
+    meta: button("New agent", { class: "btn tonal", onClick: () => openAgentBuilder() }),
     body: agents.length === 0
       ? [el("p", { class: "empty", text: "No agents yet. 'etnpilot forge' writes some for this repository, or add a manifest under .etnpilot/agents/." })]
       : agents.map(agentCard),
@@ -134,6 +134,85 @@ function agentCard(agent) {
   ]);
   card.append(detail);
   return card;
+}
+
+// ------------------------------------------------------------ agent builder
+
+const AGENT_TOOL_GROUPS = [
+  ["Read", [["read_file", "reads files"], ["list_files", "lists files"], ["search_files", "searches files"]]],
+  ["Change", [["write_file", "writes files"], ["edit_file", "edits files"], ["run_command", "runs commands"]]],
+  ["Other", [["fetch_url", "reads web pages"], ["ask_human", "asks you questions"]]],
+];
+const AGENT_PRESETS = {
+  reader: { label: "Only reads", tools: ["read_file", "list_files", "search_files"] },
+  builder: { label: "Reads and changes", tools: ["read_file", "list_files", "search_files", "edit_file", "write_file", "run_command"] },
+};
+let agentDraft;
+
+function openAgentBuilder(preset) {
+  agentDraft = { name: "", description: "", prompt: "", tools: [...(AGENT_PRESETS[preset ?? "reader"].tools)], skills: [], subagents: [], effort: "", errors: [], saving: false };
+  drawAgentBuilder();
+  openModal("agent-modal");
+}
+
+function drawAgentBuilder() {
+  const host = $("agent-body");
+  host.replaceChildren();
+  const draft = agentDraft;
+  const skills = (contentData?.items ?? []).filter((item) => item.type === "skill").map((item) => item.name);
+  const others = (agentData?.agents ?? []).filter((agent) => !agent.error).map((agent) => agent.name);
+  const toggle = (list, name, on) => {
+    const at = list.indexOf(name);
+    if (on && at < 0) list.push(name);
+    if (!on && at >= 0) list.splice(at, 1);
+  };
+  host.append(
+    field("agent-name", "Name", draft.name, (value) => { draft.name = value; }, "e.g. test-writer"),
+    field("agent-description", "What it is for (one line)", draft.description, (value) => { draft.description = value; }, ""),
+  );
+  const prompt = el("textarea", { attrs: { id: "agent-prompt", rows: "6", placeholder: "Its job, its limits, and how it reports back." } });
+  prompt.value = draft.prompt;
+  prompt.addEventListener("input", () => { draft.prompt = prompt.value; });
+  host.append(el("div", { class: "field" }, [el("label", { text: "What it is told", attrs: { for: "agent-prompt" } }), prompt]));
+
+  host.append(el("p", { class: "muted", text: "What it may do. Nothing ticked means it only answers." }));
+  host.append(el("div", { class: "chips" }, Object.entries(AGENT_PRESETS).map(([key, entry]) => button(entry.label, { class: "btn small", onClick: () => { draft.tools = [...entry.tools]; drawAgentBuilder(); } }))));
+  for (const [group, tools] of AGENT_TOOL_GROUPS) {
+    host.append(el("h5", { class: "card-h", text: group }));
+    for (const [tool, words] of tools) {
+      host.append(checkField("agent-tool-" + tool, words, draft.tools.includes(tool), (on) => toggle(draft.tools, tool, on)));
+    }
+  }
+  if (skills.length > 0) {
+    host.append(el("h5", { class: "card-h", text: "Skills it can open" }));
+    for (const skill of skills) host.append(checkField("agent-skill-" + skill, skill, draft.skills.includes(skill), (on) => toggle(draft.skills, skill, on)));
+  }
+  if (others.length > 0) {
+    host.append(el("h5", { class: "card-h", text: "Agents it can hand work to" }));
+    for (const other of others) host.append(checkField("agent-sub-" + other, other, draft.subagents.includes(other), (on) => toggle(draft.subagents, other, on)));
+  }
+  host.append(selectField("agent-effort", "How hard it thinks", draft.effort, [["", "the provider's own"], ["low", "low"], ["medium", "medium"], ["high", "high"]], (value) => { draft.effort = value; }));
+  if (draft.errors.length > 0) host.append(el("div", { class: "notice bad", attrs: { role: "alert" } }, draft.errors.map((message) => el("p", { text: message }))));
+  $("agent-save").disabled = draft.saving;
+}
+
+async function saveAgent() {
+  agentDraft.saving = true;
+  agentDraft.errors = [];
+  drawAgentBuilder();
+  try {
+    const { errors: _errors, saving: _saving, ...body } = agentDraft;
+    const made = await api("/api/agents", { method: "POST", body: JSON.stringify(body) });
+    closeModal("agent-modal");
+    toast("Saved " + made.path + ". It is not reviewed yet: read it under Content, then lock it.");
+    openAgentName = made.name;
+    await loadProjectViews();
+  } catch (error) {
+    agentDraft.errors = error.details?.errors ?? [error.message];
+  } finally {
+    agentDraft.saving = false;
+    drawAgentBuilder();
+  }
 }
 
 // ---------------------------------------------------------------- workflows

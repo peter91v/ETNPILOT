@@ -4,7 +4,7 @@ import { compactSession, compactionCheck, createSessionId, listSessions, readSes
 import { resolveAttachments, summarizeAttachments } from "./chat-attachments.js";
 import { PolicyEngine } from "../policy/engine.js";
 import { git } from "../git/command.js";
-import { createWorkflow, lockReviewedContent, readAgentDetails, readContentFile, readContentReview, readWorkflows } from "./project-content.js";
+import { createAgent, createWorkflow, lockReviewedContent, readAgentDetails, readContentFile, readContentReview, readWorkflows } from "./project-content.js";
 import { normalizeContentProvenance, verifyProjectContent } from "../content/provenance.js";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -221,6 +221,7 @@ export async function openProjectState({ root = process.cwd(), env = process.env
     agentDetails: () => readAgentDetails({ root: projectRoot, config: current }),
     workflows: () => readWorkflows({ root: projectRoot, config: current }),
     createWorkflow: (input) => createWorkflow({ root: projectRoot, config: current, input }),
+    createAgent: (input) => createAgent({ root: projectRoot, config: current, input }),
     startRun({ input, agent, workflow, signal, dryRun, providerFactories, via, session, worktree } = {}) {
       if (!input || !String(input).trim()) throw new TypeError("A task is required to start a run.");
       const inboxConfig = current.approval?.inbox ?? {};

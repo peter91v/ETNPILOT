@@ -450,6 +450,12 @@ export const STYLES = `
     font: var(--md-body-large); letter-spacing: .5px;
   }
   input:focus, select:focus { border-color: var(--md-primary); border-width: 2px; padding: 0 15px; outline: 0; }
+  .field textarea {
+    min-height: 120px; padding: 16px; width: 100%; resize: vertical; min-width: 0;
+    border: 1px solid var(--md-outline); border-radius: var(--md-shape-xs); background: transparent;
+    color: var(--md-on-surface); font: var(--md-body-large); letter-spacing: .5px;
+  }
+  .field textarea:focus { border-color: var(--md-primary); box-shadow: 0 0 0 1px var(--md-primary); outline: 0; }
   input::placeholder { color: var(--md-on-surface-variant); }
   input[type="checkbox"] {
     min-height: 0; width: 18px; height: 18px; padding: 0; accent-color: var(--md-primary);
