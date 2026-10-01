@@ -45,7 +45,17 @@ const PROPOSALS_ROOT = ".etnpilot/proposals";
 // tells ETNPilot's own merge requests apart from everyone else's.
 export const RUN_BRANCH_PREFIX = "etnpilot/";
 
-async function executeProject({
+async function executeProject(options = {}) {
+  const run = await setUpRun(options);
+  const outcome = await runWorkflow(run);
+  return finishRun(run, outcome);
+}
+
+// Everything a run needs before its first step: configuration, a workspace, the
+// project loaded into the harness, tools and providers. If any of it fails, what was
+// opened is closed and the workspace is discarded; nothing was run, so there is no
+// receipt to seal.
+async function setUpRun({
   root = process.cwd(),
   input,
   agent,
@@ -163,22 +173,11 @@ async function executeProject({
     harness.hooks = config.hooks ?? {};
     codegraph = createCodegraph(workspace.path, config, { importer: codegraphImporter });
     if (codegraph) {
-      try {
-        codegraphBefore = await codegraph.graph.indexDirectory(workspace.path, { signal });
-        harness.instructions.push([
-          "CodeGraph is available through the codegraph_explore MCP tool"
-            + " (offered as codegraph.codegraph_explore by providers that prefix a server name).",
-          "Query it before planning broad edits and use its refreshed index when reviewing changes.",
-        ].join("\n"));
-      } catch (error) {
-        // CodeGraph enriches a run; it does not guard it. Losing an entire run
-        // because this machine has no compiled index is the wrong trade — the
-        // sandbox fails a run because it is a safeguard, an index is not. The
-        // receipt says the index was absent, so no later reader assumes it was
-        // consulted. Any other indexing failure still stops the run.
-        if (!isCodeGraphUnavailable(error)) throw error;
-        codegraphUnavailable = error.message;
-        codegraph.graph.close();
+      // Throws for any failure that should stop the run; the catch below closes `codegraph`.
+      const indexed = await indexCodegraph(codegraph, { workspace, harness, signal });
+      codegraphBefore = indexed.before;
+      if (indexed.unavailable) {
+        codegraphUnavailable = indexed.unavailable;
         codegraph = undefined;
       }
     }
@@ -188,18 +187,7 @@ async function executeProject({
     // Copilot adapter is handed, spoken through the same client as any other
     // server. Without this the prompt below promised a tool that 'anthropic'
     // and 'openai' were never given.
-    const servers = {
-      ...(codegraph ? { codegraph: codegraphAsServer(codegraph.mcp) } : {}),
-      ...config.mcpServers,
-    };
-    if (Object.keys(servers).length > 0) {
-      mcp = await connectMcpTools(servers, {
-        onError: ({ server, error }) => {
-          mcpErrors.push({ server, error });
-          harness.instructions.push(`The MCP server '${server}' is unavailable: ${error}`);
-        },
-      });
-    }
+    mcp = await connectProjectMcp({ codegraph, config, harness, errors: mcpErrors });
     sandbox = createSandbox(await resolveSandboxConfig(config.sandbox ?? {}, workspace.path), {
       workspace: workspace.path,
     });
@@ -207,11 +195,7 @@ async function executeProject({
     if (sandbox && !dryRun) await sandbox.assertAvailable();
     let effectiveFactories = providerFactories;
     if (fixtures) {
-      // Offline execution: recorded answers stand in for every provider.
-      const replay = fixtureProviderFactories(await loadFixtures(resolve(repositoryRoot, fixtures)), {
-        types: Object.values(config.providers ?? {}).map((entry) => entry.type),
-        strict: config.fixtures?.strict !== false,
-      });
+      const replay = await playbackProviders({ fixtures, repositoryRoot, config });
       fixturePlayer = replay.player;
       effectiveFactories = replay.factories;
     }
@@ -229,15 +213,7 @@ async function executeProject({
         readOnlyMcpTools: codegraph.mcp.tools,
       } : {}),
     });
-    if (recordFixtures) {
-      recorder = createFixtureRecorder({
-        path: resolve(repositoryRoot, recordFixtures),
-        redact: config.fixtures?.redact !== false,
-      });
-      for (const name of harness.providers.list()) {
-        harness.providers.replace(name, recorder.wrap(harness.providers.get(name)));
-      }
-    }
+    if (recordFixtures) recorder = recordProviders(harness, { recordFixtures, repositoryRoot, config });
     harness.setProviderRouter(new ProviderRouter(harness.providers, config.routing, {
       policy,
       defaultProvider: config.defaultProvider,
@@ -272,6 +248,24 @@ async function executeProject({
     error.workspaceCleanup = await discardWorkspace(workspace, worktreeManager, branch);
     throw error;
   }
+  return {
+    root, input, agent, workflowName, dryRun, publish, env, fetchImpl, signal, metadata, session, approvalHandler,
+    repositoryRoot, bootstrapConfig, secrets, useWorktree, effectiveCleanupPolicy, runId, branch, worktreeManager,
+    receiptPath, policy, harness, config, gitLabToken, receiptSigner, receiptStore, telemetry, workspace,
+    codegraph, mcp, codegraphBefore, codegraphUnavailable, contentEvidence, workflow, sandbox, recorder, fixturePlayer,
+    toolsReleased: false,
+  };
+}
+
+// The workflow itself. A failure here is sealed as a failed receipt with the run's
+// evidence, everything opened is closed, and the error carries the run.
+async function runWorkflow(run) {
+  const {
+    root, input, dryRun, publish, fetchImpl, metadata, session, env, signal,
+    bootstrapConfig, useWorktree, runId, harness, config, gitLabToken, receiptSigner, receiptStore, telemetry,
+    workspace, sandbox, workflow, receiptPath,
+  } = run;
+  let { contentEvidence } = run;
   const engine = new WorkflowEngine({
     concurrency: workflow.concurrency,
     failFast: workflow.failFast,
@@ -385,8 +379,7 @@ async function executeProject({
       observability,
       summary,
     });
-    codegraph?.graph.close();
-    await mcp?.close();
+    await releaseTools(run);
     await harness.close();
     error.run = {
       runId,
@@ -403,144 +396,149 @@ async function executeProject({
     };
     throw error;
   }
+  return { summary, contentEvidence, publisher, startedAt, workflowSpan };
+}
 
-  await harness.close();
+// Everything after the workflow: evidence, the sealed receipt, publishing, cleanup.
+// If it fails before the receipt is sealed, the receipt is sealed as failed (a run
+// must not be left looking unfinished), and either way what was opened is closed.
+async function finishRun(run, { summary, contentEvidence, publisher, startedAt, workflowSpan }) {
+  const {
+    input, agent, workflowName, dryRun, fetchImpl, session, bootstrapConfig, effectiveCleanupPolicy, runId, branch,
+    worktreeManager, receiptPath, harness, config, gitLabToken, receiptSigner, receiptStore, telemetry, workspace,
+    codegraph, codegraphBefore, codegraphUnavailable, sandbox, recorder, fixturePlayer,
+  } = run;
+  let sealed = false;
+  try {
 
-  const fixtureEvidence = await finishFixtures(recorder, fixturePlayer);
-  const gitEvidence = await collectGitEvidence(workspace.path);
-  // Rehearsed even when nothing will be published: knowing the branch has
-  // drifted from its target is evidence a reviewer wants either way.
-  const rehearsal = workspace.managed && config.git?.rehearseMerge !== false
-    ? await rehearseMerge({
-        cwd: workspace.path,
-        remote: config.git?.remote,
-        targetBranch: config.git?.targetBranch ?? "main",
-        fetch: config.git?.rehearseFetch !== false,
-      })
-    : undefined;
-  const mergeTrain = rehearsal?.clean === true
-    ? await inspectTrain({ config, token: gitLabToken, workspace, branch, fetchImpl })
-    : undefined;
+    await harness.close();
 
-  let codegraphEvidence;
-  if (codegraphUnavailable) {
-    codegraphEvidence = {
-      engine: "@colbymchenry/codegraph",
-      available: false,
-      reason: codegraphUnavailable,
-    };
-  } else if (codegraph) {
-    try {
-      const update = await codegraph.graph.indexDirectory(workspace.path);
-      const sourceChanges = gitEvidence.changedPaths.filter(isSourcePath);
-      codegraphEvidence = {
-        engine: "@colbymchenry/codegraph",
-        indexPath: join(workspace.path, ".codegraph"),
-        before: codegraphBefore,
-        after: update,
-        impact: sourceChanges.length > 0
-          ? codegraph.graph.impact(sourceChanges, { maxDepth: config.codegraph?.maxImpactDepth ?? 20 })
-          : { changed: [], files: [], tests: [], maxDepth: config.codegraph?.maxImpactDepth ?? 20 },
-      };
-    } finally {
-      codegraph.graph.close();
-    }
-  }
-  // The servers were only ever closed when a run failed. A run that succeeded
-  // left every one of them running — invisible while a project configured
-  // none, and a hung process on every run now that codegraph is one.
-  await mcp?.close();
-  const observability = await finishTelemetry({
-    telemetry,
-    span: workflowSpan,
-    workflowRunId: runId,
-    status: summary.status === "succeeded" ? "ok" : "error",
-    durationMs: Date.now() - startedAt,
-    file: bootstrapConfig.observability?.file,
-  });
-  // What agents suggested for the project's instructions. Written into the
-  // worktree here, by the harness, after the evidence about the run's own
-  // changes was taken — so it is neither counted as the agent's edit nor
-  // able to alter what the run itself was told.
-  const proposals = dryRun ? [] : harness.proposals;
-  if (proposals.length > 0) await writeProposals(workspace.path, proposals, runId);
-  const receiptHash = await receiptStore.append({
-    type: "workflow",
-    terminal: true,
-    runId,
-    mode: dryRun ? "dry-run" : "execute",
-    ...(workflowName && !agent ? { workflow: workflowName } : {}),
-    status: summary.status,
-    durationMs: Date.now() - startedAt,
-    workspace: { ...workspace, ...(sandbox ? { sandbox: sandbox.describe() } : {}) },
-    settings: settingsEvidence(bootstrapConfig),
-    content: contentEvidence,
-    git: {
-      ...gitEvidence,
-      ...(rehearsal ? { mergeRehearsal: rehearsal } : {}),
-      ...(mergeTrain ? { mergeTrain } : {}),
-    },
-    ...(session ? { session: { id: session.id, turn: session.turn, ...(session.kind ? { kind: session.kind } : {}), ...(session.attachments?.length ? { attachments: session.attachments } : {}) } } : {}),
-    ...(fixtureEvidence ? { fixtures: fixtureEvidence } : {}),
-    ...(proposals.length > 0 ? { proposals: proposals.map(summarizeProposal) } : {}),
-    codegraph: codegraphEvidence,
-    observability,
-    summary,
-  });
-  let mergeRequest;
-  let publication;
-  if (publisher && summary.status !== "succeeded") {
-    // Unreviewed work from a failed workflow is never pushed, even when
-    // fail-fast is disabled and the engine returned without throwing.
-    publication = { published: false, reason: "workflow-not-succeeded" };
-  } else if (publisher && rehearsal?.clean === false && config.git?.publishOnConflict !== true) {
-    publication = { published: false, reason: "merge-conflict", conflicts: rehearsal.conflicts };
-  } else if (publisher) {
-    mergeRequest = await publisher.publish({
-      cwd: workspace.path,
-      branch,
-      targetBranch: config.git?.targetBranch ?? "main",
-      title: `ETNPilot: ${firstLine(input)}`,
-      description: `Automated ETNPilot run \`${runId}\`. Review the attached evidence before merging.`
-        + describeProposals(proposals, { tainted: proposals.find((entry) => entry.tainted)?.tainted }),
-      proposalsPath: proposals.length > 0 ? PROPOSALS_ROOT : undefined,
-      receipt: receiptHash,
+    const fixtureEvidence = await finishFixtures(recorder, fixturePlayer);
+    const gitEvidence = await collectGitEvidence(workspace.path);
+    // Rehearsed even when nothing will be published: knowing the branch has
+    // drifted from its target is evidence a reviewer wants either way.
+    const rehearsal = workspace.managed && config.git?.rehearseMerge !== false
+      ? await rehearseMerge({
+          cwd: workspace.path,
+          remote: config.git?.remote,
+          targetBranch: config.git?.targetBranch ?? "main",
+          fetch: config.git?.rehearseFetch !== false,
+        })
+      : undefined;
+    const mergeTrain = rehearsal?.clean === true
+      ? await inspectTrain({ config, token: gitLabToken, workspace, branch, fetchImpl })
+      : undefined;
+
+    const codegraphEvidence = await describeCodegraph({ codegraph, codegraphBefore, codegraphUnavailable, workspace, gitEvidence, config });
+    // The servers were only ever closed when a run failed. A run that succeeded
+    // left every one of them running — invisible while a project configured
+    // none, and a hung process on every run now that codegraph is one.
+    await releaseTools(run);
+    const observability = await finishTelemetry({
+      telemetry,
+      span: workflowSpan,
+      workflowRunId: runId,
+      status: summary.status === "succeeded" ? "ok" : "error",
+      durationMs: Date.now() - startedAt,
+      file: bootstrapConfig.observability?.file,
+    });
+    // What agents suggested for the project's instructions. Written into the
+    // worktree here, by the harness, after the evidence about the run's own
+    // changes was taken — so it is neither counted as the agent's edit nor
+    // able to alter what the run itself was told.
+    const proposals = dryRun ? [] : harness.proposals;
+    if (proposals.length > 0) await writeProposals(workspace.path, proposals, runId);
+    const receiptHash = await receiptStore.append({
+      type: "workflow",
+      terminal: true,
+      runId,
+      mode: dryRun ? "dry-run" : "execute",
+      ...(workflowName && !agent ? { workflow: workflowName } : {}),
+      status: summary.status,
+      durationMs: Date.now() - startedAt,
+      workspace: { ...workspace, ...(sandbox ? { sandbox: sandbox.describe() } : {}) },
+      settings: settingsEvidence(bootstrapConfig),
+      content: contentEvidence,
+      git: {
+        ...gitEvidence,
+        ...(rehearsal ? { mergeRehearsal: rehearsal } : {}),
+        ...(mergeTrain ? { mergeTrain } : {}),
+      },
+      ...(session ? { session: { id: session.id, turn: session.turn, ...(session.kind ? { kind: session.kind } : {}), ...(session.attachments?.length ? { attachments: session.attachments } : {}) } } : {}),
+      ...(fixtureEvidence ? { fixtures: fixtureEvidence } : {}),
+      ...(proposals.length > 0 ? { proposals: proposals.map(summarizeProposal) } : {}),
+      codegraph: codegraphEvidence,
+      observability,
+      summary,
+    });
+    sealed = true;
+    const { mergeRequest, publication } = await publishRun({
+      publisher, summary, rehearsal, config, workspace, branch, input, runId, proposals, receiptHash, receiptSigner,
+    });
+    const cleanup = await cleanupWorkspace({
+      policy: effectiveCleanupPolicy,
+      published: Boolean(mergeRequest),
+      workspace,
+      manager: worktreeManager,
+    });
+    return {
+      runId,
+      status: summary.status,
+      ...(dryRun ? { mode: "dry-run" } : {}),
+      workspace,
+      cleanup,
+      receiptPath,
+      receiptHash,
       receiptProof: receiptSigner ? {
         algorithm: receiptSigner.algorithm,
         keyId: receiptSigner.keyId,
       } : undefined,
-    });
-    publication = { published: true, ...(mergeRequest?.noteError ? { noteError: mergeRequest.noteError } : {}) };
+      summary,
+      content: contentEvidence,
+      git: gitEvidence,
+      ...(rehearsal ? { mergeRehearsal: rehearsal } : {}),
+      ...(mergeTrain ? { mergeTrain } : {}),
+      ...(fixtureEvidence ? { fixtures: fixtureEvidence } : {}),
+      codegraph: codegraphEvidence,
+      observability,
+      mergeRequest,
+      ...(publication ? { publication } : {}),
+    };
+  } catch (error) {
+    await releaseTools(run).catch(swallow("closing tools after a failed finish", undefined));
+    if (!sealed) {
+      error.run = { runId, workspace, receiptPath };
+      try {
+        error.run.receiptHash = await receiptStore.append({
+          type: "workflow",
+          terminal: true,
+          runId,
+          mode: dryRun ? "dry-run" : "execute",
+          status: "failed",
+          phase: "finish",
+          durationMs: Date.now() - startedAt,
+          workspace,
+          content: contentEvidence,
+          summary: { status: "failed", error: error.message },
+        });
+      } catch (sealError) {
+        // The failure that matters is the first one; this is only noted on it.
+        error.sealFailure = sealError.message;
+      }
+    }
+    throw error;
   }
-  const cleanup = await cleanupWorkspace({
-    policy: effectiveCleanupPolicy,
-    published: Boolean(mergeRequest),
-    workspace,
-    manager: worktreeManager,
-  });
-  return {
-    runId,
-    status: summary.status,
-    ...(dryRun ? { mode: "dry-run" } : {}),
-    workspace,
-    cleanup,
-    receiptPath,
-    receiptHash,
-    receiptProof: receiptSigner ? {
-      algorithm: receiptSigner.algorithm,
-      keyId: receiptSigner.keyId,
-    } : undefined,
-    summary,
-    content: contentEvidence,
-    git: gitEvidence,
-    ...(rehearsal ? { mergeRehearsal: rehearsal } : {}),
-    ...(mergeTrain ? { mergeTrain } : {}),
-    ...(fixtureEvidence ? { fixtures: fixtureEvidence } : {}),
-    codegraph: codegraphEvidence,
-    observability,
-    mergeRequest,
-    ...(publication ? { publication } : {}),
-  };
+}
+
+// Closes the code index and the MCP servers, once, however the run ends.
+async function releaseTools(run) {
+  if (run.toolsReleased) return;
+  run.toolsReleased = true;
+  try {
+    run.codegraph?.graph.close();
+  } finally {
+    await run.mcp?.close();
+  }
 }
 
 // PATH and the locale are what any command needs. The rest are what one needs
@@ -1018,4 +1016,111 @@ export async function runProject(options = {}) {
   const lease = inPlace && !options.workspaceLease ? await acquireWorkspaceLease(root, { sessionId: options.session?.id }) : undefined;
   try { return await executeProject(options); }
   finally { lease?.release(); }
+}
+
+// What the code index saw before and after the run, and what the change reaches.
+// The index is closed here whatever happens.
+async function describeCodegraph({ codegraph, codegraphBefore, codegraphUnavailable, workspace, gitEvidence, config }) {
+  if (codegraphUnavailable) {
+    return { engine: "@colbymchenry/codegraph", available: false, reason: codegraphUnavailable };
+  }
+  if (!codegraph) return undefined;
+  try {
+    const update = await codegraph.graph.indexDirectory(workspace.path);
+    const sourceChanges = gitEvidence.changedPaths.filter(isSourcePath);
+    const maxDepth = config.codegraph?.maxImpactDepth ?? 20;
+    return {
+      engine: "@colbymchenry/codegraph",
+      indexPath: join(workspace.path, ".codegraph"),
+      before: codegraphBefore,
+      after: update,
+      impact: sourceChanges.length > 0
+        ? codegraph.graph.impact(sourceChanges, { maxDepth })
+        : { changed: [], files: [], tests: [], maxDepth },
+    };
+  } finally {
+    codegraph.graph.close();
+  }
+}
+
+// Publishing is never implicit, and never of unreviewed work: a failed workflow, or a
+// branch that conflicts with its target, is reported instead of pushed.
+async function publishRun({ publisher, summary, rehearsal, config, workspace, branch, input, runId, proposals, receiptHash, receiptSigner }) {
+  if (publisher && summary.status !== "succeeded") {
+    // Even when fail-fast is disabled and the engine returned without throwing.
+    return { publication: { published: false, reason: "workflow-not-succeeded" } };
+  }
+  if (publisher && rehearsal?.clean === false && config.git?.publishOnConflict !== true) {
+    return { publication: { published: false, reason: "merge-conflict", conflicts: rehearsal.conflicts } };
+  }
+  if (!publisher) return {};
+  const mergeRequest = await publisher.publish({
+    cwd: workspace.path,
+    branch,
+    targetBranch: config.git?.targetBranch ?? "main",
+    title: `ETNPilot: ${firstLine(input)}`,
+    description: `Automated ETNPilot run \`${runId}\`. Review the attached evidence before merging.`
+      + describeProposals(proposals, { tainted: proposals.find((entry) => entry.tainted)?.tainted }),
+    proposalsPath: proposals.length > 0 ? PROPOSALS_ROOT : undefined,
+    receipt: receiptHash,
+    receiptProof: receiptSigner ? { algorithm: receiptSigner.algorithm, keyId: receiptSigner.keyId } : undefined,
+  });
+  return { mergeRequest, publication: { published: true, ...(mergeRequest?.noteError ? { noteError: mergeRequest.noteError } : {}) } };
+}
+
+// Indexes the workspace before the run. A machine with no compiled index loses
+// the index, not the run: the sandbox fails a run because it is a safeguard, an
+// index is not. The receipt then says the index was absent, so no later reader
+// assumes it was consulted. Any other indexing failure still stops the run.
+async function indexCodegraph(codegraph, { workspace, harness, signal }) {
+  try {
+    const before = await codegraph.graph.indexDirectory(workspace.path, { signal });
+    harness.instructions.push([
+      "CodeGraph is available through the codegraph_explore MCP tool"
+        + " (offered as codegraph.codegraph_explore by providers that prefix a server name).",
+      "Query it before planning broad edits and use its refreshed index when reviewing changes.",
+    ].join("\n"));
+    return { before };
+  } catch (error) {
+    if (!isCodeGraphUnavailable(error)) throw error;
+    codegraph.graph.close();
+    return { unavailable: error.message };
+  }
+}
+
+// The project's own MCP servers, for every provider rather than one. A server
+// that will not start costs its tools, not the run. CodeGraph is one of them for
+// the chat providers: the same descriptor the Copilot adapter is handed, spoken
+// through the same client as any other server.
+async function connectProjectMcp({ codegraph, config, harness, errors }) {
+  const servers = {
+    ...(codegraph ? { codegraph: codegraphAsServer(codegraph.mcp) } : {}),
+    ...config.mcpServers,
+  };
+  if (Object.keys(servers).length === 0) return undefined;
+  return connectMcpTools(servers, {
+    onError: ({ server, error }) => {
+      errors.push({ server, error });
+      harness.instructions.push(`The MCP server '${server}' is unavailable: ${error}`);
+    },
+  });
+}
+
+// Offline execution: recorded answers stand in for every provider.
+async function playbackProviders({ fixtures, repositoryRoot, config }) {
+  return fixtureProviderFactories(await loadFixtures(resolve(repositoryRoot, fixtures)), {
+    types: Object.values(config.providers ?? {}).map((entry) => entry.type),
+    strict: config.fixtures?.strict !== false,
+  });
+}
+
+function recordProviders(harness, { recordFixtures, repositoryRoot, config }) {
+  const recorder = createFixtureRecorder({
+    path: resolve(repositoryRoot, recordFixtures),
+    redact: config.fixtures?.redact !== false,
+  });
+  for (const name of harness.providers.list()) {
+    harness.providers.replace(name, recorder.wrap(harness.providers.get(name)));
+  }
+  return recorder;
 }
