@@ -10,6 +10,7 @@ import { receiptsCommands } from "./commands/receipts.js";
 import { securityCommands } from "./commands/security.js";
 import { serversCommands } from "./commands/servers.js";
 import { modelsCommands } from "./commands/models.js";
+import { providersCommands } from "./commands/providers.js";
 import { usageCommands } from "./commands/usage.js";
 import { defaultWaitForShutdown, shouldOpenBrowser } from "./shared.js";
 
@@ -32,6 +33,7 @@ export const COMMANDS = [
   ...opsCommands,
   ...usageCommands,
   ...modelsCommands,
+  ...providersCommands,
 ];
 
 export const CLI_OPTIONS = Object.freeze({
@@ -94,6 +96,7 @@ export const CLI_OPTIONS = Object.freeze({
   "no-forge": { type: "boolean" },
   global: { type: "boolean", default: false },
   changed: { type: "boolean", default: false },
+  name: { type: "string" },
   "record-fixtures": { type: "string" },
   raw: { type: "boolean", default: false },
   fixtures: { type: "string" },
@@ -153,6 +156,8 @@ ${TRUST_USAGE}
   etnpilot scan secrets [--root directory]
   etnpilot attest <receipt-file> [--out file] [--root directory]
   etnpilot telemetry summary [workflow-run-id] [--root directory]
+  etnpilot provider presets
+  etnpilot provider add <preset> [--name name] [--model id] [--force] [--root directory]
   etnpilot models [--provider name] [--json]       what the provider offers this account, with known prices
   etnpilot usage [--json] [--root directory]       tokens, requests and cost by model and by day
   etnpilot doctor [--root directory]
