@@ -1,3 +1,4 @@
+import { invocationMeter } from "./usage-meter.js";
 import { telemetryProviderAttributes } from "../observability/telemetry.js";
 
 export class ProviderError extends Error {
@@ -77,14 +78,19 @@ export class ProviderRouter {
           "etnpilot.agent.run_id": context.runId,
         },
       });
+      const meter = invocationMeter(context, name);
       let result;
+      let accounting;
       try {
-        result = await provider.invoke(context);
+        result = await provider.invoke(meter.context);
+        accounting = meter.finish(result);
       } catch (error) {
+        meter.finish(undefined, error);
         const durationMs = Date.now() - startedAt;
         await providerSpan?.end({
           status: "error",
           attributes: {
+            ...telemetryProviderAttributes(error.accounting),
             "error.type": error instanceof ProviderError ? error.code : "provider_error",
             "etnpilot.duration_ms": durationMs,
           },
@@ -94,6 +100,7 @@ export class ProviderRouter {
           provider: name,
           status: "failed",
           durationMs,
+          ...(error.accounting ? { usage: error.accounting } : {}),
           // The reason it failed, kept with the attempt: a provider that was
           // tried and refused the connection is not 'no provider can satisfy'.
           message: String(error?.message ?? error).slice(0, 300),
@@ -107,13 +114,6 @@ export class ProviderRouter {
         continue;
       }
       const durationMs = Date.now() - startedAt;
-      const accounting = context.telemetry?.recordProviderUsage({
-        workflowRunId: context.metadata?.workflowRunId,
-        agentRunId: context.runId,
-        provider: name,
-        model: result?.model ?? context.agent.model,
-        usage: result?.usage,
-      });
       await providerSpan?.end({
         attributes: {
           "etnpilot.duration_ms": durationMs,

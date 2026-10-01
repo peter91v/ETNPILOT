@@ -1,5 +1,6 @@
+import { readRegularFile } from "../runtime/bounded-io.js";
 import { randomBytes } from "node:crypto";
-import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { appendFile, mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { knownPriceForModel } from "./known-pricing.js";
 
@@ -23,6 +24,7 @@ export async function createTelemetry({
   }
   return new Telemetry({
     ...options,
+    root: resolve(root),
     file: options.file ? resolve(root, options.file) : undefined,
     otlp: options.otlp ? { ...options.otlp, headers } : undefined,
     fetchImpl,
@@ -32,6 +34,7 @@ export async function createTelemetry({
 
 export class Telemetry {
   constructor({
+    root = "",
     file,
     serviceName = "etnpilot",
     environment,
@@ -42,6 +45,7 @@ export class Telemetry {
     fetchImpl = globalThis.fetch,
     now = () => Date.now(),
   } = {}) {
+    this.root = root;
     this.file = file;
     this.serviceName = serviceName;
     this.environment = environment;
@@ -97,14 +101,16 @@ export class Telemetry {
     });
   }
 
-  recordProviderUsage({ workflowRunId, agentRunId, provider, model, usage = {} }) {
+  recordProviderUsage({ workflowRunId, agentRunId, provider, model, usage = {}, invocationComplete = true }) {
     const normalized = normalizeUsage(usage);
     const key = workflowRunId ?? agentRunId;
     const rate = this.pricing.models[model]
       ?? this.pricing.models[undatedModel(model)]
       ?? this.pricing.models["*"]
-      ?? tabulatedRate(model, this.pricing.currency);
-    const estimatedCost = rate ? calculateCost(normalized, rate) : undefined;
+      ?? tabulatedRate(model, this.pricing.currency, { root: this.root, now: this.now(), autoUpdate: this.pricing.autoUpdate });
+    const hasTokens = normalized.inputTokens > 0 || normalized.outputTokens > 0;
+    const measured = !["partial", "unknown"].includes(usage.usageStatus);
+    const estimatedCost = rate && (hasTokens || measured) ? calculateCost(normalized, rate) : undefined;
     const previous = this.totals.get(key) ?? emptySummary(this.pricing.currency);
     const total = {
       ...previous,
@@ -115,9 +121,10 @@ export class Telemetry {
       providerUnits: previous.providerUnits + normalized.providerUnits,
       requests: previous.requests + normalized.requests,
       estimatedCost: addOptional(previous.estimatedCost, estimatedCost),
-      invocations: previous.invocations + 1,
-      pricedInvocations: previous.pricedInvocations + (estimatedCost === undefined ? 0 : 1),
-      unpricedInvocations: previous.unpricedInvocations + (estimatedCost === undefined ? 1 : 0),
+      invocations: previous.invocations + (invocationComplete ? 1 : 0),
+      unknownUsageInvocations: (previous.unknownUsageInvocations ?? 0) + (invocationComplete && !measured ? 1 : 0),
+      pricedInvocations: previous.pricedInvocations + (invocationComplete && estimatedCost !== undefined ? 1 : 0),
+      unpricedInvocations: previous.unpricedInvocations + (invocationComplete && estimatedCost === undefined ? 1 : 0),
     };
     this.totals.set(key, total);
     const exceeded = budgetViolations(total, this.budgets);
@@ -125,7 +132,8 @@ export class Telemetry {
       provider,
       model,
       ...normalized,
-      ...(estimatedCost === undefined ? {} : { estimatedCost, currency: this.pricing.currency }),
+      ...(usage.usageStatus ? { usageStatus: usage.usageStatus } : {}),
+      ...(estimatedCost === undefined ? {} : { estimatedCost, currency: this.pricing.currency, pricing: { source: rate.source ?? "project configuration", asOf: rate.asOf, status: rate.status ?? "configured", stale: rate.stale ?? false, cacheTtl: rate.cacheTtl } }),
       workflow: Object.freeze({ ...total }),
       ...(exceeded.length > 0 ? { budgetExceeded: Object.freeze(exceeded) } : {}),
     });
@@ -163,8 +171,8 @@ export class Telemetry {
   }
 }
 
-export async function summarizeTelemetryFile(path, { workflowRunId } = {}) {
-  const content = await readFile(resolve(path), "utf8").catch((error) => {
+export async function summarizeTelemetryFile(path, { workflowRunId, root = "", config = {} } = {}) {
+  const content = await readRegularFile(resolve(path), 64 * 1024 * 1024).then((bytes) => bytes.toString("utf8")).catch((error) => {
     if (error.code === "ENOENT") return "";
     throw error;
   });
@@ -174,6 +182,7 @@ export async function summarizeTelemetryFile(path, { workflowRunId } = {}) {
   // the same thing afterwards.
   const unpriced = new Map();
   const priced = new Set();
+  const pricingSources = new Map();
   let spans = 0;
   for (const line of content.split("\n").filter(Boolean)) {
     const payload = JSON.parse(line);
@@ -190,17 +199,25 @@ export async function summarizeTelemetryFile(path, { workflowRunId } = {}) {
           summary.cacheWriteTokens += attributes["gen_ai.usage.cache_creation.input_tokens"] ?? 0;
           summary.providerUnits += attributes["etnpilot.provider.usage_units"] ?? 0;
           summary.requests += attributes["etnpilot.provider.requests"] ?? 0;
+          if (["partial", "unknown"].includes(attributes["etnpilot.usage.status"])) summary.unknownUsageInvocations = (summary.unknownUsageInvocations ?? 0) + 1;
           const model = attributes["gen_ai.request.model"] ?? "unknown";
+          if (attributes["etnpilot.pricing.source"]) {
+            const provenance = { source: attributes["etnpilot.pricing.source"], asOf: attributes["etnpilot.pricing.as_of"],
+              status: attributes["etnpilot.pricing.status"], stale: attributes["etnpilot.pricing.stale"] === true };
+            pricingSources.set(JSON.stringify(provenance), provenance);
+          }
+          const retrospectiveCost = retroactive(attributes, summary, model, { root, autoUpdate: config.observability?.pricing?.autoUpdate, pricing: config.observability?.pricing });
           if (attributes["etnpilot.cost.estimated"] !== undefined) {
             summary.estimatedCost = (summary.estimatedCost ?? 0) + attributes["etnpilot.cost.estimated"];
             summary.pricedInvocations += 1;
             priced.add(model);
-          } else if (retroactive(attributes, summary, model)) {
+          } else if (retrospectiveCost !== undefined) {
             // Recorded before a rate existed for it: the table prices it now, so a
             // run is not stuck unpriced for having happened earlier.
-            summary.estimatedCost = (summary.estimatedCost ?? 0) + retroactive(attributes, summary, model);
+            summary.estimatedCost = (summary.estimatedCost ?? 0) + retrospectiveCost;
             summary.pricedInvocations += 1;
-            summary.currency ??= "USD";
+            summary.currency ??= config.observability?.pricing?.currency ?? "USD";
+            summary.retrospective = true;
             priced.add(model);
           } else {
             summary.unpricedInvocations += 1;
@@ -217,6 +234,7 @@ export async function summarizeTelemetryFile(path, { workflowRunId } = {}) {
     spans,
     workflowRunId,
     ...summary,
+    ...(pricingSources.size ? { pricingSources: [...pricingSources.values()], pricing: pricingSources.size === 1 ? [...pricingSources.values()][0] : { source: "multiple rate observations", status: "mixed" } } : {}),
     // A cost is recorded when the call happens, so a rate set afterwards
     // never reaches a call already on disk. Naming the models says which rate
     // is missing, and how many calls predate the one that exists.
@@ -230,8 +248,9 @@ export async function summarizeTelemetryFile(path, { workflowRunId } = {}) {
   };
 }
 
-function retroactive(attributes, summary, model) {
-  const rate = tabulatedRate(model, summary.currency ?? "USD");
+function retroactive(attributes, summary, model, context) {
+  const configured = normalizePricing(context?.pricing ?? {});
+  const rate = configured.models[model] ?? configured.models[undatedModel(model)] ?? configured.models["*"] ?? tabulatedRate(model, summary.currency ?? configured.currency, context);
   if (!rate) return undefined;
   return calculateCost({
     inputTokens: attributes["gen_ai.usage.input_tokens"] ?? 0,
@@ -312,13 +331,13 @@ function normalizePricing(config) {
       cacheWritePerMillion: nonNegative(rates.cacheWritePerMillion ?? rates.inputPerMillion ?? 0, `${model}.cacheWritePerMillion`),
     });
   }
-  return Object.freeze({ currency, models: Object.freeze(models) });
+  return Object.freeze({ currency, models: Object.freeze(models), autoUpdate: config.autoUpdate });
 }
 
 function normalizeBudgets(config) {
   if (!config || Array.isArray(config) || typeof config !== "object") throw new TypeError("observability.budgets must be an object.");
   return Object.freeze(Object.fromEntries(Object.entries(config).map(([name, value]) => {
-    if (!["maxInputTokensPerWorkflow", "maxOutputTokensPerWorkflow", "maxEstimatedCostPerWorkflow", "maxProviderUnitsPerWorkflow"].includes(name)) {
+    if (!["maxInputTokensPerWorkflow", "maxOutputTokensPerWorkflow", "maxEstimatedCostPerWorkflow", "maxProviderUnitsPerWorkflow", "maxProviderRequestsPerWorkflow"].includes(name)) {
       throw new TypeError(`Unknown observability budget '${name}'.`);
     }
     return [name, nonNegative(value, name)];
@@ -340,11 +359,12 @@ function normalizeUsage(usage) {
 // the configuration names none: pricing follows the model in use without
 // anyone typing rates. The table is in USD, so it only applies to USD; a rate
 // the user wrote always wins over it.
-function tabulatedRate(model, currency) {
+function tabulatedRate(model, currency, context) {
   if (currency !== "USD") return undefined;
-  const known = typeof model === "string" ? knownPriceForModel(model) : undefined;
+  const known = typeof model === "string" ? knownPriceForModel(model, context) : undefined;
   if (!known) return undefined;
   return {
+    ...known,
     inputPerMillion: known.inputPerMillion,
     outputPerMillion: known.outputPerMillion,
     cacheReadPerMillion: known.cacheReadPerMillion ?? known.inputPerMillion,
@@ -368,6 +388,7 @@ function budgetViolations(total, budgets) {
     ["output_tokens", total.outputTokens, budgets.maxOutputTokensPerWorkflow],
     ["estimated_cost", total.estimatedCost, budgets.maxEstimatedCostPerWorkflow],
     ["provider_units", total.providerUnits, budgets.maxProviderUnitsPerWorkflow],
+    ["provider_requests", total.requests, budgets.maxProviderRequestsPerWorkflow],
   ];
   return checks.filter(([, actual, limit]) => limit !== undefined && actual !== undefined && actual > limit)
     .map(([metric, actual, limit]) => Object.freeze({ metric, actual, limit }));
@@ -474,6 +495,11 @@ function providerAttributes(accounting = {}) {
     "etnpilot.provider.requests": accounting.requests,
     "etnpilot.cost.estimated": accounting.estimatedCost,
     "etnpilot.cost.currency": accounting.currency,
+    "etnpilot.usage.status": accounting.usageStatus,
+    "etnpilot.pricing.source": accounting.pricing?.source,
+    "etnpilot.pricing.as_of": accounting.pricing?.asOf,
+    "etnpilot.pricing.status": accounting.pricing?.status,
+    "etnpilot.pricing.stale": accounting.pricing?.stale,
   });
 }
 

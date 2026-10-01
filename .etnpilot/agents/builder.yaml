@@ -4,4 +4,4 @@ skills: [evidence, codegraph]
 requires: [chat, tools]
 subagents: []
 # The one agent that changes the repository.
-tools: [read_file, list_files, search_files, write_file, edit_file, run_command, fetch_url]
+tools: [codegraph.codegraph_explore, read_file, list_files, search_files, write_file, edit_file, run_command, fetch_url]

@@ -11,6 +11,7 @@
 // status pills, a command palette and toasts — follows the GUI draft. What it
 // does not follow is the draft's screens for things that do not exist yet: a
 // surface that shows an empty 'Plugins' page teaches the wrong thing.
+import { renderChatMarkdown } from "./markdown.js";
 import { CLIENT_CHAT } from "./page/client-chat.js";
 import { CLIENT_CORE } from "./page/client-core.js";
 import { CLIENT_RUNS } from "./page/client-runs.js";
@@ -39,6 +40,7 @@ ${MARKUP}
 <script>
 const TOKEN = ${JSON.stringify(token)};
 ${CLIENT_CORE}
+${renderChatMarkdown.toString()}
 ${CLIENT_CHAT}
 ${CLIENT_RUNS}
 ${CLIENT_WORKTREES}

@@ -1,3 +1,4 @@
+import { invocationMeter } from "../providers/usage-meter.js";
 import { normalizeHistory } from "./history.js";
 import { randomUUID } from "node:crypto";
 import { EventBus } from "./events.js";
@@ -300,6 +301,7 @@ export class Harness {
             });
           }
         },
+        recordFileEffect: metadata.recordFileEffect,
         approve: async (request) => {
           const decision = await this.#approve(request, {
             runId,
@@ -364,6 +366,8 @@ export class Harness {
         provider: error.provider ?? agent.provider,
         providerAttempts: error.providerAttempts ?? [],
         status: "failed",
+        ...(error.accounting ? { usage: error.accounting } : {}),
+        ...(error.usage ? { partialResult: { usage: error.usage, model: error.model, toolCalls: error.toolCalls } } : {}),
         durationMs: Date.now() - startedAt,
         approvals,
         ...(runSpan ? { trace: { traceId: runSpan.traceId, spanId: runSpan.spanId } } : {}),
@@ -492,14 +496,19 @@ export class Harness {
         "etnpilot.agent.run_id": context.runId,
       },
     });
+    const meter = invocationMeter(context, providerName);
     let result;
+    let accounting;
     try {
-      result = await this.providers.get(providerName).invoke(context);
+      result = await this.providers.get(providerName).invoke(meter.context);
+      accounting = meter.finish(result);
     } catch (error) {
+      meter.finish(undefined, error);
       const attempt = { provider: providerName, status: "failed", durationMs: Date.now() - startedAt };
       await providerSpan?.end({
         status: "error",
         attributes: {
+          ...telemetryProviderAttributes(error.accounting),
           "error.type": error.code ?? error.name ?? "provider_error",
           "etnpilot.duration_ms": attempt.durationMs,
         },
@@ -508,13 +517,6 @@ export class Harness {
       error.providerAttempts ??= [attempt];
       throw error;
     }
-    const accounting = this.telemetry?.recordProviderUsage({
-      workflowRunId: context.metadata?.workflowRunId,
-      agentRunId: context.runId,
-      provider: providerName,
-      model: result?.model ?? context.agent.model,
-      usage: result?.usage,
-    });
     const attempt = { provider: providerName, status: "succeeded", durationMs: Date.now() - startedAt };
     await providerSpan?.end({
       attributes: {

@@ -79,34 +79,45 @@ export function knownPriceFor(providerType, modelId) {
   // A dated snapshot ('claude-opus-5-2026-09-01') prices the same as the
   // undated name, exactly as observability.pricing itself resolves it.
   const undated = modelId.replace(/-\d{4}-\d{2}-\d{2}$/, "");
-  const rate = table.rates[modelId] ?? table.rates[undated];
-  return rate ? { ...rate, asOf: table.asOf, source: table.source } : undefined;
+  const rate = Object.hasOwn(table.rates, modelId) ? table.rates[modelId] : Object.hasOwn(table.rates, undated) ? table.rates[undated] : undefined;
+  const inferred = providerType === "openai-compatible" && !["gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2", "gpt-6-luna"].includes(undated);
+  const cacheRates = providerType === "anthropic" && rate ? {
+    cacheReadPerMillion: rate.inputPerMillion * (undated === "claude-opus-5-5" ? 0.05 : undated === "claude-fable-5-1" ? 0.025 : 0.1),
+    cacheWritePerMillion: rate.inputPerMillion * 1.25,
+  } : {};
+  return rate ? { ...rate, ...cacheRates, asOf: table.asOf, source: table.source, status: inferred ? "inferred-id" : "snapshot", cacheTtl: providerType === "anthropic" ? "5m" : undefined } : undefined;
 }
 
 // The same lookup when only the model id is at hand (telemetry records the
 // provider's configured name, not its type). Ids do not collide across the
 // tables — 'claude-…' versus 'gpt-…' — so the first table that knows the id
 // answers. Undefined when none does.
-export function knownPriceForModel(modelId) {
-  for (const type of Object.keys(RATE_TABLES)) {
-    const rate = knownPriceFor(type, modelId);
-    if (rate) return rate;
+export function knownPriceForModel(modelId, { root = "", now = Date.now(), autoUpdate = true } = {}) {
+  const builtIn = Object.keys(RATE_TABLES).map((type) => knownPriceFor(type, modelId)).find(Boolean);
+  const snapshot = autoUpdate ? learned.get(root) : undefined;
+  const key = typeof modelId === "string" ? modelId.toLowerCase().replace(/^[a-z0-9-]+\//, "").replace(/\./g, "-").replace(/-\d{4}-\d{2}-\d{2}$/, "") : "";
+  const rate = snapshot && Object.hasOwn(snapshot.rates, key) ? snapshot.rates[key] : undefined;
+  const fetched = rate ? { ...rate, asOf: snapshot.asOf, source: snapshot.source, status: "catalog" } : undefined;
+  // Prefer the newer dated observation. Undated catalogs cannot replace a snapshot.
+  const winner = fetched && (!builtIn || new Date(fetched.asOf).getTime() > new Date(builtIn.asOf).getTime()) ? fetched : builtIn;
+  if (!winner) return undefined;
+  const age = now - new Date(winner.asOf).getTime();
+  return { ...winner, stale: !Number.isFinite(age) || age > 30 * 24 * 60 * 60 * 1000 };
+}
+
+// Catalog state is keyed by canonical project root; telemetry always supplies it.
+const learned = new Map();
+const catalogKeys = new Map();
+let catalogRevision = 0;
+export function pricingCatalogRevision() { return catalogRevision; }
+export function useLearnedRates(rates, { asOf, source, root = "" } = {}) {
+  const validated = Object.create(null);
+  for (const [model, rate] of Object.entries(rates ?? {})) {
+    if (!rate || typeof rate !== "object" || ![rate.inputPerMillion, rate.outputPerMillion].every((value) => Number.isFinite(value) && value >= 0)) continue;
+    if ([rate.cacheReadPerMillion, rate.cacheWritePerMillion].some((value) => value !== undefined && (!Number.isFinite(value) || value < 0))) continue;
+    validated[model] = { ...rate };
   }
-  return learnedPriceFor(modelId);
-}
-
-// Rates the project learned from the public catalog (see pricing-sync.js).
-// They answer only for what the built-in table does not know, so a rate that
-// was checked by hand is never replaced by a fetched one.
-let learned = { rates: {}, asOf: undefined, source: undefined };
-
-export function useLearnedRates(rates, { asOf, source } = {}) {
-  learned = { rates: rates ?? {}, asOf, source };
-}
-
-function learnedPriceFor(modelId) {
-  if (typeof modelId !== "string") return undefined;
-  const key = modelId.toLowerCase().replace(/^[a-z0-9-]+\//, "").replace(/\./g, "-").replace(/-\d{4}-\d{2}-\d{2}$/, "");
-  const rate = learned.rates[key];
-  return rate ? { ...rate, asOf: learned.asOf, source: learned.source } : undefined;
+  learned.set(root, { rates: validated, asOf, source });
+  const key = JSON.stringify({ rates: validated, asOf, source });
+  if (catalogKeys.get(root) !== key) { catalogKeys.set(root, key); catalogRevision += 1; }
 }

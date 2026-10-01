@@ -391,7 +391,7 @@ function renderRuns() {
       { label: "Took", value: (run) => run.durationMs === undefined ? "—" : (run.durationMs / 1000).toFixed(1) + "s" },
       { label: "Receipt", value: (run) => (run.hash ?? "—").slice(0, 12), mono: true },
     ], state.runs, "No runs have been recorded yet.", { selected: (run) => run.receiptFile === openRun?.file }),
-      ...(runsHidden() > 0 ? [button("Show " + Math.min(50, runsHidden()) + " more", { class: "btn tonal", onClick: () => { runLimit += 50; refresh({ force: true }); } })] : [])],
+      ...(runsHidden() > 0 && runLimit < 500 ? [button("Show " + Math.min(50, runsHidden()) + " more", { class: "btn tonal", onClick: () => { runLimit = Math.min(500, runLimit + 50); refresh({ force: true }); } })] : [])],
   }));
   if (openRun) host.append(renderRunDetail());
 }
@@ -418,7 +418,10 @@ function describeUsage(summary) {
     cached: summary.cacheReadTokens ?? 0,
     invocations: summary.invocations,
     requests: summary.requests ?? 0,
+    unknownUsage: summary.unknownUsageInvocations ?? 0,
     cost,
+    retrospective: summary.retrospective === true,
+    pricing: summary.pricing,
     unpriced: summary.unpricedInvocations ?? 0,
     unpricedModels: summary.unpricedModels ?? [],
   };
@@ -429,6 +432,9 @@ function describeUsage(summary) {
 // sends someone to set a rate they may already have set.
 function pricingHint(described) {
   const models = described.unpricedModels;
+  if (described.unknownUsage > 0) return described.unknownUsage + " calls have partial or unknown usage; cost is incomplete";
+  if (described.retrospective) return "retrospective estimate using current prices; sealed receipt unchanged";
+  if (described.pricing) return [described.pricing.source, described.pricing.asOf, described.pricing.status, described.pricing.stale ? "stale snapshot" : ""].filter(Boolean).join(" · ");
   if (models.length === 0) return described.cost ? "from observability.pricing" : "no published rate known for this model";
   const named = models.slice(0, 2).map((row) => "'" + row.model + "'").join(", ");
   const more = models.length > 2 ? " and " + (models.length - 2) + " more" : "";

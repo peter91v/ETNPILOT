@@ -27,6 +27,7 @@ export async function createReviewServer({
   env = process.env,
   token,
   rotateToken = false,
+  getNetworkInterfaces = networkInterfaces,
 } = {}) {
   // Kept between starts, because an installed app holds a link: a token minted
   // per start locks that icon out at the next restart. A caller may still pass
@@ -315,10 +316,12 @@ export async function createReviewServer({
           // on a tablet: when the port is open to the network, the address
           // given is one that can actually be reached from there.
           const exposed = !isLoopback(address.address);
-          const displayed = exposed ? (localAddress() ?? displayHost(address.address)) : displayHost(address.address);
+          const detected = exposed ? localAddress(getNetworkInterfaces) : undefined;
+          const displayed = exposed ? (detected ?? displayHost(address.address)) : displayHost(address.address);
           resolveListen({
             ...address,
             exposed,
+            ...(exposed && !detected ? { warning: "LAN address discovery is unavailable; use the host’s address to connect from another device." } : {}),
             url: `http://${bracket(displayed)}:${address.port}/?token=${resolvedToken}`,
           });
         };
@@ -462,8 +465,10 @@ function isLoopback(address) {
 
 // The address another device on this network would use. Picked rather than
 // guessed, so the printed link is one that works from the tablet in your hand.
-function localAddress() {
-  for (const interfaces of Object.values(networkInterfaces())) {
+function localAddress(getInterfaces = networkInterfaces) {
+  let adapters;
+  try { adapters = getInterfaces(); } catch { return undefined; }
+  for (const interfaces of Object.values(adapters)) {
     for (const entry of interfaces ?? []) {
       if (entry.internal) continue;
       if (entry.family === "IPv4" || entry.family === 4) return entry.address;

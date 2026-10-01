@@ -99,7 +99,7 @@ test("the approval carries the change, not its size", async () => {
     new_string: '  if (token === "letmein") return true;\n  return verify(token);',
   }, approveAll(requests));
 
-  const [request] = requests;
+  const request = requests.find((entry) => entry.kind === "write");
   assert.equal(request.kind, "write");
   assert.equal(request.toolName, "edit_file");
   assert.match(request.diff, /\+  if \(token === "letmein"\) return true;/);
@@ -114,8 +114,8 @@ test("the approval carries the change, not its size", async () => {
   await tools.invoke("write_file", {
     path: "auth.js", content: "export function check() {\n  return true;\n}\n",
   }, approveAll(writes));
-  assert.match(writes[0].diff, /-export function check\(token\)/);
-  assert.match(writes[0].diff, /\+export function check\(\)/);
+  assert.match(writes.find((entry) => entry.kind === "write").diff, /-export function check\(token\)/);
+  assert.match(writes.find((entry) => entry.kind === "write").diff, /\+export function check\(\)/);
 });
 
 test("two writes to one path with different content are two different decisions", () => {

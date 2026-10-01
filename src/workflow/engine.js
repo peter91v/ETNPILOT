@@ -71,6 +71,8 @@ export class WorkflowEngine {
           state.status = "failed";
           state.finishedAt = new Date().toISOString();
           state.error = error instanceof Error ? error.message : String(error);
+          if (error?.usage) state.usage = error.usage;
+          if (error?.partialResult) state.partialResult = error.partialResult;
           fatalError ??= error;
           await this.events?.emit("workflow.step.failed", { step: step.id, error: state.error });
         }).finally(() => running.delete(step.id));

@@ -1,3 +1,5 @@
+import { accountRequest } from "./usage-meter.js";
+import { providerToolNames } from "./tool-names.js";
 import { missingApiKey } from "./openai-compatible.js";
 import { ProviderError } from "./router.js";
 import { collectAnthropicStream } from "./sse.js";
@@ -104,6 +106,7 @@ export function createAnthropicProvider({
       // the marker in use.
       const envelope = createResultEnvelope(context.runId);
       const system = buildSystemMessage(context, workspaceTools ? envelope : undefined, workspaceTools);
+      const wireTools = providerToolNames(workspaceTools?.definitions);
       const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, requests: 0 };
       // Marks the last block of a list so everything before it is cached.
       // Anthropic allows four such breakpoints; this uses three — the tools,
@@ -118,13 +121,16 @@ export function createAnthropicProvider({
       const retried = [];
       const compactions = [];
       let responseModel;
+      let knownRequests = 0;
 
+      try {
       for (let iteration = 0; iteration <= maxToolIterations; iteration += 1) {
-        const attempt = await withRetry((number) => request({
+        const attempt = await withRetry((number) => accountRequest(context, usage,
+          responseModel ?? context.agent.model ?? model, addUsage, (requestContext) => request({
           endpoint,
           apiKey,
           fetchImpl,
-          context,
+          context: requestContext,
           attempt: number,
           stream,
           body: {
@@ -149,13 +155,16 @@ export function createAnthropicProvider({
             messages: caching && messages.length > 1 ? withConversationBreakpoint(messages) : messages,
             // An agent allowed no tool at all is sent none: an empty list is not a
             // request every API accepts.
-            ...(workspaceTools?.definitions.length > 0 ? { tools: cacheable(toolSchema(workspaceTools.definitions)) } : {}),
+            ...(workspaceTools?.definitions.length > 0 ? { tools: cacheable(toolSchema(wireTools.definitions)) } : {}),
           },
-        }), { ...retry, signal: context.signal });
+        })), { ...retry, signal: context.signal });
         const payload = attempt.value;
         retried.push(...attempt.tried);
         addUsage(usage, payload.usage);
         responseModel = payload.model ?? responseModel;
+        if (payload.usage) knownRequests += 1;
+        usage.usageStatus = knownRequests === usage.requests ? "measured" : knownRequests > 0 ? "partial" : "unknown";
+        context.recordProviderProgress?.(usage, responseModel ?? context.agent.model ?? model);
         const content = Array.isArray(payload.content) ? payload.content : [];
         const requested = workspaceTools ? content.filter((block) => block?.type === "tool_use") : [];
         if (requested.length === 0) {
@@ -163,7 +172,7 @@ export function createAnthropicProvider({
             text: textOf(content),
             raw: payload,
             model: responseModel ?? context.agent.model ?? model,
-            usage,
+            usage: usage.usageStatus === "measured" ? (({ usageStatus: _status, ...measured }) => measured)(usage) : usage,
             ...(context.agent.effort ? { effort: context.agent.effort } : {}),
             ...(retried.length > 0 ? { retries: retried } : {}),
             ...(compactions.length > 0 ? { compactions } : {}),
@@ -181,8 +190,8 @@ export function createAnthropicProvider({
         const results = [];
         for (const call of requested) {
           context.signal?.throwIfAborted();
-          const result = await workspaceTools.invoke(call.name, call.input ?? {}, context);
-          toolCalls.push({ tool: call.name, label: describeCall(call.name, call.input), ok: result.ok === true, ...(result.refused ? { refused: result.refused } : {}), ...(result.error ? { error: result.error } : {}), ...(result.afterWrite ? { afterWrite: result.afterWrite } : {}) });
+          const result = await workspaceTools.invoke(wireTools.internal(call.name), call.input ?? {}, context);
+          toolCalls.push({ tool: wireTools.internal(call.name), label: describeCall(wireTools.internal(call.name), call.input), ok: result.ok === true, ...(result.refused ? { refused: result.refused } : {}), ...(result.error ? { error: result.error } : {}), ...(result.afterWrite ? { afterWrite: result.afterWrite } : {}) });
           results.push({
             type: "tool_result",
             tool_use_id: call.id,
@@ -213,6 +222,7 @@ export function createAnthropicProvider({
         }
       }
       throw new ProviderError("Provider tool loop did not terminate.", { code: "tool_loop_error" });
+      } catch (cause) { const error = cause instanceof Error && Object.isExtensible(cause) ? cause : new ProviderError(String(cause), { cause }); error.usage = { ...usage }; error.model = responseModel ?? context.agent.model ?? model; error.toolCalls = toolCalls; throw error; }
     },
   };
 }
@@ -295,7 +305,7 @@ async function request({ endpoint, apiKey, fetchImpl, context, body, stream }) {
   }
   if (!stream) return response.json();
   try {
-    return await collectAnthropicStream(response, { onDelta: context.emitDelta });
+    return await collectAnthropicStream(response, { onDelta: context.emitDelta, onUsage: context.onStreamUsage, signal: context.signal });
   } catch (error) {
     // Same rule as a failed status: what already ran tools is not replayed blindly.
     if (error instanceof ProviderError && bodyHasToolResults(body)) error.safeToRetry = false;
@@ -352,8 +362,8 @@ function toolSchema(definitions) {
 function addUsage(total, usage = {}) {
   // One per answer received: a turn that reads files and then answers is
   // several requests to the provider, and the provider bills and counts them so.
-  total.requests = (total.requests ?? 0) + 1;
-  total.inputTokens += usage.input_tokens ?? 0;
+
+  total.inputTokens += (usage.input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0);
   total.outputTokens += usage.output_tokens ?? 0;
   total.cacheReadTokens += usage.cache_read_input_tokens ?? 0;
   total.cacheWriteTokens += usage.cache_creation_input_tokens ?? 0;

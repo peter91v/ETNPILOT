@@ -108,7 +108,7 @@ test("router stops after a cumulative usage budget is exceeded", async () => {
     }),
     (error) => error instanceof ProviderError
       && error.code === "budget_exceeded"
-      && error.providerAttempts[0].status === "succeeded",
+      && error.providerAttempts[0].status === "failed",
   );
 });
 

@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { runChild } from "../runtime/child-process.js";
 
 const DEFAULT_OUTPUT_LIMIT = 1024 * 1024;
 
@@ -10,6 +10,7 @@ export async function runCheck(check, { cwd, signal, env = process.env, outputLi
     env: { ...env, ...(check.env ?? {}) },
     signal,
     outputLimit,
+    timeoutMs: check.timeoutMs ?? 120_000,
   });
   return {
     name: check.name ?? command.join(" "),
@@ -29,48 +30,20 @@ function normalizeCommand(command) {
   return command;
 }
 
-function spawnCommand([executable, ...args], { cwd, env, signal, outputLimit }) {
-  const passed = Object.keys(env ?? {}).sort();
-  return new Promise((resolve, reject) => {
-    const child = spawn(executable, args, { cwd, env, signal, shell: false, stdio: ["ignore", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    let truncated = false;
-    const collect = (target, chunk) => {
-      const current = target === "stdout" ? stdout : stderr;
-      const room = Math.max(0, outputLimit - Buffer.byteLength(current));
-      const addition = chunk.toString("utf8", 0, room);
-      if (target === "stdout") stdout += addition;
-      else stderr += addition;
-      if (Buffer.byteLength(chunk) > room) truncated = true;
-    };
-    child.stdout.on("data", (chunk) => collect("stdout", chunk));
-    child.stderr.on("data", (chunk) => collect("stderr", chunk));
-    child.once("error", (error) => {
-      // A command that never started reports ENOENT and nothing else; the
-      // reason is the same allow-listed environment, so say so here too.
-      if (error?.code === "ENOENT") {
-        const failure = new Error(
-          `Check could not start: ${exitCodeHint("start", executable, passed)}`,
-        );
-        failure.cause = error;
-        failure.exitCode = 127;
-        reject(failure);
-        return;
-      }
-      reject(error);
-    });
-    child.once("close", (code, exitSignal) => {
-      const result = { exitCode: code, signal: exitSignal, stdout, stderr, truncated };
-      if (code === 0) resolve(result);
-      else {
-        const error = new Error(describeFailure(executable, code, result, passed));
-        error.result = result;
-        error.exitCode = code;
-        reject(error);
-      }
-    });
-  });
+async function spawnCommand(command, options) {
+  const passed = Object.keys(options.env ?? {}).sort();
+  let result;
+  try { result = await runChild(command, options); }
+  catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    const failure = new Error(`Check could not start: ${exitCodeHint("start", command[0], passed)}`, { cause: error });
+    failure.exitCode = 127;
+    throw failure;
+  }
+  if (result.exitCode === 0 && !result.timedOut) return result;
+  const error = new Error(describeFailure(command[0], result.exitCode, result, passed));
+  error.result = result; error.exitCode = result.exitCode;
+  throw error;
 }
 
 // What the check said is the reason it failed. Reporting the exit code alone

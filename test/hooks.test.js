@@ -32,7 +32,7 @@ test("afterWrite runs on the file that was written, and its outcome is on the wr
   assert.equal(result.afterWrite.ok, true);
   assert.equal(result.afterWrite.command.at(-1), "a.txt");
   // Asked for like any command the model made: the policy and a human see it.
-  assert.deepEqual(asked.map((request) => request.kind), ["write", "shell"]);
+  assert.deepEqual(asked.map((request) => request.kind), ["read", "write", "shell"]);
 });
 
 test("a hook that fails, or is refused, never fails or blocks the write", async () => {
@@ -55,7 +55,7 @@ test("without a hook nothing extra runs", async () => {
   const { asked, context, tools } = await setup({});
   const result = await tools.invoke("write_file", { path: "a.txt", content: "x" }, context);
   assert.equal(result.afterWrite, undefined);
-  assert.deepEqual(asked.map((request) => request.kind), ["write"]);
+  assert.deepEqual(asked.map((request) => request.kind), ["read", "write"]);
 });
 
 test("every tool call announces itself, and a subscriber that throws changes nothing", async () => {

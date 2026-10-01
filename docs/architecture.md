@@ -6,7 +6,7 @@
 |---|---|---|
 | Harness | Runs agents, subagents, events, approvals, receipts | `src/core/` |
 | Plugins | Capability-scoped extensions behind bounded worker-process RPC | `src/plugins/` |
-| Providers | Capability-aware model/agent runtime adapters and safe fallback | GitHub Copilot SDK, OpenAI-compatible |
+| Providers | Capability-aware model/agent runtime adapters and safe fallback | GitHub Copilot SDK, OpenAI-compatible, Anthropic |
 | Content | SHA-256-pinned instructions, skills, prompts, and agent manifests | `.etnpilot/` plus reviewed content lock |
 | Git | Safe local operations and isolated branches | native Git worktrees |
 | Forge | Remote repository lifecycle | self-hosted GitLab API |
@@ -171,3 +171,15 @@ resolves everything from the working tree.
 The workflow engine returns a summary rather than throwing when `failFast` is disabled. Publishing,
 the CLI exit code, and the GitLab commit status all key off `summary.status`, so unreviewed work from
 a failed workflow is never pushed.
+
+## Shared-workspace hardening
+
+In-place workflows and chat reserve a SQLite workspace lease before asynchronous
+preparation. Turn numbering, compaction and journal-based undo are serialized
+under that lease. Crash recovery is explicit and never silently reruns work.
+Providers report per-request usage to the harness accounting boundary; policy and
+budget decisions stay there. Qualified MCP tool names retain their internal
+identity while provider adapters apply reversible wire aliases. The external
+CodeGraph engine and its published MCP interface remain the code-intelligence
+implementation. See [review-hardening.md](review-hardening.md) for concrete limits
+and platform requirements.

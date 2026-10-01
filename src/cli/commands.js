@@ -1,3 +1,4 @@
+import { recoverWorkspaceLease } from "../runtime/workspace-lease.js";
 import { access } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { CodeGraph } from "../codegraph/codegraph.js";
@@ -81,6 +82,8 @@ export const CLI_OPTIONS = Object.freeze({
   force: { type: "boolean", default: false },
   "private-key": { type: "string" },
   "public-key": { type: "string", multiple: true },
+  "inspect-only": { type: "boolean", default: false },
+  "lease-owner": { type: "string" },
   "require-signatures": { type: "boolean", default: false },
   "allow-unsigned": { type: "boolean", default: false },
   "require-terminal": { type: "boolean", default: false },
@@ -109,8 +112,9 @@ Usage:
     [--events jsonl]
     [--worktree | --no-worktree] [--cleanup-worktree] [--publish] [--dry-run]
     [--record-fixtures file | --fixtures file]
+  etnpilot lease recover --lease-owner <uuid> [--root directory]
   etnpilot replay <receipt-file> [--root directory] [--public-key path]
-    [--require-signatures]
+    [--require-signatures] [--inspect-only]
   etnpilot worktree list [--root directory]
   etnpilot worktree cleanup <name> [--root directory]
   etnpilot merge list [--status opened|merged|closed|all] [--root directory]
@@ -221,6 +225,9 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     // final line gets the same answer either way.
     console.log(streaming ? JSON.stringify({ event: "run.result", ...result }) : JSON.stringify(result, null, 2));
     return result.summary?.status === "succeeded" ? 0 : 1;
+  } else if (command === "lease" && subcommand === "recover") {
+    console.log(JSON.stringify(await recoverWorkspaceLease(resolve(values.root), values["lease-owner"]), null, 2));
+    return 0;
   } else if (command === "replay") {
     if (!subcommand) throw new Error("A receipt file is required.");
     const root = resolve(values.root);
@@ -229,6 +236,7 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
       root,
       verifiers: await loadReceiptVerifiers(publicKeyPaths),
       requireSignatures: values["require-signatures"] || publicKeyPaths.length > 0,
+      inspectOnly: values["inspect-only"],
     });
     console.log(JSON.stringify(report, null, 2));
     return report.receiptValid && report.drifted.length === 0 ? 0 : 1;
@@ -413,6 +421,7 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
     });
     const address = await review.listen({ host: values.host, port });
     console.log(`ETNPilot review UI: ${address.url}`);
+    if (address.warning) console.log(address.warning);
     // The token is no longer minted per start — an installed app holds a link,
     // and a link that expires at the next restart is an icon that 401s. So it
     // says what it is: a stored credential, and how to throw it away.

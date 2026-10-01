@@ -1,6 +1,11 @@
 // The page's stylesheet: Material Design 3 tokens first, then components.
 // Below the token block there are no colour literals; see test/ui-material.test.js.
-export const STYLES = `  /* Material Design 3, implemented rather than approximated -------------
+export const STYLES = `
+.markdown p { margin: .4em 0; }
+.markdown pre { overflow-x: auto; white-space: pre; padding: .8em; border-radius: 8px; background: var(--surface-container); }
+.markdown code { font-family: monospace; }
+.markdown a { overflow-wrap: anywhere; }
+  /* Material Design 3, implemented rather than approximated -------------
      Tokens first: a colour scheme built from tonal palettes, the type
      scale, the shape scale, elevation, motion, and the state-layer
      opacities. Every rule below reads these; nothing hard-codes a colour.
@@ -564,16 +569,6 @@ export const STYLES = `  /* Material Design 3, implemented rather than approxima
     margin: 0; padding: 12px 16px; border-radius: var(--md-shape-lg); white-space: pre-wrap;
     overflow-wrap: anywhere; font: var(--md-body-large); letter-spacing: .5px;
   }
-  .msg .said.md { white-space: normal; display: grid; gap: 8px; }
-  .msg .said.md > * { margin: 0; min-width: 0; }
-  .msg .said.md p { white-space: pre-wrap; }
-  .msg .said.md h3, .msg .said.md h4, .msg .said.md h5, .msg .said.md h6 { font: var(--md-title-medium); font-weight: 600; }
-  .msg .said.md ul, .msg .said.md ol { padding-left: 22px; display: grid; gap: 4px; }
-  .msg .said.md blockquote { padding-left: 12px; border-left: 3px solid var(--md-outline-variant); color: var(--md-on-surface-variant); }
-  .msg .said.md code { font: 13px/1.5 var(--mono); background: var(--md-surface-container-highest); padding: 1px 5px; border-radius: 6px; }
-  .msg .said.md pre { overflow-x: auto; padding: 10px 12px; border-radius: var(--md-shape-md); background: var(--md-surface-container-highest); }
-  .msg .said.md pre code { background: none; padding: 0; white-space: pre; }
-  .msg .said.md a { color: var(--md-primary); overflow-wrap: anywhere; }
   .msg.you .said { background: var(--md-primary-container); color: var(--md-on-primary-container); border-bottom-right-radius: var(--md-shape-xs); }
   .msg.agent .said { background: var(--md-surface-container-high); color: var(--md-on-surface); border-bottom-left-radius: var(--md-shape-xs); }
   .msg.failed .said { background: var(--md-error-container); color: var(--md-on-error-container); }

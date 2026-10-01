@@ -21,9 +21,12 @@ worker's lifetime.
 - Standard output and standard error are counted but not forwarded. Exceeding the configured limit
   terminates the worker without copying plugin output into receipts or diagnostics.
 
-The permission system and V8 heap limit apply on every supported Node.js platform. On Linux, the
-parent also monitors resident memory through `/proc` and kills a worker above `memoryMb`; this
-catches external allocations such as large buffers. Plugin isolation is a defense boundary for
+The permission system and V8 heap limit apply on every supported Node.js platform. RSS monitoring is required by default. The parent verifies `/proc` access before importing the
+plugin, resolves nested PID namespaces, and kills the worker above `memoryMb`; this catches
+external allocations such as large buffers. Missing, unreadable, or malformed RSS measurements
+fail closed with `plugin_memory_monitor_unavailable`. On systems without this facility, an
+operator may explicitly configure `memoryMonitoring: heap-only`; that mode limits V8 old space
+only and does not bound total resident or external memory. The loaded event reports the mode. Plugin isolation is a defense boundary for
 JavaScript extensions, not a substitute for a container when executing native or untrusted binary
 code. Native and non-ESM plugin formats are therefore not accepted.
 
@@ -39,6 +42,7 @@ pluginIsolation:
   maxMessageBytes: 1048576
   maxPendingRequests: 32
   memoryPollIntervalMs: 100
+  memoryMonitoring: required
 
 plugins:
   - path: ./.etnpilot/plugins/team-guidance.mjs
@@ -84,8 +88,9 @@ registration of agents, model providers, instructions, prompts, skills, or event
 | `maxMessageBytes` | Maximum encoded RPC request or response | 1048576 |
 | `maxPendingRequests` | Concurrent RPC or callback ceiling | 32 |
 | `memoryPollIntervalMs` | Linux RSS sampling interval | 100 |
+| `memoryMonitoring` | `required` RSS or explicitly weaker `heap-only` | required |
 
-All values are positive bounded integers. Invalid configuration fails before plugin setup.
+Numeric values are positive bounded integers. Plugin definitions and isolation settings are locked against local overrides. Invalid configuration fails before plugin setup.
 
 ## Lifecycle and failures
 
@@ -105,5 +110,5 @@ the process and removes all host registrations.
 
 Stable error codes include `plugin_timeout`, `plugin_aborted`, `plugin_memory_limit`,
 `plugin_output_limit`, `plugin_rpc_limit`, `plugin_protocol_error`, `plugin_permission_denied`, and
-`plugin_process_exit`. Secret-provider registrations are removed and active host-mediated network
+`plugin_process_exit`, and `plugin_memory_monitor_unavailable`. Secret-provider registrations are removed and active host-mediated network
 requests are aborted when their worker exits.

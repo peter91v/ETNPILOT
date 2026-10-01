@@ -1,3 +1,5 @@
+import { accountRequest } from "./usage-meter.js";
+import { providerToolNames } from "./tool-names.js";
 import { ProviderError } from "./router.js";
 import { retryAfterMs, withRetry } from "./retry.js";
 import { createWorkspaceTools, describeCall, lazySkills, skillsOf } from "./workspace-tools.js";
@@ -84,19 +86,23 @@ export function createOpenAICompatibleProvider({
         ...(context.history ?? []),
         { role: "user", content: String(context.input) },
       ];
+      const wireTools = providerToolNames(workspaceTools?.definitions);
       const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, requests: 0 };
       const toolCalls = [];
       const retried = [];
       const compactions = [];
       let payload;
       let responseModel;
+      let knownRequests = 0;
 
+      try {
       for (let iteration = 0; iteration <= maxToolIterations; iteration += 1) {
-        const attempt = await withRetry((number) => request({
+        const attempt = await withRetry((number) => accountRequest(context, usage,
+          responseModel ?? context.agent.model ?? model, addUsage, (requestContext) => request({
           endpoint,
           apiKey,
           fetchImpl,
-          context,
+          context: requestContext,
           name,
           // The configured fields go in first: what this adapter needs to
           // work — the model, the conversation, the tool declarations — is
@@ -110,15 +116,18 @@ export function createOpenAICompatibleProvider({
             messages,
             // Usage arrives in a last chunk only when asked for.
             ...(stream ? { stream: true, stream_options: { include_usage: true } } : {}),
-            ...(workspaceTools?.definitions.length > 0 ? { tools: toolSchema(workspaceTools.definitions), tool_choice: "auto" } : {}),
+            ...(workspaceTools?.definitions.length > 0 ? { tools: toolSchema(wireTools.definitions), tool_choice: "auto" } : {}),
           },
           reasoningEffortConfigured: extraBody.reasoning_effort !== undefined || Boolean(context.agent.effort),
           stream,
-        }), { ...retry, signal: context.signal });
+        })), { ...retry, signal: context.signal });
         payload = attempt.value;
         retried.push(...attempt.tried);
         addUsage(usage, payload.usage);
         responseModel = payload.model ?? responseModel;
+        if (payload.usage) knownRequests += 1;
+        usage.usageStatus = knownRequests === usage.requests ? "measured" : knownRequests > 0 ? "partial" : "unknown";
+        context.recordProviderProgress?.(usage, responseModel ?? context.agent.model ?? model);
         const message = payload.choices?.[0]?.message ?? {};
         const requested = workspaceTools ? message.tool_calls ?? [] : [];
         if (requested.length === 0) {
@@ -126,7 +135,7 @@ export function createOpenAICompatibleProvider({
             text: message.content ?? "",
             raw: payload,
             model: responseModel ?? context.agent.model ?? model,
-            usage,
+            usage: usage.usageStatus === "measured" ? (({ usageStatus: _status, ...measured }) => measured)(usage) : usage,
             ...(context.agent.effort ? { effort: context.agent.effort } : {}),
             ...(retried.length > 0 ? { retries: retried } : {}),
             ...(compactions.length > 0 ? { compactions } : {}),
@@ -143,7 +152,7 @@ export function createOpenAICompatibleProvider({
         messages.push(message);
         for (const call of requested) {
           context.signal?.throwIfAborted();
-          const toolName = call.function?.name ?? call.name;
+          const toolName = wireTools.internal(call.function?.name ?? call.name);
           const result = await workspaceTools.invoke(toolName, call.function?.arguments ?? call.arguments, context);
           toolCalls.push({ tool: toolName, label: describeCall(toolName, call.function?.arguments ?? call.arguments), ok: result.ok === true, ...(result.refused ? { refused: result.refused } : {}), ...(result.error ? { error: result.error } : {}), ...(result.afterWrite ? { afterWrite: result.afterWrite } : {}) });
           messages.push({
@@ -166,6 +175,7 @@ export function createOpenAICompatibleProvider({
         }
       }
       throw new ProviderError("Provider tool loop did not terminate.", { code: "tool_loop_error" });
+      } catch (cause) { const error = cause instanceof Error && Object.isExtensible(cause) ? cause : new ProviderError(String(cause), { cause }); error.usage = { ...usage }; error.model = responseModel ?? context.agent.model ?? model; error.toolCalls = toolCalls; throw error; }
     },
   };
 }
@@ -242,7 +252,7 @@ async function request({ endpoint, apiKey, fetchImpl, context, body, name, reaso
   }
   if (!stream) return response.json();
   try {
-    return await collectChatStream(response, { onDelta: context.emitDelta });
+    return await collectChatStream(response, { onDelta: context.emitDelta, onUsage: context.onStreamUsage, signal: context.signal });
   } catch (error) {
     // Same rule as a failed status: what already ran tools is not replayed blindly.
     if (error instanceof ProviderError && bodyHasToolResults(body)) error.safeToRetry = false;
@@ -392,7 +402,7 @@ function toolSchema(definitions) {
 function addUsage(total, usage = {}) {
   // One per answer received: a turn that reads files and then answers is
   // several requests to the provider, and the provider bills and counts them so.
-  total.requests = (total.requests ?? 0) + 1;
+
   const normalized = normalizeUsage(usage);
   total.inputTokens += normalized.inputTokens;
   total.outputTokens += normalized.outputTokens;

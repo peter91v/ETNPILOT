@@ -31,8 +31,8 @@ test("every 'etnpilot ...' command the docs name is one the CLI has", async () =
 test("the first-real-run walkthrough says what is proven and what is not", async () => {
   const text = await readFile(join(root, "docs/first-real-run.md"), "utf8");
   // The point of the document is the distinction, so it is stated outright.
-  assert.match(text, /It is not a claim that this has been\s*done/);
-  assert.match(text, /\| A run completes end to end against a real provider \| \*\*nothing\*\* \| — \|/);
+  assert.match(text, /OpenAI chat and complete workflow were exercised on 2026-09-30/);
+  assert.match(text, /\| A run completes end to end against a real provider \| .*succeeded.*OpenAI, 2026-09-30/);
   assert.match(text, /\| A real GitLab instance accepts what a run publishes \| \*\*nothing\*\* \| — \|/);
   // And every failure it records names a date and a platform.
   const entries = [...text.matchAll(/^### (\d{4}-\d{2}-\d{2}) — (.+)$/gm)];

@@ -289,6 +289,7 @@ pluginIsolation:
   maxMessageBytes: 1048576
   maxPendingRequests: 32
   memoryPollIntervalMs: 100
+  memoryMonitoring: required
 plugins: []
 # Tools from Model Context Protocol servers, offered to every provider. Each
 # one is asked for under the 'mcp' operation kind, which 'policy.operations'
@@ -365,7 +366,7 @@ subagents: []
 # opened on request instead of all being sent every time. 'fetch_url' is left out below on purpose: it reads
 # text nobody here wrote, so add it to the agent that needs it rather than
 # to all of them, and see 'policy.operations' for which hosts it may reach.
-tools: [read_file, list_files, search_files, write_file, edit_file, run_command]
+tools: [read_file, list_files, search_files, codegraph.codegraph_explore, write_file, edit_file, run_command]
 # How hard the model thinks: low, medium or high. Leave it out for the
 # provider's own default. A planner or reviewer usually earns 'high'; a builder
 # that follows a plan often does not. Anthropic models older than the 4.6
