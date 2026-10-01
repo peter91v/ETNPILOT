@@ -17,6 +17,7 @@ pre-1.0, so breaking changes may appear in any release.
 - Architecture decision records (docs/adr/), a release process (docs/releasing.md).
 - `etnpilot content diff`: what changed, was added or removed since the reviewed lock, before you lock it.
 - The Overview of a project with no runs shows a "Getting started" list (provider key, commit, first run), read live and gone after the first run.
+- The TUI's run detail is a list of section functions (complexity 71 → 13); the ESLint complexity limit of 60 has no exceptions left.
 - The review server's request handler is a route table (32 exact routes looked up by method and path; complexity 160 → 49).
 - The run list can be filtered by text and status; a running run's card shows tokens and cost so far.
 - An axe-core accessibility test visits every view in both colour schemes (dev dependency).

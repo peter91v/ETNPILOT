@@ -751,6 +751,27 @@ function renderRunDetail(state, { style, width, height, cursor, receipt, verific
     lines.push("");
   };
   const outcome = receipt.outcome ?? { reasons: [], steps: [] };
+  // What every section reads. Each is a function of its own so that the
+  // detail is a list of sections, not one long function.
+  const c = { lines, style, width, height, run, receipt, verification, agentMode, agentCursor, outcome, terminal };
+  runDetailReasons(c);
+  runDetailAgents(c);
+  runDetailSteps(c);
+  runDetailUsage(c);
+  runDetailTools(c);
+  field("Branch", terminal.workspace?.branch);
+  // Where the files are: a worktree run leaves them there, not in the checkout.
+  field("Workspace", terminal.workspace?.path);
+  field("Sandbox", terminal.workspace?.sandbox?.image);
+  runDetailRehearsal(c);
+  runDetailSettings(c);
+  runDetailApprovals(c);
+  runDetailReceipt(c);
+  runDetailError(c);
+  return lines.slice(0, height);
+}
+
+function runDetailReasons({ lines, style, width, run, outcome }) {
   if (outcome.reasons.length > 0) {
     lines.push(style.dim(run.status === "succeeded" ? "Worth knowing" : "Why it ended"));
     for (const reason of outcome.reasons) {
@@ -762,6 +783,9 @@ function renderRunDetail(state, { style, width, height, cursor, receipt, verific
     }
     lines.push("");
   }
+}
+
+function runDetailAgents({ lines, style, width, run, agentMode, agentCursor, outcome }) {
   // The agents that ran, as the tree they ran in. In agent mode this list is
   // what 'enter' opens; ETNPilot never invents a hierarchy that did not run —
   // today every provider is flat, so this reads as one row per step, and
@@ -779,6 +803,9 @@ function renderRunDetail(state, { style, width, height, cursor, receipt, verific
     }
     lines.push("");
   }
+}
+
+function runDetailSteps({ lines, style, outcome }) {
   if (outcome.steps.length > 1) {
     lines.push(style.dim("Steps"));
     for (const step of outcome.steps) {
@@ -786,6 +813,9 @@ function renderRunDetail(state, { style, width, height, cursor, receipt, verific
     }
     lines.push("");
   }
+}
+
+function runDetailUsage({ lines, style, receipt, outcome }) {
   // What the providers cost. A surface that never shows this leaves a budget
   // nobody can see.
   const usage = outcome.usage;
@@ -801,6 +831,9 @@ function renderRunDetail(state, { style, width, height, cursor, receipt, verific
     if (usage.pricing) lines.push(style.muted(`  ${usage.pricing.source} · ${usage.pricing.asOf ?? "configured"} · ${usage.pricing.status}${usage.pricing.stale ? " · stale" : ""}`));
     lines.push("");
   }
+}
+
+function runDetailTools({ lines, style, outcome }) {
   if (outcome.tools) {
     lines.push(style.dim("Tools it used"));
     for (const row of outcome.tools) {
@@ -810,10 +843,9 @@ function renderRunDetail(state, { style, width, height, cursor, receipt, verific
     }
     lines.push("");
   }
-  field("Branch", terminal.workspace?.branch);
-  // Where the files are: a worktree run leaves them there, not in the checkout.
-  field("Workspace", terminal.workspace?.path);
-  field("Sandbox", terminal.workspace?.sandbox?.image);
+}
+
+function runDetailRehearsal({ lines, style, width, outcome }) {
   const rehearsal = outcome.rehearsal;
   if (rehearsal) {
     lines.push(style.dim("Merge rehearsal"));
@@ -824,6 +856,9 @@ function renderRunDetail(state, { style, width, height, cursor, receipt, verific
     if (rehearsal.error) for (const piece of wrap(rehearsal.error, width - 4)) lines.push(`  ${style.muted(piece)}`);
     lines.push("");
   }
+}
+
+function runDetailSettings({ lines, style, run, terminal }) {
   // Which settings were in effect is evidence, so it belongs next to the run
   // rather than only in the file.
   if (terminal.settings) {
@@ -835,6 +870,9 @@ function renderRunDetail(state, { style, width, height, cursor, receipt, verific
       : `  ${style.warn(`${overrides.length} changed locally`)} ${style.muted(overrides.join(", "))}`);
     lines.push("");
   }
+}
+
+function runDetailApprovals({ lines, style, height, receipt }) {
   const approvals = receipt.entries.flatMap((entry) => entry.approvals ?? []);
   if (approvals.length > 0) {
     lines.push(style.dim(`Approvals (${approvals.length})`));
@@ -848,6 +886,9 @@ function renderRunDetail(state, { style, width, height, cursor, receipt, verific
     if (approvals.length > room) lines.push(style.dim(`  … ${approvals.length - room} more, in the receipt`));
     lines.push("");
   }
+}
+
+function runDetailReceipt({ lines, style, width, run, verification }) {
   lines.push(style.dim("Receipt"));
   lines.push(`  ${style.muted(run.receiptFile)} · ${run.entries} entries · ${run.signed ? style.ok("signed") : style.warn("unsigned")}`);
   // Whether it verifies is a different claim from what it says, so it is only
@@ -864,11 +905,13 @@ function renderRunDetail(state, { style, width, height, cursor, receipt, verific
       lines.push(`  ${verification.valid ? style.muted(piece) : style.bad(piece)}`);
     }
   }
+}
+
+function runDetailError({ lines, style, width, terminal }) {
   if (terminal.error) {
     lines.push("", style.dim("Error"));
     for (const piece of wrap(terminal.error, width - 2)) lines.push(`  ${style.bad(piece)}`);
   }
-  return lines.slice(0, height);
 }
 
 function renderHelp({ style, width, height, offset = 0 }) {

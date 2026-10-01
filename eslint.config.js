@@ -26,12 +26,6 @@ export default [
     },
   },
   {
-    // The one known outlier, held where it is so it cannot grow: the TUI's
-    // run detail. Splitting it is the open work.
-    files: ["src/tui/render.js"],
-    rules: { complexity: ["error", 71] },
-  },
-  {
     // The page's script runs in a browser as one file made of these, in order,
     // so what one defines the others use: undefined-name and unused checks
     // across files are not meaningful, the syntax and the rest are.
