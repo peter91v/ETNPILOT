@@ -26,13 +26,8 @@ export default [
     },
   },
   {
-    // The two known outliers, held at where they are so they cannot grow:
-    // the review server's request handler (one route table written as if/else)
-    // and the TUI's run detail. Splitting them is the open work.
-    files: ["src/ui/server.js"],
-    rules: { complexity: ["error", 160] },
-  },
-  {
+    // The one known outlier, held where it is so it cannot grow: the TUI's
+    // run detail. Splitting it is the open work.
     files: ["src/tui/render.js"],
     rules: { complexity: ["error", 71] },
   },

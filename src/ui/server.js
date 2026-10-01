@@ -56,6 +56,211 @@ export async function createReviewServer({
   const namedHosts = new Set([...allowedHosts, ...String(env.ETNPILOT_UI_HOSTS ?? "").split(",")]
     .map((name) => name.trim().toLowerCase()).filter(Boolean));
 
+  // Every route that is one method and one exact path. Looked up, not tried in
+  // turn, so adding a route does not make every other request slower to
+  // answer or the handler harder to read. Routes that match a family of paths
+  // stay in the handler below.
+  const routes = new Map();
+  const route = (method, path, handler) => routes.set(`${method} ${path}`, handler);
+  route("GET", "/api/state", async ({ request, response, url, state }) => {
+    const wanted = Number(url.searchParams.get("runs"));
+    return send(response, 200, await state.collect(Number.isFinite(wanted) && wanted > 0 ? { runLimit: wanted } : undefined));
+  });
+  route("POST", "/api/approvals/decide", async ({ request, response, url, state }) => {
+    const body = await readJsonBody(request);
+    return send(response, 200, decideApproval(state.inbox, body));
+  });
+  route("POST", "/api/queue/cancel", async ({ request, response, url, state }) => {
+    const body = await readJsonBody(request);
+    return send(response, 200, state.queue.requestCancel(String(body.id), {
+      actor: actorName(body, env),
+      reason: body.reason ? String(body.reason) : undefined,
+    }));
+  });
+  route("POST", "/api/queue/resume", async ({ request, response, url, state }) => {
+    const body = await readJsonBody(request);
+    if (!body.id) throw badRequest("A workflow job id is required.");
+    return send(response, 200, state.resumeJob(String(body.id), { force: body.force === true }));
+  });
+  // Read on demand, never in the poll: one runs 'git status' per worktree,
+  // the other crosses the network to GitLab.
+  route("GET", "/api/worktrees", async ({ request, response, url, state }) => {
+    return send(response, 200, await state.worktrees());
+  });
+  route("POST", "/api/worktrees/remove", async ({ request, response, url, state }) => {
+    const body = await readJsonBody(request);
+    if (typeof body.name !== "string" || body.name.trim() === "") throw badRequest("A worktree name is required.");
+    const removal = await state.removeWorktree(body.name.trim()).catch((error) => {
+      throw error instanceof TypeError ? badRequest(error.message) : error;
+    });
+    return send(response, 200, removal);
+  });
+  route("GET", "/api/worktrees/changes", async ({ request, response, url, state }) => {
+    const name = url.searchParams.get("name");
+    if (!name) throw badRequest("A worktree name is required.");
+    const changes = await state.worktreeChanges(name).catch((error) => {
+      throw error instanceof TypeError ? badRequest(error.message) : error;
+    });
+    return send(response, 200, changes);
+  });
+  route("GET", "/api/worktrees/diff", async ({ request, response, url, state }) => {
+    const name = url.searchParams.get("name");
+    const file = url.searchParams.get("file");
+    if (!name || !file) throw badRequest("A worktree name and a file are required.");
+    const diff = await state.worktreeDiff(name, file).catch((error) => {
+      throw error instanceof TypeError ? badRequest(error.message) : error;
+    });
+    return send(response, 200, diff);
+  });
+  // Conversations. A turn is started the way a run is, and answered the
+  // same way (202): its approvals appear in the inbox the page shows.
+  route("GET", "/api/chat/sessions", async ({ request, response, url, state }) => {
+    return send(response, 200, { sessions: await state.chat.list() });
+  });
+  route("GET", "/api/chat/session", async ({ request, response, url, state }) => {
+    const id = url.searchParams.get("id") ?? "";
+    if (!/^[a-z0-9][a-z0-9-]{2,63}$/.test(id)) throw badRequest("That is not a conversation id.");
+    return send(response, 200, await state.chat.read(id));
+  });
+  route("GET", "/api/chat/files", async ({ request, response, url, state }) => {
+    return send(response, 200, { files: await state.chat.files(url.searchParams.get("q") ?? "") });
+  });
+  route("POST", "/api/chat/send", async ({ request, response, url, state }) => {
+    const body = await readJsonBody(request);
+    const text = typeof body.text === "string" ? body.text.trim() : "";
+    if (text === "") throw badRequest("A message is required.");
+    const pick = (value) => (typeof value === "string" && value.trim() !== "" ? value.trim() : undefined);
+    try {
+      const started = await state.chat.send({
+        sessionId: pick(body.sessionId),
+        text,
+        agent: pick(body.agent),
+        model: pick(body.model),
+        provider: pick(body.provider),
+        effort: pick(body.effort),
+      });
+      return send(response, 202, started);
+    } catch (error) {
+      // Anything the person can fix by choosing differently is a 400, not a fault.
+      throw badRequest(error.message);
+    }
+  });
+  route("POST", "/api/chat/compact", async ({ request, response, url, state }) => {
+    const body = await readJsonBody(request);
+    const id = String(body.sessionId ?? "");
+    if (!/^[a-z0-9][a-z0-9-]{2,63}$/.test(id)) throw badRequest("That is not a conversation id.");
+    const pick = (value) => (typeof value === "string" && value.trim() !== "" ? value.trim() : undefined);
+    const result = await state.chat.compact(id, { agent: pick(body.agent), model: pick(body.model), provider: pick(body.provider), effort: pick(body.effort) });
+    return send(response, result.ok ? 202 : 200, result);
+  });
+  route("POST", "/api/chat/undo", async ({ request, response, url, state }) => {
+    const body = await readJsonBody(request);
+    const id = String(body.sessionId ?? "");
+    if (!/^[a-z0-9][a-z0-9-]{2,63}$/.test(id)) throw badRequest("That is not a conversation id.");
+    return send(response, 200, await state.chat.undo(id));
+  });
+  route("POST", "/api/chat/stop", async ({ request, response, url, state }) => {
+    const body = await readJsonBody(request);
+    return send(response, 200, { stopped: state.chat.stop(String(body.sessionId ?? "")) });
+  });
+  route("GET", "/api/agents", async ({ request, response, url, state }) => {
+    return send(response, 200, await state.agents());
+  });
+  route("GET", "/api/usage", async ({ request, response, url, state }) => {
+    return send(response, 200, await state.usage());
+  });
+  route("GET", "/api/merges", async ({ request, response, url, state }) => {
+    const status = url.searchParams.get("status");
+    return send(response, 200, await state.mergeRequests(status ? { state: status } : undefined));
+  });
+  route("GET", "/api/settings", async ({ request, response, url, state }) => {
+    return send(response, 200, await state.settings());
+  });
+  route("POST", "/api/settings/set", async ({ request, response, url, state }) => {
+    const body = await readJsonBody(request);
+    if (typeof body.path !== "string" || body.path.trim() === "") throw badRequest("A setting path is required.");
+    // The value arrives as the YAML a person typed, exactly as in the CLI
+    // and the TUI, so '4', 'true' and '["read"]' mean what they look like.
+    let value;
+    try {
+      value = typeof body.value === "string" ? parseSettingValue(body.value) : body.value;
+    } catch (error) {
+      throw badRequest(`That is not valid YAML: ${error.message}`);
+    }
+    return send(response, 200, await state.setSetting(body.path.trim(), value, { scope: scopeName(body) }));
+  });
+  route("POST", "/api/settings/unset", async ({ request, response, url, state }) => {
+    const body = await readJsonBody(request);
+    if (typeof body.path !== "string" || body.path.trim() === "") throw badRequest("A setting path is required.");
+    return send(response, 200, await state.unsetSetting(body.path.trim(), { scope: scopeName(body) }));
+  });
+  // A run is not awaited: the answer says it started, and everything the
+  // run then needs appears in this same page's approvals.
+  route("GET", "/api/content", async ({ request, response, url, state }) => {
+    return send(response, 200, await state.content());
+  });
+  route("GET", "/api/content/file", async ({ request, response, url, state }) => {
+    const found = await state.contentFile(url.searchParams.get("path") ?? "");
+    if (!found) return send(response, 404, { error: "That is not a file of the project content." });
+    return send(response, 200, found);
+  });
+  // Locks what the person saw: the digest comes back with the request, and
+  // content that is not the same any more is refused rather than locked.
+  route("POST", "/api/content/lock", async ({ request, response, url, state }) => {
+    const body = await readJsonBody(request);
+    return send(response, 200, await state.lockContent(String(body.manifestDigest ?? "")));
+  });
+  route("GET", "/api/agents/detail", async ({ request, response, url, state }) => {
+    return send(response, 200, await state.agentDetails());
+  });
+  route("POST", "/api/agents", async ({ request, response, url, state }) => {
+    const body = await readJsonBody(request);
+    return send(response, 201, await state.createAgent(body));
+  });
+  route("GET", "/api/workflows", async ({ request, response, url, state }) => {
+    return send(response, 200, await state.workflows());
+  });
+  route("POST", "/api/workflows", async ({ request, response, url, state }) => {
+    const body = await readJsonBody(request);
+    return send(response, 201, await state.createWorkflow(body));
+  });
+  route("GET", "/api/runs/readiness", async ({ request, response, url, state }) => {
+    return send(response, 200, await state.readiness());
+  });
+  route("POST", "/api/runs/start", async ({ request, response, url, state }) => {
+    const body = await readJsonBody(request);
+    const task = typeof body.task === "string" ? body.task.trim() : "";
+    if (task === "") throw badRequest("A run needs a task to work on.");
+    const agent = typeof body.agent === "string" && body.agent.trim() !== "" ? body.agent.trim() : undefined;
+    const inPlace = body.worktree === false;
+    // Refuse here, with a way out, what would only fail after the 202.
+    if (!inPlace) {
+      const readiness = await state.readiness();
+      if (!readiness.ready) {
+        const refusal = new Error(readiness.message);
+        refusal.statusCode = 409;
+        refusal.details = { code: readiness.code, fixes: readiness.fixes, commands: readiness.commands };
+        throw refusal;
+      }
+    }
+    const workflow = typeof body.workflow === "string" && body.workflow.trim() !== "" ? body.workflow.trim() : undefined;
+    state.startRun({ input: task, agent, ...(workflow && !agent ? { workflow } : {}), ...(inPlace ? { worktree: false } : {}) });
+    return send(response, 202, { started: true, task, ...(agent ? { agent } : {}), ...(workflow && !agent ? { workflow } : {}), ...(inPlace ? { inPlace: true } : {}) });
+  });
+  // The checks this project can run on itself. Listing them is part of the
+  // state; running one is a POST, because it reads the working tree.
+  route("GET", "/api/checks", async ({ request, response, url, state }) => {
+    return send(response, 200, { checks: state.checks() });
+  });
+  route("POST", "/api/checks/run", async ({ request, response, url, state }) => {
+    const body = await readJsonBody(request);
+    if (typeof body.id !== "string" || body.id.trim() === "") throw badRequest("A check id is required.");
+    const result = await state.runCheck(body.id.trim()).catch((error) => {
+      throw badRequest(error.message);
+    });
+    return send(response, 200, result);
+  });
+
   const server = createServer(async (request, response) => {
     try {
       if (!hostAllowed(request.headers.host, namedHosts)) {
@@ -124,113 +329,8 @@ export async function createReviewServer({
         const handled = await accounts(request.method, url.pathname, body);
         if (handled) return send(response, handled.status, handled.body);
       }
-      if (request.method === "GET" && url.pathname === "/api/state") {
-        const wanted = Number(url.searchParams.get("runs"));
-        return send(response, 200, await state.collect(Number.isFinite(wanted) && wanted > 0 ? { runLimit: wanted } : undefined));
-      }
-      if (request.method === "POST" && url.pathname === "/api/approvals/decide") {
-        const body = await readJsonBody(request);
-        return send(response, 200, decideApproval(state.inbox, body));
-      }
-      if (request.method === "POST" && url.pathname === "/api/queue/cancel") {
-        const body = await readJsonBody(request);
-        return send(response, 200, state.queue.requestCancel(String(body.id), {
-          actor: actorName(body, env),
-          reason: body.reason ? String(body.reason) : undefined,
-        }));
-      }
-      if (request.method === "POST" && url.pathname === "/api/queue/resume") {
-        const body = await readJsonBody(request);
-        if (!body.id) throw badRequest("A workflow job id is required.");
-        return send(response, 200, state.resumeJob(String(body.id), { force: body.force === true }));
-      }
-      // Read on demand, never in the poll: one runs 'git status' per worktree,
-      // the other crosses the network to GitLab.
-      if (request.method === "GET" && url.pathname === "/api/worktrees") {
-        return send(response, 200, await state.worktrees());
-      }
-      if (request.method === "POST" && url.pathname === "/api/worktrees/remove") {
-        const body = await readJsonBody(request);
-        if (typeof body.name !== "string" || body.name.trim() === "") throw badRequest("A worktree name is required.");
-        const removal = await state.removeWorktree(body.name.trim()).catch((error) => {
-          throw error instanceof TypeError ? badRequest(error.message) : error;
-        });
-        return send(response, 200, removal);
-      }
-      if (request.method === "GET" && url.pathname === "/api/worktrees/changes") {
-        const name = url.searchParams.get("name");
-        if (!name) throw badRequest("A worktree name is required.");
-        const changes = await state.worktreeChanges(name).catch((error) => {
-          throw error instanceof TypeError ? badRequest(error.message) : error;
-        });
-        return send(response, 200, changes);
-      }
-      if (request.method === "GET" && url.pathname === "/api/worktrees/diff") {
-        const name = url.searchParams.get("name");
-        const file = url.searchParams.get("file");
-        if (!name || !file) throw badRequest("A worktree name and a file are required.");
-        const diff = await state.worktreeDiff(name, file).catch((error) => {
-          throw error instanceof TypeError ? badRequest(error.message) : error;
-        });
-        return send(response, 200, diff);
-      }
-      // Conversations. A turn is started the way a run is, and answered the
-      // same way (202): its approvals appear in the inbox the page shows.
-      if (request.method === "GET" && url.pathname === "/api/chat/sessions") {
-        return send(response, 200, { sessions: await state.chat.list() });
-      }
-      if (request.method === "GET" && url.pathname === "/api/chat/session") {
-        const id = url.searchParams.get("id") ?? "";
-        if (!/^[a-z0-9][a-z0-9-]{2,63}$/.test(id)) throw badRequest("That is not a conversation id.");
-        return send(response, 200, await state.chat.read(id));
-      }
-      if (request.method === "GET" && url.pathname === "/api/chat/files") {
-        return send(response, 200, { files: await state.chat.files(url.searchParams.get("q") ?? "") });
-      }
-      if (request.method === "POST" && url.pathname === "/api/chat/send") {
-        const body = await readJsonBody(request);
-        const text = typeof body.text === "string" ? body.text.trim() : "";
-        if (text === "") throw badRequest("A message is required.");
-        const pick = (value) => (typeof value === "string" && value.trim() !== "" ? value.trim() : undefined);
-        try {
-          const started = await state.chat.send({
-            sessionId: pick(body.sessionId),
-            text,
-            agent: pick(body.agent),
-            model: pick(body.model),
-            provider: pick(body.provider),
-            effort: pick(body.effort),
-          });
-          return send(response, 202, started);
-        } catch (error) {
-          // Anything the person can fix by choosing differently is a 400, not a fault.
-          throw badRequest(error.message);
-        }
-      }
-      if (request.method === "POST" && url.pathname === "/api/chat/compact") {
-        const body = await readJsonBody(request);
-        const id = String(body.sessionId ?? "");
-        if (!/^[a-z0-9][a-z0-9-]{2,63}$/.test(id)) throw badRequest("That is not a conversation id.");
-        const pick = (value) => (typeof value === "string" && value.trim() !== "" ? value.trim() : undefined);
-        const result = await state.chat.compact(id, { agent: pick(body.agent), model: pick(body.model), provider: pick(body.provider), effort: pick(body.effort) });
-        return send(response, result.ok ? 202 : 200, result);
-      }
-      if (request.method === "POST" && url.pathname === "/api/chat/undo") {
-        const body = await readJsonBody(request);
-        const id = String(body.sessionId ?? "");
-        if (!/^[a-z0-9][a-z0-9-]{2,63}$/.test(id)) throw badRequest("That is not a conversation id.");
-        return send(response, 200, await state.chat.undo(id));
-      }
-      if (request.method === "POST" && url.pathname === "/api/chat/stop") {
-        const body = await readJsonBody(request);
-        return send(response, 200, { stopped: state.chat.stop(String(body.sessionId ?? "")) });
-      }
-      if (request.method === "GET" && url.pathname === "/api/agents") {
-        return send(response, 200, await state.agents());
-      }
-      if (request.method === "GET" && url.pathname === "/api/usage") {
-        return send(response, 200, await state.usage());
-      }
+      const handler = routes.get(`${request.method} ${url.pathname}`);
+      if (handler) return await handler({ request, response, url, state }); // awaited: a refusal must land in the catch below
       // A provider's models, read live from its own API — never cached here,
       // so the list is what the account can reach right now, not a memory of
       // it. A provider whose key is missing or refused says so; that is not
@@ -243,54 +343,6 @@ export async function createReviewServer({
         });
         return send(response, 200, result);
       }
-      if (request.method === "GET" && url.pathname === "/api/merges") {
-        const status = url.searchParams.get("status");
-        return send(response, 200, await state.mergeRequests(status ? { state: status } : undefined));
-      }
-      if (request.method === "GET" && url.pathname === "/api/settings") {
-        return send(response, 200, await state.settings());
-      }
-      if (request.method === "POST" && url.pathname === "/api/settings/set") {
-        const body = await readJsonBody(request);
-        if (typeof body.path !== "string" || body.path.trim() === "") throw badRequest("A setting path is required.");
-        // The value arrives as the YAML a person typed, exactly as in the CLI
-        // and the TUI, so '4', 'true' and '["read"]' mean what they look like.
-        let value;
-        try {
-          value = typeof body.value === "string" ? parseSettingValue(body.value) : body.value;
-        } catch (error) {
-          throw badRequest(`That is not valid YAML: ${error.message}`);
-        }
-        return send(response, 200, await state.setSetting(body.path.trim(), value, { scope: scopeName(body) }));
-      }
-      if (request.method === "POST" && url.pathname === "/api/settings/unset") {
-        const body = await readJsonBody(request);
-        if (typeof body.path !== "string" || body.path.trim() === "") throw badRequest("A setting path is required.");
-        return send(response, 200, await state.unsetSetting(body.path.trim(), { scope: scopeName(body) }));
-      }
-      // A run is not awaited: the answer says it started, and everything the
-      // run then needs appears in this same page's approvals.
-      if (request.method === "GET" && url.pathname === "/api/content") {
-        return send(response, 200, await state.content());
-      }
-      if (request.method === "GET" && url.pathname === "/api/content/file") {
-        const found = await state.contentFile(url.searchParams.get("path") ?? "");
-        if (!found) return send(response, 404, { error: "That is not a file of the project content." });
-        return send(response, 200, found);
-      }
-      // Locks what the person saw: the digest comes back with the request, and
-      // content that is not the same any more is refused rather than locked.
-      if (request.method === "POST" && url.pathname === "/api/content/lock") {
-        const body = await readJsonBody(request);
-        return send(response, 200, await state.lockContent(String(body.manifestDigest ?? "")));
-      }
-      if (request.method === "GET" && url.pathname === "/api/agents/detail") {
-        return send(response, 200, await state.agentDetails());
-      }
-      if (request.method === "POST" && url.pathname === "/api/agents") {
-        const body = await readJsonBody(request);
-        return send(response, 201, await state.createAgent(body));
-      }
       // Change or remove one agent or workflow, by name. The name is the file's:
       // anything that is not a plain project name is refused before a path exists.
       const named = /^\/api\/(agents|workflows)\/([a-z0-9][a-z0-9_-]{0,63})$/.exec(url.pathname);
@@ -301,36 +353,6 @@ export async function createReviewServer({
       if (named && request.method === "DELETE") {
         return send(response, 200, await state.removeContent(named[1] === "agents" ? "agent" : "workflow", named[2]));
       }
-      if (request.method === "GET" && url.pathname === "/api/workflows") {
-        return send(response, 200, await state.workflows());
-      }
-      if (request.method === "POST" && url.pathname === "/api/workflows") {
-        const body = await readJsonBody(request);
-        return send(response, 201, await state.createWorkflow(body));
-      }
-      if (request.method === "GET" && url.pathname === "/api/runs/readiness") {
-        return send(response, 200, await state.readiness());
-      }
-      if (request.method === "POST" && url.pathname === "/api/runs/start") {
-        const body = await readJsonBody(request);
-        const task = typeof body.task === "string" ? body.task.trim() : "";
-        if (task === "") throw badRequest("A run needs a task to work on.");
-        const agent = typeof body.agent === "string" && body.agent.trim() !== "" ? body.agent.trim() : undefined;
-        const inPlace = body.worktree === false;
-        // Refuse here, with a way out, what would only fail after the 202.
-        if (!inPlace) {
-          const readiness = await state.readiness();
-          if (!readiness.ready) {
-            const refusal = new Error(readiness.message);
-            refusal.statusCode = 409;
-            refusal.details = { code: readiness.code, fixes: readiness.fixes, commands: readiness.commands };
-            throw refusal;
-          }
-        }
-        const workflow = typeof body.workflow === "string" && body.workflow.trim() !== "" ? body.workflow.trim() : undefined;
-        state.startRun({ input: task, agent, ...(workflow && !agent ? { workflow } : {}), ...(inPlace ? { worktree: false } : {}) });
-        return send(response, 202, { started: true, task, ...(agent ? { agent } : {}), ...(workflow && !agent ? { workflow } : {}), ...(inPlace ? { inPlace: true } : {}) });
-      }
       // Whether a receipt is what it claims. It rereads and rehashes the whole
       // file, so it is a route of its own that the page's poll never calls —
       // a person asks for it, per run.
@@ -340,19 +362,6 @@ export async function createReviewServer({
           throw error instanceof TypeError ? badRequest(error.message) : error;
         });
         return send(response, 200, report);
-      }
-      // The checks this project can run on itself. Listing them is part of the
-      // state; running one is a POST, because it reads the working tree.
-      if (request.method === "GET" && url.pathname === "/api/checks") {
-        return send(response, 200, { checks: state.checks() });
-      }
-      if (request.method === "POST" && url.pathname === "/api/checks/run") {
-        const body = await readJsonBody(request);
-        if (typeof body.id !== "string" || body.id.trim() === "") throw badRequest("A check id is required.");
-        const result = await state.runCheck(body.id.trim()).catch((error) => {
-          throw badRequest(error.message);
-        });
-        return send(response, 200, result);
       }
       // The file name is never inspected here: readReceipt refuses anything
       // that is not a '*.jsonl' without a path separator, and one check in
