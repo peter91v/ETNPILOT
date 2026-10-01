@@ -155,3 +155,65 @@ test("an agent made in the page is written with the tools that were ticked, and 
   assert.equal(bad.statusCode, 400);
   assert.ok(bad.details.errors.length >= 5, bad.details.errors.join(" | "));
 });
+
+test("editing an agent changes what the form shows and keeps what it does not", async () => {
+  const { createAgent, updateAgent } = await import("../src/runtime/project-content.js");
+  const yaml = (await import("yaml")).default;
+  const { root, config } = await project();
+  await writeFile(join(root, ".etnpilot/agents/imported.yaml"), "# Imported from .claude/agents/x.md by 'etnpilot init' (claude).\nname: imported\ndescription: old\npromptRef: imported\nprovider: openai\nmodel: gpt-5\nrequires: [chat]\nskills: []\nsubagents: []\ntools: [read_file]\n");
+  await writeFile(join(root, ".etnpilot/prompts/imported.md"), "old prompt\n");
+
+  await updateAgent({ root, config, name: "imported", input: { description: "new", prompt: "new prompt", tools: ["read_file", "edit_file"], effort: "high", subagents: ["orchestrator"] } });
+  const text = await readFile(join(root, ".etnpilot/agents/imported.yaml"), "utf8");
+  assert.match(text, /^# Imported from/, "the comment on the first line stays");
+  const manifest = yaml.parse(text);
+  assert.equal(manifest.description, "new");
+  assert.deepEqual(manifest.tools, ["read_file", "edit_file", "spawn_subagent"]);
+  assert.equal(manifest.effort, "high");
+  assert.equal(manifest.provider, "openai", "what the form does not know is kept");
+  assert.equal(manifest.model, "gpt-5");
+  assert.match(await readFile(join(root, ".etnpilot/prompts/imported.md"), "utf8"), /new prompt/);
+
+  await assert.rejects(() => updateAgent({ root, config, name: "imported", input: { subagents: ["imported"] } }), /cannot hand work to itself/);
+  await assert.rejects(() => updateAgent({ root, config, name: "ghost", input: {} }), /no agent called/);
+  await assert.rejects(() => updateAgent({ root, config, name: "../etnpilot", input: {} }), /not a name/);
+  void createAgent;
+});
+
+test("an agent in use cannot be removed; once free it goes with its prompt", async () => {
+  const { removeContent, createWorkflow } = await import("../src/runtime/project-content.js");
+  const { root, config } = await project();
+  await writeFile(join(root, ".etnpilot/agents/helper.yaml"), "name: helper\npromptRef: helper\ntools: []\n");
+  await writeFile(join(root, ".etnpilot/prompts/helper.md"), "help\n");
+  await createWorkflow({ root, config, input: { name: "uses-helper", steps: [{ id: "a", type: "agent", agent: "helper" }] } });
+
+  await assert.rejects(() => removeContent({ root, config, kind: "agent", name: "helper" }), /still in use.*uses-helper/);
+  await removeContent({ root, config, kind: "workflow", name: "uses-helper" });
+  const removed = await removeContent({ root, config, kind: "agent", name: "helper" });
+  assert.deepEqual(removed.removed, [".etnpilot/agents/helper.yaml", ".etnpilot/prompts/helper.md"]);
+  await assert.rejects(() => readFile(join(root, ".etnpilot/prompts/helper.md")), /ENOENT/);
+
+  // The project's default agent is never removed from under it.
+  await assert.rejects(() => removeContent({ root, config: { ...config, defaultAgent: "orchestrator" }, kind: "agent", name: "orchestrator" }), /default agent/);
+  await assert.rejects(() => removeContent({ root, config, kind: "prompt", name: "orchestrator" }), /Only an agent or a workflow/);
+});
+
+test("the routes: edit and remove by name", async () => {
+  const { root } = await project();
+  await writeFile(join(root, ".etnpilot/agents/helper.yaml"), "name: helper\npromptRef: helper\ntools: []\n");
+  await writeFile(join(root, ".etnpilot/prompts/helper.md"), "help\n");
+  const review = await createReviewServer({ root });
+  const address = await review.listen({ port: 0 });
+  try {
+    const call = (path, options = {}) => fetch(`http://127.0.0.1:${address.port}${path}`, { ...options, headers: { "x-etnpilot-token": review.token, "content-type": "application/json" } });
+    assert.equal((await call("/api/agents/helper", { method: "PUT", body: JSON.stringify({ description: "edited" }) })).status, 200);
+    assert.match(await readFile(join(root, ".etnpilot/agents/helper.yaml"), "utf8"), /description: edited/);
+    assert.equal((await call("/api/agents/Helper%20X", { method: "PUT", body: "{}" })).status, 404);
+    assert.equal((await call("/api/workflows/nope", { method: "DELETE" })).status, 404);
+    const gone = await call("/api/agents/helper", { method: "DELETE" });
+    assert.equal(gone.status, 200);
+    assert.equal((await call("/api/agents/helper", { method: "DELETE" })).status, 404, "already gone");
+  } finally {
+    await review.close?.();
+  }
+});

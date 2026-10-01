@@ -131,6 +131,17 @@ export const MARKUP = `</head>
   </div>
 </div>
 
+<div class="backdrop" id="confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-text">
+  <div class="modal">
+    <div class="modal-head"><h2 class="modal-title" id="confirm-title"></h2></div>
+    <div class="modal-body"><p id="confirm-text"></p></div>
+    <div class="modal-footer">
+      <button type="button" class="btn link state" id="confirm-no">Keep it</button>
+      <button type="button" class="btn danger state" id="confirm-yes"></button>
+    </div>
+  </div>
+</div>
+
 <div class="backdrop" id="agent-modal" role="dialog" aria-modal="true" aria-labelledby="agent-modal-title">
   <div class="modal wide">
     <div class="modal-head">

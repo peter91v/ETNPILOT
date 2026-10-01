@@ -44,6 +44,12 @@ unknown name is refused with the names that exist.
   hard it thinks. `tools` is always written out, so ticking nothing means "only answers", never "every tool";
   skills and handing work on add `load_skill` and `spawn_subagent` by themselves. Like a workflow it is written
   as unreviewed content, never over an existing one, and not locked.
+- **Edit** opens the same forms filled in. Editing an agent changes what the form shows and leaves the rest of the
+  manifest as it was (provider, model, the comment saying where it came from); an agent with no list of tools
+  starts with every tool the form offers ticked, so saving is not a quiet change. Both are unreviewed again
+  afterwards. **Remove** asks first, deletes the file (and an agent's prompt when nothing else reads it), and is
+  refused while something still points at it: a workflow with a step for the agent, an agent that hands work to
+  it, the project's default agent.
 - **Content** lists everything a run may use, grouped by type, with `locked`, `not reviewed yet` or `changed
   since the lock` on each and where it came from. Tapping one shows its text. **Lock what I reviewed** shows
   what will be locked and, on confirmation, locks exactly the content that was on screen: the request carries

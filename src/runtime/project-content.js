@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import YAML from "yaml";
 import { captureProjectContent, normalizeContentProvenance, writeContentLock } from "../content/provenance.js";
@@ -255,4 +255,115 @@ export async function createAgent({ root, config, input }) {
   await writeFile(join(etn, "prompts", `${name}.md`), `${prompt}\n`, { encoding: "utf8", flag: "wx" });
   await writeFile(join(etn, "agents", `${name}.yaml`), `# Created in the page. Read it, then lock it under Content.\n${manifest}\n`, { encoding: "utf8", flag: "wx" });
   return { name, path: `.etnpilot/agents/${name}.yaml`, promptPath: `.etnpilot/prompts/${name}.md`, unreviewed: true };
+}
+
+// ------------------------------------------------------------ change and remove
+
+function ownName(name) {
+  const slug = slugName(name);
+  if (!slug || slug !== name) throw Object.assign(new Error("That is not a name of this project."), { statusCode: 400 });
+  return slug;
+}
+
+// Rewrites an agent's manifest and prompt from the form, keeping what the form
+// does not know about (provider, model, requires, the comment on the first
+// line): the page edits what it shows and leaves the rest as it found it.
+export async function updateAgent({ root, config, name, input }) {
+  ownName(name);
+  const etn = join(resolve(root), ".etnpilot");
+  const path = join(etn, "agents", `${name}.yaml`);
+  const text = await readFile(path, "utf8").catch(() => undefined);
+  if (text === undefined) throw Object.assign(new Error(`There is no agent called '${name}'.`), { statusCode: 404 });
+  const known = WORKSPACE_TOOL_DEFINITIONS.map((definition) => definition.name);
+  const errors = [];
+  const prompt = typeof input?.prompt === "string" ? input.prompt.replace(/\r\n/g, "\n").trim() : undefined;
+  if (prompt !== undefined && !prompt) errors.push("An agent needs a prompt.");
+  if (prompt && prompt.length > 12_000) errors.push("The prompt is longer than 12,000 characters.");
+  const asked = Array.isArray(input?.tools) ? input.tools.map(String) : undefined;
+  if (asked) {
+    const unknown = asked.filter((tool) => !known.includes(tool));
+    if (unknown.length > 0) errors.push(`Unknown tools: ${unknown.join(", ")}.`);
+  }
+  const skillNames = (await readdir(join(etn, "skills"), { withFileTypes: true }).catch(() => [])).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+  const agentNames = (await readdir(join(etn, "agents")).catch(() => [])).filter((file) => /\.ya?ml$/.test(file)).map((file) => file.replace(/\.ya?ml$/, ""));
+  const skills = Array.isArray(input?.skills) ? input.skills.map(String) : undefined;
+  if (skills?.some((skill) => !skillNames.includes(skill))) errors.push(`Skills that do not exist: ${skills.filter((skill) => !skillNames.includes(skill)).join(", ")}.`);
+  const subagents = Array.isArray(input?.subagents) ? input.subagents.map(String) : undefined;
+  if (subagents?.some((agent) => !agentNames.includes(agent))) errors.push(`Agents that do not exist: ${subagents.filter((agent) => !agentNames.includes(agent)).join(", ")}.`);
+  if (subagents?.includes(name)) errors.push("An agent cannot hand work to itself.");
+  if (input?.effort !== undefined && input.effort !== "" && !EFFORTS.includes(input.effort)) errors.push("Effort is low, medium or high.");
+  if (errors.length > 0) throw Object.assign(new Error(errors[0]), { statusCode: 400, details: { errors } });
+
+  const document = YAML.parseDocument(text);
+  const current = document.toJS() ?? {};
+  const finalSkills = skills ?? current.skills ?? [];
+  const finalSubagents = subagents ?? current.subagents ?? [];
+  if (typeof input?.description === "string") {
+    if (input.description.trim()) document.set("description", input.description.trim().slice(0, 240)); else document.delete("description");
+  }
+  if (skills) document.set("skills", skills);
+  if (subagents) document.set("subagents", subagents);
+  if (input?.effort !== undefined) {
+    if (EFFORTS.includes(input.effort)) document.set("effort", input.effort); else document.delete("effort");
+  }
+  if (asked) {
+    const tools = [...new Set([...asked, ...(finalSkills.length > 0 ? ["load_skill"] : []), ...(finalSubagents.length > 0 ? ["spawn_subagent"] : [])])];
+    const node = document.createNode(tools);
+    node.flow = true;
+    document.set("tools", node);
+  }
+  await writeFile(path, String(document), "utf8");
+  if (prompt !== undefined) {
+    const ref = typeof current.promptRef === "string" ? slugName(current.promptRef) : name;
+    await mkdir(join(etn, "prompts"), { recursive: true });
+    await writeFile(join(etn, "prompts", `${ref}.md`), `${prompt}\n`, "utf8");
+  }
+  return { name, path: `.etnpilot/agents/${name}.yaml`, unreviewed: true };
+}
+
+export async function updateWorkflow({ root, config, name, input }) {
+  ownName(name);
+  const path = join(resolve(root), ".etnpilot", "workflows", `${name}.yaml`);
+  if (await readFile(path, "utf8").then(() => false, () => true)) throw Object.assign(new Error(`There is no workflow called '${name}'.`), { statusCode: 404 });
+  const { agents } = await readAgentDetails({ root, config });
+  const checked = validateWorkflowDefinition({ ...input, name }, { agents: agents.filter((agent) => !agent.error).map((agent) => agent.name), maxSteps: config?.workflow?.maxSteps ?? 50 });
+  if (!checked.ok) throw Object.assign(new Error(checked.errors[0]), { statusCode: 400, details: { errors: checked.errors } });
+  await writeFile(path, renderWorkflowFile(checked.workflow, { note: "Edited in the page. Read it, then lock it under Content." }), "utf8");
+  return { name, path: `.etnpilot/workflows/${name}.yaml`, unreviewed: true };
+}
+
+// Removes an agent (and its prompt, when nothing else uses it) or a workflow.
+// Refused while something still points at it: a workflow that names a deleted
+// agent, or an agent that hands work to one, would only fail at the next run.
+export async function removeContent({ root, config, kind, name }) {
+  ownName(name);
+  if (!["agent", "workflow"].includes(kind)) throw Object.assign(new Error("Only an agent or a workflow can be removed here."), { statusCode: 400 });
+  const etn = join(resolve(root), ".etnpilot");
+  if (kind === "workflow") {
+    const path = join(etn, "workflows", `${name}.yaml`);
+    if (await readFile(path, "utf8").then(() => false, () => true)) throw Object.assign(new Error(`There is no workflow called '${name}'.`), { statusCode: 404 });
+    await rm(path);
+    return { removed: [`.etnpilot/workflows/${name}.yaml`] };
+  }
+  const { agents } = await readAgentDetails({ root, config });
+  const agent = agents.find((candidate) => candidate.name === name);
+  if (!agent || agent.error) throw Object.assign(new Error(`There is no agent called '${name}'.`), { statusCode: agent?.error ? 409 : 404 });
+  const blockers = [];
+  for (const other of agents) if (other.name !== name && (other.subagents ?? []).includes(name)) blockers.push(`the agent '${other.name}' hands work to it`);
+  const { workflows, configured } = await readWorkflows({ root, config });
+  const uses = (steps) => (steps ?? []).some((step) => step.agent === name || (step.agents ?? []).includes(name));
+  for (const workflow of workflows) if (uses(workflow.steps)) blockers.push(`the workflow '${workflow.name}' has a step for it`);
+  if (uses(configured?.steps)) blockers.push("the workflow in etnpilot.yaml has a step for it");
+  if (config?.defaultAgent === name) blockers.push("it is the project's default agent");
+  if (blockers.length > 0) {
+    throw Object.assign(new Error(`'${name}' is still in use: ${blockers.join("; ")}. Change that first.`), { statusCode: 409, details: { blockers } });
+  }
+  const removed = [agent.path];
+  await rm(join(etn, "agents", agent.file));
+  // The prompt goes with it unless another agent reads the same file.
+  if (agent.promptPath && !agents.some((other) => other.name !== name && other.promptPath === agent.promptPath)) {
+    await rm(join(resolve(root), agent.promptPath), { force: true });
+    removed.push(agent.promptPath);
+  }
+  return { removed };
 }

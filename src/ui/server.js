@@ -268,6 +268,16 @@ export async function createReviewServer({
         const body = await readJsonBody(request);
         return send(response, 201, await state.createAgent(body));
       }
+      // Change or remove one agent or workflow, by name. The name is the file's:
+      // anything that is not a plain project name is refused before a path exists.
+      const named = /^\/api\/(agents|workflows)\/([a-z0-9][a-z0-9_-]{0,63})$/.exec(url.pathname);
+      if (named && request.method === "PUT") {
+        const body = await readJsonBody(request);
+        return send(response, 200, named[1] === "agents" ? await state.updateAgent(named[2], body) : await state.updateWorkflow(named[2], body));
+      }
+      if (named && request.method === "DELETE") {
+        return send(response, 200, await state.removeContent(named[1] === "agents" ? "agent" : "workflow", named[2]));
+      }
       if (request.method === "GET" && url.pathname === "/api/workflows") {
         return send(response, 200, await state.workflows());
       }

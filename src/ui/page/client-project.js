@@ -56,6 +56,42 @@ function present(nodes) {
   return nodes.filter(Boolean);
 }
 
+// A question that has to be answered before something is removed. Resolves to
+// true or false; closing it any other way is a no.
+function askConfirm({ title, text, yes }) {
+  $("confirm-title").textContent = title;
+  $("confirm-text").textContent = text;
+  $("confirm-yes").textContent = yes;
+  openModal("confirm-modal");
+  return new Promise((resolve) => {
+    const done = (answer) => {
+      $("confirm-yes").onclick = null;
+      $("confirm-no").onclick = null;
+      closeModal("confirm-modal");
+      resolve(answer);
+    };
+    $("confirm-yes").onclick = () => done(true);
+    $("confirm-no").onclick = () => done(false);
+  });
+}
+
+async function removeNamed(kind, name, path) {
+  const yes = await askConfirm({
+    title: "Remove " + kind + " " + name + "?",
+    text: "This deletes " + path + " from the project directory. If it was committed, git can bring it back; if not, it is gone. Content that other things still use is refused.",
+    yes: "Remove",
+  });
+  if (!yes) return;
+  try {
+    await api("/api/" + (kind === "agent" ? "agents" : "workflows") + "/" + encodeURIComponent(name), { method: "DELETE" });
+    toast("Removed " + name + ".");
+    if (openAgentName === name) openAgentName = undefined;
+    await loadProjectViews();
+  } catch (error) {
+    toast(error.message, "bad");
+  }
+}
+
 // ------------------------------------------------------------------ Agents
 
 function agentAbilities(agent) {
@@ -128,6 +164,8 @@ function agentCard(agent) {
       : el("pre", { class: "scroll-pre", attrs: { tabindex: "0" }, text: agent.prompt + (agent.promptCut ? String.fromCharCode(10) + "[cut]" : "") }),
     el("p", { class: "muted mono", text: agent.path + (agent.promptPath ? "  ·  " + agent.promptPath : "") }),
     el("div", { class: "card-actions" }, [
+      button("Remove", { class: "btn danger", onClick: () => removeNamed("agent", agent.name, agent.path) }),
+      button("Edit", { class: "btn", onClick: () => openAgentBuilder(undefined, agent) }),
       button("Read the manifest", { class: "btn", onClick: () => openContentFile(agent.path) }),
       button("Start a run with it", { class: "btn tonal", onClick: () => startRunWith({ agent: agent.name }) }),
     ]),
@@ -149,8 +187,27 @@ const AGENT_PRESETS = {
 };
 let agentDraft;
 
-function openAgentBuilder(preset) {
+function openAgentBuilder(preset, existing) {
   agentDraft = { name: "", description: "", prompt: "", tools: [...(AGENT_PRESETS[preset ?? "reader"].tools)], skills: [], subagents: [], effort: "", errors: [], saving: false };
+  if (existing) {
+    // Editing: the form starts from what the agent is. One with no list of tools
+    // has every tool, so the form starts with every tool it offers ticked,
+    // rather than with none, which would be a quiet change on save.
+    const offered = AGENT_TOOL_GROUPS.flatMap(([, list]) => list.map(([tool]) => tool));
+    agentDraft = {
+      ...agentDraft,
+      editing: existing.name,
+      name: existing.name,
+      description: existing.description ?? "",
+      prompt: existing.prompt ?? "",
+      tools: existing.tools === null ? offered : existing.tools.filter((tool) => offered.includes(tool)),
+      skills: [...existing.skills],
+      subagents: [...existing.subagents],
+      effort: existing.effort ?? "",
+      cut: Boolean(existing.promptCut),
+    };
+  }
+  $("agent-modal-title").textContent = existing ? "Edit " + existing.name : "New agent";
   drawAgentBuilder();
   openModal("agent-modal");
 }
@@ -167,13 +224,14 @@ function drawAgentBuilder() {
     if (!on && at >= 0) list.splice(at, 1);
   };
   host.append(
-    field("agent-name", "Name", draft.name, (value) => { draft.name = value; }, "e.g. test-writer"),
+    ...(draft.editing ? [el("p", { class: "muted", text: "Changing an agent makes it unreviewed again: lock it under Content afterwards. What this form does not show (provider, model) stays as it is." })] : []),
+    ...(draft.editing ? [] : [field("agent-name", "Name", draft.name, (value) => { draft.name = value; }, "e.g. test-writer")]),
     field("agent-description", "What it is for (one line)", draft.description, (value) => { draft.description = value; }, ""),
   );
-  const prompt = el("textarea", { attrs: { id: "agent-prompt", rows: "6", placeholder: "Its job, its limits, and how it reports back." } });
+  const prompt = el("textarea", { attrs: { id: "agent-prompt", rows: "6", placeholder: "Its job, its limits, and how it reports back.", ...(draft.cut ? { disabled: "disabled" } : {}) } });
   prompt.value = draft.prompt;
   prompt.addEventListener("input", () => { draft.prompt = prompt.value; });
-  host.append(el("div", { class: "field" }, [el("label", { text: "What it is told", attrs: { for: "agent-prompt" } }), prompt]));
+  host.append(el("div", { class: "field" }, [el("label", { text: draft.cut ? "What it is told (too long to edit here)" : "What it is told", attrs: { for: "agent-prompt" } }), prompt]));
 
   host.append(el("p", { class: "muted", text: "What it may do. Nothing ticked means it only answers." }));
   host.append(el("div", { class: "chips" }, Object.entries(AGENT_PRESETS).map(([key, entry]) => button(entry.label, { class: "btn small", onClick: () => { draft.tools = [...entry.tools]; drawAgentBuilder(); } }))));
@@ -201,8 +259,11 @@ async function saveAgent() {
   agentDraft.errors = [];
   drawAgentBuilder();
   try {
-    const { errors: _errors, saving: _saving, ...body } = agentDraft;
-    const made = await api("/api/agents", { method: "POST", body: JSON.stringify(body) });
+    const { errors: _errors, saving: _saving, editing, cut, ...body } = agentDraft;
+    if (cut) delete body.prompt;
+    const made = editing
+      ? await api("/api/agents/" + encodeURIComponent(editing), { method: "PUT", body: JSON.stringify(body) })
+      : await api("/api/agents", { method: "POST", body: JSON.stringify(body) });
     closeModal("agent-modal");
     toast("Saved " + made.path + ". It is not reviewed yet: read it under Content, then lock it.");
     openAgentName = made.name;
@@ -248,6 +309,8 @@ function workflowCard(workflow) {
   ]);
   for (const message of workflow.errors ?? []) card.append(el("p", { class: "notice bad", text: message }));
   card.append(el("div", { class: "card-actions" }, [
+    button("Remove", { class: "btn danger", onClick: () => removeNamed("workflow", workflow.name, workflow.path) }),
+    button("Edit", { class: "btn", onClick: () => openWorkflowBuilder(undefined, workflow) }),
     button("Read the file", { class: "btn", onClick: () => openContentFile(workflow.path) }),
     ...(failed ? [] : [button("Start a run with it", { class: "btn tonal", onClick: () => startRunWith({ workflow: workflow.name }) })]),
   ]));
@@ -300,12 +363,15 @@ const BUILDER_PRESETS = {
 
 let builder;
 
-function openWorkflowBuilder(preset) {
+function openWorkflowBuilder(preset, existing) {
   const names = (workflowData?.agents ?? []);
-  const base = JSON.parse(JSON.stringify(BUILDER_PRESETS[preset ?? "empty"]));
+  const base = existing
+    ? { name: existing.name, description: existing.description ?? "", steps: JSON.parse(JSON.stringify(existing.steps)) }
+    : JSON.parse(JSON.stringify(BUILDER_PRESETS[preset ?? "empty"]));
+  $("workflow-modal-title").textContent = existing ? "Edit " + existing.name : "New workflow";
   // Agent steps start on the first agent that exists, so a preset is runnable as soon as it is saved.
   for (const step of base.steps) if (step.type === "agent" && !step.agent) step.agent = names[0] ?? "";
-  builder = { workflow: base, errors: [], saving: false };
+  builder = { workflow: base, errors: [], saving: false, editing: existing?.name };
   drawBuilder();
   openModal("workflow-modal");
 }
@@ -317,12 +383,12 @@ function drawBuilder() {
   const agents = workflowData?.agents ?? [];
 
   host.append(
-    el("p", { class: "muted", text: "Start from a pattern, or build your own:" }),
-    el("div", { class: "chips" }, Object.keys(BUILDER_PRESETS).filter((key) => key !== "empty").map((key) => {
+    ...(builder.editing ? [el("p", { class: "muted", text: "Changing a workflow makes it unreviewed again: lock it under Content afterwards." })] : [el("p", { class: "muted", text: "Start from a pattern, or build your own:" })]),
+    el("div", { class: "chips" }, builder.editing ? [] : Object.keys(BUILDER_PRESETS).filter((key) => key !== "empty").map((key) => {
       const chip = button(key, { class: "btn small", onClick: () => openWorkflowBuilder(key) });
       return chip;
     })),
-    field("workflow-name", "Name", w.name, (value) => { w.name = value; }, "e.g. plan-build-check"),
+    ...(builder.editing ? [] : [field("workflow-name", "Name", w.name, (value) => { w.name = value; }, "e.g. plan-build-check")]),
     field("workflow-description", "What it is for (optional)", w.description ?? "", (value) => { w.description = value; }, ""),
   );
 
@@ -403,7 +469,9 @@ async function saveWorkflow() {
   builder.errors = [];
   drawBuilder();
   try {
-    const made = await api("/api/workflows", { method: "POST", body: JSON.stringify(builder.workflow) });
+    const made = builder.editing
+      ? await api("/api/workflows/" + encodeURIComponent(builder.editing), { method: "PUT", body: JSON.stringify(builder.workflow) })
+      : await api("/api/workflows", { method: "POST", body: JSON.stringify(builder.workflow) });
     closeModal("workflow-modal");
     toast("Saved " + made.path + ". It is not reviewed yet: read it under Content, then lock it.");
     await loadProjectViews();

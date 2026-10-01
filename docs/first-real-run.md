@@ -258,3 +258,17 @@ It never merges and observes pipelines for at most 60 seconds. Exit 3 means no s
 and run CI before treating that part as proven. This check exercises the forge
 protocol and cleanup; it does not replace the provider-to-publication walkthrough.
 No real GitLab smoke has been recorded in this change.
+
+
+## 2026-10-01 — a model that wants /v1/responses
+
+`gpt-5.6-sol` answered the first tool request with 400: "Function tools with reasoning_effort are not
+supported ... in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to
+'none'." The advice this adapter gave was the second half, which switches the model's reasoning off.
+
+The adapter now speaks `/v1/responses` as well (`providers.<name>.api`: `auto`, `chat` or `responses`). With
+`auto`, the default, it starts on chat completions and, when the server's refusal names `/v1/responses`
+before any tool has run, repeats the same request there and stays there. The Responses loop is stateless
+(`store: false`): the conversation travels with each request, the model's own output items, reasoning
+included as encrypted content, are handed back with the tool results, and the effort is sent as
+`reasoning.effort`. Usage is read from the same fields. Not yet: streaming answers on this route.
