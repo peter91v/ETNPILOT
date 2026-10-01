@@ -9,6 +9,7 @@ import { PolicyEngine } from "../policy/engine.js";
 import { openProjectState } from "./project-state.js";
 import { openCredentialStore } from "../auth/credential-store.js";
 import { trustState } from "../trust/trust.js";
+import { hostAllowed, serviceForSecret } from "../auth/services.js";
 
 // Whether a run could start on this machine, and against which provider.
 // It lives here rather than in the CLI because every surface asks the same
@@ -60,6 +61,7 @@ async function diagnoseWarnings(root) {
   if (config.sandbox?.enabled !== true) {
     warnings.push("Approved commands run directly on this machine; sandbox.enabled is false.");
   }
+  warnings.push(...keysSentElsewhere(config));
   const problem = await openCredentialStore({ env: process.env })?.permissionsProblem();
   if (problem) warnings.push(problem);
   const trust = await trustState(root, { env: process.env }).catch(() => undefined);
@@ -67,6 +69,25 @@ async function diagnoseWarnings(root) {
     warnings.push(trust.changed
       ? "This project's configuration changed since you trusted it. Run 'etnpilot trust' to look at it again."
       : "This project has not been trusted on this machine yet. Run 'etnpilot trust' to look at what it can do.");
+  }
+  return warnings;
+}
+
+// A key kept in the environment goes wherever the provider's baseUrl points;
+// unlike a stored login it is not bound to the vendor's own hosts. That is
+// the point of setting a baseUrl, so it is a heads-up, not an error.
+function keysSentElsewhere(config) {
+  const warnings = [];
+  for (const [name, provider] of Object.entries(config.providers ?? {})) {
+    if (!provider?.baseUrl || isLoopbackUrl(provider.baseUrl)) continue;
+    const secret = provider.apiKeySecret ?? (provider.type === "anthropic" ? "anthropic.apiKey" : provider.type === "openai-compatible" ? "provider.apiKey" : undefined);
+    if (!secret || !serviceForSecret(secret)) continue;
+    const reference = config.secrets?.values?.[secret];
+    if (reference && reference.provider !== "env") continue;
+    if (hostAllowed(secret, undefined, provider.baseUrl).ok) continue;
+    let host = provider.baseUrl;
+    try { host = new URL(provider.baseUrl).hostname; } catch { /* shown as written */ }
+    warnings.push(`Provider '${name}' sends the key '${secret}' to ${host}, which is not one of the vendor's own hosts. A key from the environment is not bound to a host, so make sure ${host} is meant to get it.`);
   }
   return warnings;
 }

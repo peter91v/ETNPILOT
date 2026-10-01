@@ -235,3 +235,10 @@ Läufe, Chat, Inhalt), `updateAgent` (56), `describeOutcome` (54), `invokeChat` 
    Ereignisse.
 
 Danach A2 (Charakterisierungstests, dann `executeProject`) und A3 (Receipts über 16 MiB).
+
+## Stand der zweiten Runde
+
+Erledigt: Typprüfung auf 102 Dateien (Rest in `docs/typecheck.md`), Doctor-Warnung für Umgebungs-Schlüssel an
+fremde Hosts, Zufallstests (`test/fuzz.test.js`), `CODEOWNERS`, PR-Vorlage mit „What leaves the machine?“.
+Weiter offen: Benachrichtigung bei offener Genehmigung, Lauf fortsetzen, Live-Kosten, Filter in Läufen,
+Provider-Presets, `etnpilot gc`, axe-Test, Release-Prozess, ADRs, deutsche Einstiegsdokumente.
