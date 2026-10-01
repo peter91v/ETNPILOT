@@ -101,7 +101,7 @@ function buildChat() {
   void loadChatSessions();
   // While a turn runs the answer may be forming: read it once a second rather
   // than on the page's slower beat.
-  setInterval(() => { if (view === "chat" && chatSession && (chatRunning || chatPending)) void syncChat(); }, 1000);
+  setInterval(() => { if (!document.hidden && view === "chat" && chatSession && (chatRunning || chatPending)) void syncChat(); }, 1000);
 }
 
 async function loadChatChoices() {

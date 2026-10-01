@@ -378,4 +378,7 @@ renderNav();
 show(location.hash.slice(1) || "overview");
 refresh();
 loadUsage();
-setInterval(refresh, 5000);
+// A page nobody is looking at does not ask: on a phone that is battery and data.
+// It catches up the moment it is shown again.
+setInterval(() => { if (!document.hidden) refresh(); }, 5000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh({ force: true }); });
