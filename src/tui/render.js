@@ -749,6 +749,9 @@ function renderRunDetail(state, { style, width, height, cursor, receipt, verific
     lines.push(style.dim("Usage"));
     lines.push(`  ${style.ink(`${(usage.inputTokens + usage.outputTokens).toLocaleString()} tokens`)} ${style.muted(`${usage.inputTokens.toLocaleString()} in · ${usage.outputTokens.toLocaleString()} out · ${usage.cacheReadTokens.toLocaleString()} cached`)}`);
     lines.push(`  ${style.ink(`${usage.invocations} provider calls`)} ${style.muted(cost)}`);
+    if (usage.unknownUsageInvocations > 0) lines.push(style.muted(`  ${usage.unknownUsageInvocations} calls have partial or unknown usage; cost is incomplete`));
+    if (usage.retrospective) lines.push(style.muted("  retrospective estimate; sealed receipt unchanged"));
+    if (usage.pricing) lines.push(style.muted(`  ${usage.pricing.source} · ${usage.pricing.asOf ?? "configured"} · ${usage.pricing.status}${usage.pricing.stale ? " · stale" : ""}`));
     lines.push("");
   }
   if (outcome.tools) {

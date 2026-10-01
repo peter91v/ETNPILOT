@@ -351,7 +351,7 @@ function chatKey(event) {
 // --- drawing
 
 function message(who, text, { tone = "", meta, extra = [] } = {}) {
-  const said = el("p", { class: "said", text });
+  const said = renderChatMarkdown(text);
   return el("div", { class: "msg " + tone }, [
     el("span", { class: "who", text: who }),
     said,

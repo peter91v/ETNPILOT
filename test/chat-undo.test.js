@@ -1,3 +1,4 @@
+import { digestBytes } from "../src/runtime/workspace-files.js";
 import assert from "node:assert/strict";
 import { access, mkdtemp, readFile, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -41,9 +42,9 @@ test("undo puts back what the turn added and changed", async () => {
   const root = await project();
   const first = await turn(root, undefined, "edit", {
     edit: [
-      () => writeFile(join(root, "notes.txt"), "ready\n"),
-      () => writeFile(join(root, "README.md"), "# changed\n"),
-      () => unlink(join(root, "src", "a.js")),
+      (context) => writeOwned(context, root, "notes.txt", "ready\n"),
+      (context) => writeOwned(context, root, "README.md", "# changed\n"),
+      (context) => writeOwned(context, root, "src/a.js", undefined),
     ],
   });
   assert.equal(await readFile(join(root, "notes.txt"), "utf8"), "ready\n");
@@ -66,7 +67,7 @@ test("undo puts back what the turn added and changed", async () => {
 test("a file the person changed since is left alone, and named", async () => {
   const root = await project();
   const first = await turn(root, undefined, "edit", {
-    edit: [() => writeFile(join(root, "notes.txt"), "agent\n"), () => writeFile(join(root, "README.md"), "# agent\n")],
+    edit: [(context) => writeOwned(context, root, "notes.txt", "agent\n"), (context) => writeOwned(context, root, "README.md", "# agent\n")],
   });
   await writeFile(join(root, "notes.txt"), "agent\nand my own line\n");
   const undone = await undoLastTurn({ root, sessionId: first.sessionId });
@@ -78,8 +79,8 @@ test("a file the person changed since is left alone, and named", async () => {
 
 test("turns are undone newest first, and a turn that changed nothing says so", async () => {
   const root = await project();
-  const one = await turn(root, undefined, "one", { one: [() => writeFile(join(root, "one.txt"), "1")] });
-  await turn(root, one.sessionId, "two", { two: [() => writeFile(join(root, "two.txt"), "2")] });
+  const one = await turn(root, undefined, "one", { one: [(context) => writeOwned(context, root, "one.txt", "1")] });
+  await turn(root, one.sessionId, "two", { two: [(context) => writeOwned(context, root, "two.txt", "2")] });
   await turn(root, one.sessionId, "three", {});
 
   const third = await undoLastTurn({ root, sessionId: one.sessionId });
@@ -98,7 +99,7 @@ test("the person's staging area is never touched, and ETNPilot's own state is no
   await git(["add", "staged.txt"], { cwd: root });
   const before = (await git(["diff", "--cached", "--name-only"], { cwd: root })).stdout;
 
-  const first = await turn(root, undefined, "edit", { edit: [() => writeFile(join(root, "notes.txt"), "x")] });
+  const first = await turn(root, undefined, "edit", { edit: [(context) => writeOwned(context, root, "notes.txt", "x")] });
   assert.equal((await git(["diff", "--cached", "--name-only"], { cwd: root })).stdout, before);
   await undoLastTurn({ root, sessionId: first.sessionId });
   assert.equal((await git(["diff", "--cached", "--name-only"], { cwd: root })).stdout, before);
@@ -126,3 +127,11 @@ test("a turn without a snapshot says why it cannot be undone", async () => {
   assert.equal(legacy.ok, false);
   assert.match(legacy.message, /cannot be undone: no snapshot was taken \(not a git repository\)/);
 });
+
+async function writeOwned(context, root, path, content) {
+  const file = join(root, path);
+  const before = await readFile(file).catch((error) => { if (error.code === "ENOENT") return undefined; throw error; });
+  if (content === undefined) await unlink(file); else await writeFile(file, content);
+  await context.recordFileEffect({ path, before: before === undefined ? null : digestBytes(before),
+    after: content === undefined ? null : digestBytes(Buffer.from(content)), beforeContent: before?.toString("utf8") });
+}

@@ -78,6 +78,7 @@ export async function loadPlugins(entries, harness, projectRoot = process.cwd(),
           plugin: item.manifest.name,
           version: item.manifest.version,
           isolated: true,
+          memoryMonitoring: item.host.memoryMonitoring,
         });
       }
       for (const item of ordered) item.host.release();

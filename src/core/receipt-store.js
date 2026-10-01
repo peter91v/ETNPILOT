@@ -1,5 +1,6 @@
+import { readRegularFile } from "../runtime/bounded-io.js";
 import { createHash } from "node:crypto";
-import { mkdir, appendFile, readFile } from "node:fs/promises";
+import { mkdir, appendFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { verifyReceiptSignature } from "./receipt-signing.js";
 
@@ -38,7 +39,7 @@ export class JsonlReceiptStore {
   }
 
   async #lastEntry() {
-    const content = await readFile(this.path, "utf8").catch((error) => {
+    const content = await readRegularFile(this.path, 16 * 1024 * 1024).then((bytes) => bytes.toString("utf8")).catch((error) => {
       if (error.code === "ENOENT") return "";
       throw error;
     });
@@ -54,10 +55,14 @@ export async function verifyReceiptFile(path, {
 } = {}) {
   let content;
   try {
-    content = await readFile(path, "utf8");
+    content = await readRegularFile(path, 16 * 1024 * 1024).then((bytes) => bytes.toString("utf8"));
   } catch (error) {
     return verificationFailure("file-read-failed", { message: error.message });
   }
+  return verifyReceiptText(content, { verifiers, requireSignatures, requireTerminal });
+}
+
+export function verifyReceiptText(content, { verifiers = new Map(), requireSignatures = false, requireTerminal = false } = {}) {
   const lines = content.split("\n");
   if (lines.at(-1) === "") lines.pop();
   if (lines.length === 0) return verificationFailure("empty-file");

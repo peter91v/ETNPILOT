@@ -4,4 +4,4 @@ skills: [evidence, codegraph]
 requires: [chat]
 subagents: []
 # It reads the change and runs the checks. A reviewer that can edit the code it reviews is not a reviewer.
-tools: [read_file, list_files, search_files, run_command]
+tools: [codegraph.codegraph_explore, read_file, list_files, search_files, run_command]

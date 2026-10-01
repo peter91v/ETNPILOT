@@ -65,3 +65,10 @@ receipt chain, re-runs those checks against a workspace, and reports drift:
 ```
 
 It exits non-zero when the receipt does not verify or any check has drifted.
+
+Replay requires a terminal receipt, verifies the exact bytes it subsequently
+parses, and returns no executed checks when verification fails. Signature
+requirements are checked before invoking an executor. `--inspect-only` verifies
+and describes the receipt without running any recorded command. For executable
+replay, current project check environment and sandbox settings apply; an imported
+receipt never chooses its own environment or relaxes containment.

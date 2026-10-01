@@ -24,6 +24,8 @@ export const DEFAULT_MODES = Object.freeze({
   "supplyChain.**": "locked",
   "hooks.**": "locked",
   "mcpServers.**": "locked",
+  "plugins": "locked",
+  "pluginIsolation.**": "locked",
   "policy.**": "stricter-only",
   "approval.allow": "stricter-only",
   "approval.requireHuman": "stricter-only",
@@ -101,6 +103,8 @@ export async function readLayers(projectFile, { env = process.env, layerRoot, us
 const EXECUTABLE_LOCKS = Object.freeze({
   "hooks.**": "locked",
   "mcpServers.**": "locked",
+  "plugins": "locked",
+  "pluginIsolation.**": "locked",
 });
 
 export function readModes(projectData = {}) {

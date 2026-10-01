@@ -1,152 +1,107 @@
 import { spawn } from "node:child_process";
-
-// A Model Context Protocol client, so a project can give its agents tools this
-// project did not write.
-//
-// It existed for exactly one provider and exactly one server: the Copilot
-// adapter was handed a hardcoded codegraph descriptor, and 'anthropic' and
-// 'openai' had no MCP at all. But MCP is an open protocol and a client for it
-// is a property of the harness, not of a provider — which is also the only way
-// its tools can go through the same approval path as everything else.
-//
-// Deliberately small: stdio transport, newline-delimited JSON-RPC, the three
-// calls that matter. No resources, no prompts, no sampling — a server that
-// wants to ask the model something of its own is a different conversation, and
-// one this project would have to decide about rather than inherit.
+import { processGroupOptions, stopChild } from "../runtime/child-process.js";
 
 const PROTOCOL_VERSION = "2025-06-18";
-const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULTS = { maxMessageBytes: 1024 * 1024, maxOutputBytes: 16 * 1024 * 1024, maxTools: 256, maxPendingRequests: 32, shutdownTimeoutMs: 250 };
 
-export function createMcpClient({
-  name,
-  command,
-  args = [],
-  cwd,
-  env,
-  timeoutMs = DEFAULT_TIMEOUT_MS,
-  spawnImpl = spawn,
-} = {}) {
-  if (!name) throw new TypeError("An MCP server needs a name.");
-  if (!command) throw new TypeError(`MCP server '${name}' needs a command.`);
-
+export function createMcpClient({ name, command, args = [], cwd, env, timeoutMs = 30_000, limits = {}, spawnImpl = spawn } = {}) {
+  if (!name || !command) throw new TypeError("An MCP server needs a name and command.");
+  const bounds = { ...DEFAULTS, ...limits };
+  for (const [key, value] of Object.entries(bounds)) if (!(key in DEFAULTS) || !Number.isSafeInteger(value) || value < 1 || value > 64 * 1024 * 1024) throw new TypeError(`Invalid MCP limit '${key}'.`);
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) throw new TypeError("Invalid MCP timeout.");
   let child;
   let nextId = 1;
-  let buffer = "";
+  let buffer = Buffer.alloc(0);
+  let output = 0;
   let closed = false;
+  let closing;
   const pending = new Map();
-
-  const settleAll = (error) => {
-    for (const [, entry] of pending) entry.reject(error);
-    pending.clear();
+  const settle = (id, error, value) => {
+    const entry = pending.get(id);
+    if (!entry) return;
+    pending.delete(id); clearTimeout(entry.timer); entry.cleanup();
+    if (error) entry.reject(error); else entry.resolve(value);
   };
-
-  const start = () => {
-    child = spawnImpl(command, args, {
-      cwd,
-      // Never the caller's whole environment: a server this project did not
-      // write should not inherit its secrets by default.
-      env: { PATH: process.env.PATH, HOME: process.env.HOME, ...env },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => {
-      buffer += chunk;
-      let newline = buffer.indexOf("\n");
-      while (newline !== -1) {
-        const line = buffer.slice(0, newline).trim();
-        buffer = buffer.slice(newline + 1);
-        if (line) deliver(line);
-        newline = buffer.indexOf("\n");
-      }
-    });
-    // A server's own logging goes to stderr by convention; it is not an error
-    // and it is not ours to print.
-    child.stderr.resume();
-    child.once("error", (error) => {
-      closed = true;
-      settleAll(new Error(`MCP server '${name}' could not start: ${error.message}`));
-    });
-    child.once("exit", (code) => {
-      closed = true;
-      settleAll(new Error(`MCP server '${name}' exited (${code ?? "signal"}) while a call was outstanding.`));
-    });
+  const settleAll = (error) => { for (const id of pending.keys()) settle(id, error); };
+  const close = () => {
+    if (closing) return closing;
+    closed = true;
+    settleAll(new Error(`MCP server '${name}' was closed.`));
+    child?.stdin.end();
+    closing = stopChild(child, { graceMs: bounds.shutdownTimeoutMs });
+    return closing;
   };
-
+  const fatal = (reason) => { settleAll(new Error(`MCP server '${name}': ${reason}`)); void close(); };
   const deliver = (line) => {
     let message;
-    try {
-      message = JSON.parse(line);
-    } catch {
-      // A server that writes something else on stdout is broken, but one bad
-      // line is not a reason to abandon the ones that follow.
-      return;
-    }
-    const entry = pending.get(message.id);
-    if (!entry) return;
-    pending.delete(message.id);
-    clearTimeout(entry.timer);
-    if (message.error) {
-      entry.reject(new Error(`MCP server '${name}': ${message.error.message ?? "call failed"}`));
-      return;
-    }
-    entry.resolve(message.result);
+    try { message = JSON.parse(line); } catch { fatal("invalid JSON-RPC JSON"); return; }
+    if (!message || Array.isArray(message) || typeof message !== "object" || message.jsonrpc !== "2.0") { fatal("invalid JSON-RPC envelope"); return; }
+    // Unsupported server requests are refused, never executed by the host.
+    if (message.method) { if (message.id !== undefined) fatal("server requests are unsupported"); return; }
+    if (!Number.isSafeInteger(message.id) || (!Object.hasOwn(message, "result") && !Object.hasOwn(message, "error"))) { fatal("invalid RPC response"); return; }
+    settle(message.id, message.error ? new Error(`MCP server '${name}': ${String(message.error.message ?? "call failed").slice(0, 4096)}`) : undefined, message.result);
   };
-
-  const send = (method, params) => new Promise((resolve, reject) => {
-    if (closed) {
-      reject(new Error(`MCP server '${name}' is not running.`));
-      return;
-    }
+  const start = () => {
+    if (child || closed) throw new Error("MCP client can only be initialized once.");
+    child = spawnImpl(command, args, { cwd, env: { PATH: process.env.PATH, HOME: process.env.HOME, ...env }, ...processGroupOptions(), stdio: ["pipe", "pipe", "pipe"] });
+    child.stdin.on("error", (error) => fatal(error.message));
+    child.stdout.on("data", (value) => {
+      if (closed) return;
+      const chunk = Buffer.from(value); output += chunk.length;
+      if (output > bounds.maxOutputBytes) { fatal("output byte limit exceeded"); return; }
+      // Split before concatenating, so several small valid frames can share a chunk.
+      let offset = 0;
+      while (offset < chunk.length && !closed) {
+        const newline = chunk.indexOf(10, offset);
+        const end = newline < 0 ? chunk.length : newline;
+        if (buffer.length + end - offset > bounds.maxMessageBytes) { fatal("message byte limit exceeded"); return; }
+        buffer = Buffer.concat([buffer, chunk.subarray(offset, end)]);
+        if (newline < 0) break;
+        if (buffer.length) deliver(buffer.toString("utf8"));
+        buffer = Buffer.alloc(0); offset = newline + 1;
+      }
+    });
+    child.stderr.on("data", (chunk) => { output += chunk.length; if (output > bounds.maxOutputBytes) fatal("output byte limit exceeded"); });
+    child.once("error", (error) => fatal(`could not start: ${error.message}`));
+    child.once("exit", (code) => fatal(`exited (${code ?? "signal"}) while a call was outstanding`));
+  };
+  const send = (method, params, { signal } = {}) => new Promise((resolve, reject) => {
+    if (closed || !child) return reject(new Error(`MCP server '${name}' is not running.`));
+    if (signal?.aborted) return reject(signal.reason);
+    if (pending.size >= bounds.maxPendingRequests) { reject(new Error("MCP pending-request limit exceeded.")); return; }
     const id = nextId++;
-    const timer = setTimeout(() => {
-      pending.delete(id);
-      reject(new Error(`MCP server '${name}' did not answer '${method}' within ${timeoutMs}ms.`));
-    }, timeoutMs);
-    timer.unref?.();
-    pending.set(id, { resolve, reject, timer });
-    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+    const wire = `${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`;
+    if (Buffer.byteLength(wire) > bounds.maxMessageBytes) return reject(new Error("MCP request byte limit exceeded."));
+    const abort = () => { settle(id, signal.reason ?? new Error("MCP call aborted.")); void close(); };
+    const timer = setTimeout(() => { settle(id, new Error(`MCP server '${name}' did not answer '${method}' within ${timeoutMs}ms.`)); void close(); }, timeoutMs);
+    pending.set(id, { resolve, reject, timer, cleanup: () => signal?.removeEventListener("abort", abort) });
+    signal?.addEventListener("abort", abort, { once: true });
+    child.stdin.write(wire, (error) => { if (error) fatal(error.message); });
   });
-
-  const notify = (method, params) => {
-    if (closed) return;
-    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`);
-  };
-
   return {
     name,
-    async initialize() {
+    async initialize(options) {
       start();
-      const result = await send("initialize", {
-        protocolVersion: PROTOCOL_VERSION,
-        capabilities: { tools: {} },
-        clientInfo: { name: "etnpilot", version: "0.1.0" },
-      });
-      notify("notifications/initialized", {});
+      const result = await send("initialize", { protocolVersion: PROTOCOL_VERSION, capabilities: { tools: {} }, clientInfo: { name: "etnpilot", version: "0.1.0" } }, options);
+      child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized", params: {} })}\n`);
       return result;
     },
-    async listTools() {
-      const result = await send("tools/list", {});
-      return (result?.tools ?? []).map((tool) => ({
-        name: tool.name,
-        description: tool.description ?? "",
-        parameters: tool.inputSchema ?? { type: "object", properties: {}, additionalProperties: true },
-      }));
+    async listTools(options) {
+      const result = await send("tools/list", {}, options);
+      if (!Array.isArray(result?.tools) || result.tools.length > bounds.maxTools) { fatal("invalid or oversized tool list"); throw new Error("Invalid MCP tool list."); }
+      const names = new Set();
+      return result.tools.map((tool) => {
+        if (!tool || typeof tool.name !== "string" || !/^[a-zA-Z0-9_.-]{1,128}$/.test(tool.name) || names.has(tool.name) || (tool.inputSchema && (typeof tool.inputSchema !== "object" || Array.isArray(tool.inputSchema)))) throw new Error("Invalid MCP tool definition.");
+        names.add(tool.name);
+        return { name: tool.name, description: String(tool.description ?? "").slice(0, 4096), parameters: tool.inputSchema ?? { type: "object", properties: {}, additionalProperties: true } };
+      });
     },
-    async callTool(tool, args) {
-      const result = await send("tools/call", { name: tool, arguments: args ?? {} });
-      // The protocol's own failure shape: the call succeeded, the tool did not.
-      if (result?.isError) {
-        return { ok: false, error: textOf(result.content) || `MCP tool '${tool}' reported an error.` };
-      }
+    async callTool(tool, args, options) {
+      const result = await send("tools/call", { name: tool, arguments: args ?? {} }, options);
+      if (result?.isError) return { ok: false, error: textOf(result.content) || `MCP tool '${tool}' reported an error.` };
       return { ok: true, content: textOf(result?.content), ...(result?.structuredContent ? { structured: result.structuredContent } : {}) };
     },
-    close() {
-      if (closed || !child) return;
-      closed = true;
-      settleAll(new Error(`MCP server '${name}' was closed.`));
-      child.stdin.end();
-      child.kill();
-    },
+    close,
   };
 }
 
@@ -191,7 +146,7 @@ export async function connectMcpTools(servers = {}, { onError } = {}) {
             if (decision.kind !== "approve-once") {
               return { ok: false, error: decision.reason ?? "Refused." };
             }
-            return client.callTool(tool.name, args);
+            return client.callTool(tool.name, args, { signal: context.signal });
           },
         });
       }
@@ -199,9 +154,9 @@ export async function connectMcpTools(servers = {}, { onError } = {}) {
     } catch (error) {
       // A server that will not start is not a reason to lose the run: the
       // tools it would have offered are absent, and the receipt says so.
-      client.close();
+      await client.close();
       onError?.({ server: name, error: error.message });
     }
   }
-  return { tools, close: () => clients.forEach((client) => client.close()) };
+  return { tools, close: () => Promise.all(clients.map((client) => client.close())) };
 }

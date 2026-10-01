@@ -142,10 +142,10 @@ test("the agent can ask, and the answer is text rather than a permission", async
     agent: { name: "builder" },
     approve: async (request) => {
       writes.push(request.kind);
-      return { kind: "reject", reason: "no" };
+      return request.kind === "read" ? { kind: "approve-once" } : { kind: "reject", reason: "no" };
     },
   });
-  assert.deepEqual(writes, ["write"], "the write asked on its own");
+  assert.deepEqual(writes, ["read", "write"], "the write asked on its own");
   await assert.rejects(readFile(join(root, "x.txt"), "utf8"), /ENOENT/);
 });
 

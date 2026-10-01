@@ -125,3 +125,31 @@ The local file contains one valid `ExportTraceServiceRequest` JSON object per li
 the ignored `.etnpilot/state/` directory and can be replayed or transformed by normal log shipping
 tools. The summary command reads only token, unit, and estimate attributes; it does not contact a
 collector.
+
+## Per-request usage and pricing provenance
+
+OpenAI-compatible and Anthropic adapters count every HTTP attempt, including
+retries and failures, and report cumulative usage after each response. Token
+and cost budgets can stop the tool loop before another request. Failed and
+aborted invocations retain already observed usage in telemetry and receipts.
+`usageStatus` distinguishes measured, partial, and unknown usage; missing provider
+usage is not proof of zero spend. `maxProviderRequestsPerWorkflow` additionally
+bounds attempts. A response can exceed a token budget before it reports usage;
+these are between-request spending gates, not preemptive billing guarantees.
+
+Anthropic input usage is the sum of uncached input, cache reads, and cache writes.
+The adapter requests five-minute cache entries. Their write multiplier is 1.25;
+read multipliers follow the model's published rates, including documented model
+exceptions. See [Anthropic's cache documentation](https://platform.claude.com/docs/en/build-with-claude/prompt-caching).
+
+Project rates win over automatic estimates. Otherwise the newer dated catalog or
+built-in snapshot wins. Source, observation date, inferred model IDs, cache TTL,
+and snapshots older than 30 days are included with the estimate. Fetched catalogs
+are scoped to the project root, bounded to 4 MiB, and ignored when `autoUpdate` is
+false. Different projects do not share learned tariffs. The built-in table is a
+snapshot, so inferred IDs and stale rates must be checked against the account's
+actual tariff. It is not an invoice.
+
+Retrospective estimates are explicitly marked and leave sealed receipts unchanged.
+Receipt and session reads have a 16 MiB ceiling; telemetry summaries have a 64 MiB
+ceiling. Rotate/archive larger histories rather than reading an unbounded file.

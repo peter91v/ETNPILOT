@@ -6,8 +6,8 @@ answers the way this project expects, which is exactly the assumption an
 end-to-end run is supposed to test.
 
 This is the walkthrough for a run against a real provider and a real GitLab,
-and the place to record what broke. **It is not a claim that this has been
-done.** Where a step has been carried out, it says so and against what; where
+and the place to record what broke. **The OpenAI chat and complete workflow were exercised on 2026-09-30;
+the real GitLab publication remains open.** Where a step has been carried out, it says so and against what; where
 it has not, it says that too. Filling this in is the point of the document.
 
 ## What is already proven, and where
@@ -19,10 +19,10 @@ it has not, it says that too. Filling this in is the point of the document.
 | A real OpenAI call reaches a real model | a run failed at `plan` with the server's own 400 about `reasoning_effort`, which only a real endpoint produces | Termux, 2026-09-24 |
 | The review page works on a phone | driven in Chromium at 412px, every control | this repository |
 | A real GitLab instance accepts what a run publishes | **nothing** | — |
-| A run completes end to end against a real provider | **nothing** | — |
+| A run completes end to end against a real provider | `plan → build → test → review` succeeded; 101,595 tokens, clean merge rehearsal | Termux, OpenAI, 2026-09-30 |
 
-The last two rows are the open ones, and the second-largest is the first: a
-run that plans, writes, checks and publishes, with a person approving it.
+The real GitLab row remains open: publishing a reviewed run to an isolated test
+project, checking its pipeline and approvals, and cleaning up the Draft MR and branch.
 
 ## Before you start
 
@@ -213,8 +213,8 @@ The first real conversation. What it showed:
   the starter agents have no `fetch_url` (it reads text nobody here wrote, so it is
   opt-in). To let an agent read the web: add `fetch_url` to its `tools:` and allow
   the host under `policy.operations`.
-- Not addressed: answers are shown as plain text, so the model's Markdown
-  (`**…**`, links, fences) appears literally.
+- At the time, answers were plain text. The review hardening adds a bounded
+  Markdown subset using DOM nodes, with raw HTML displayed as text and checked URL protocols.
 
 ### 2026-09-30 — a full workflow run on a phone, against OpenAI (`plan → build → test → review`)
 
@@ -246,3 +246,15 @@ which 72,445 were read from the provider's cache. What it showed:
 - **Still open:** the planner looked for `first-real-run.md` at the repository root
   (it lives in `docs/`) and the run was not told otherwise; `gpt-6-luna` is not
   priced, so the cost reads "not priced".
+
+### Opt-in GitLab protocol smoke
+
+For an isolated, unarchived test project named `etnpilot-smoke`, set
+`ETNPILOT_SMOKE_GITLAB_URL`, `ETNPILOT_SMOKE_GITLAB_PROJECT`, and
+`ETNPILOT_GITLAB_TOKEN`, then run `npm run smoke:gitlab -- --confirm-writes`.
+It creates a unique branch and commit, opens a Draft MR, reads approvals and
+pipelines, closes the MR, deletes the branch, and verifies its bounded receipt.
+It never merges and observes pipelines for at most 60 seconds. Exit 3 means no successful pipeline was observed; configure
+and run CI before treating that part as proven. This check exercises the forge
+protocol and cleanup; it does not replace the provider-to-publication walkthrough.
+No real GitLab smoke has been recorded in this change.

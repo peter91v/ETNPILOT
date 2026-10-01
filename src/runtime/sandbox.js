@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
@@ -53,6 +53,7 @@ export function createSandbox(config = {}, { workspace, probe = probeRuntime } =
       return buildSandboxCommand(command, {
         ...options,
         workspace: root,
+        containerName: `etnpilot-command-${randomUUID()}`,
         envNames: Object.keys(env),
         cwd,
       });
@@ -73,6 +74,7 @@ export function buildSandboxCommand(command, options) {
     "--workdir", workdir,
     "--volume", `${options.workspace}:${options.workdir}`,
   ];
+  if (options.containerName) args.push("--name", options.containerName, "--label", `etnpilot.command=${options.containerName}`);
   if (options.readOnlyRoot) args.push("--read-only");
   for (const path of options.tmpfs) args.push("--tmpfs", path);
   if (options.user) args.push("--user", options.user);

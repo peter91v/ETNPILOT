@@ -178,3 +178,22 @@ The page does not run the checks (`policy check`, `deps check`, `scan secrets`,
 still CLI commands. Every surface is meant to do everything, and the safeguard
 is the settings layer described in [settings.md](settings.md), not which window
 you happen to be looking at.
+
+## Chat coordination and recovery
+
+Chat sends reserve the workspace before asynchronous preparation. CLI, TUI, page,
+compaction, undo, and other in-place workflows use one SQLite workspace lease.
+A busy workspace returns a conflict; turns are numbered while holding the lease.
+After a process crash the lease remains conservative: inspect changes and stop
+its processes before `etnpilot lease recover --root . --lease-owner <owner-uuid>`.
+A live owner cannot be recovered, and recovery never automatically replays work.
+
+Undo restores only journaled file-tool writes whose current digest matches the
+recorded result. Other effects need manual review. Attachments requiring a human
+read decision are withheld; the agent can request `read_file` through the normal
+approval inbox. Digests of truncated attachments identify sent content only.
+
+Chat renders a bounded Markdown subset with DOM text nodes, checked link protocols,
+and no raw HTML or remote images. Run lists stop at 500 visible items and stop
+showing a nonfunctional "Show more" control at that limit. If LAN adapter discovery
+fails, listening still resolves and returns a fallback URL with a warning.

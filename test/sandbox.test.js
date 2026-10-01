@@ -15,11 +15,15 @@ test("a sandboxed command runs in a disposable container without a network", () 
     user: "1000:1000",
   }, { workspace: "/srv/run-1", probe: async () => ({ available: true }) });
 
-  assert.deepEqual(sandbox.wrap(["npm", "test"], { env: { PATH: "/usr/bin", ETNPILOT_CHECK: "1" } }), [
+  const wrapped = sandbox.wrap(["npm", "test"], { env: { PATH: "/usr/bin", ETNPILOT_CHECK: "1" } });
+  const name = wrapped[wrapped.indexOf("--name") + 1];
+  assert.match(name, /^etnpilot-command-[a-f0-9-]{36}$/);
+  assert.deepEqual(wrapped, [
     "docker", "run", "--rm", "--init",
     "--network=none",
     "--workdir", "/workspace",
     "--volume", "/srv/run-1:/workspace",
+    "--name", name, "--label", `etnpilot.command=${name}`,
     "--read-only",
     "--tmpfs", "/tmp",
     "--user", "1000:1000",

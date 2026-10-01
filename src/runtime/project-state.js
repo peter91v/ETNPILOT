@@ -1,3 +1,5 @@
+import { readRegularFile } from "./bounded-io.js";
+import { acquireWorkspaceLease } from "./workspace-lease.js";
 import { compactSession, compactionCheck, createSessionId, listSessions, readSession, runChatTurn, undoLastTurn, verifySession } from "./chat-session.js";
 import { resolveAttachments, summarizeAttachments } from "./chat-attachments.js";
 import { PolicyEngine } from "../policy/engine.js";
@@ -18,7 +20,7 @@ import { listChecks, runProjectCheck } from "./project-checks.js";
 import { runProject, RUN_BRANCH_PREFIX } from "./project-runner.js";
 import { createSecretResolver } from "../secrets/resolver.js";
 import { resolveConfiguredApiKey } from "../providers/register.js";
-import { knownPriceFor } from "../observability/known-pricing.js";
+import { knownPriceFor, pricingCatalogRevision } from "../observability/known-pricing.js";
 import { refreshPricing } from "../observability/pricing-sync.js";
 import { WorkflowQueue } from "../workflow/queue.js";
 
@@ -71,7 +73,7 @@ export async function openProjectState({ root = process.cwd(), env = process.env
       verify: (id) => verifySession(projectRoot, id, {
         verifyReceipt: (file) => verifyProjectReceipt(runsDirectory, file, { root: projectRoot, config: current }),
         readEntries: async (file) => {
-          const text = await readFile(join(runsDirectory, file), "utf8");
+          const text = await readRegularFile(join(runsDirectory, file), 16 * 1024 * 1024).then((bytes) => bytes.toString("utf8"));
           return text.split("\n").filter(Boolean).map((line) => JSON.parse(line));
         },
       }),
@@ -99,6 +101,8 @@ export async function openProjectState({ root = process.cwd(), env = process.env
         if ([...running].some((record) => record.session === id)) {
           throw new Error("A turn is already running in this conversation. Wait for it, or stop it.");
         }
+        const lease = await acquireWorkspaceLease(projectRoot, { sessionId: id });
+        try {
         const names = (await readAgents({ root: projectRoot, config: current })).agents.filter((entry) => !entry.error).map((entry) => entry.name);
         const chosen = agent ?? current.defaultAgent ?? "orchestrator";
         if (!names.includes(chosen)) throw new TypeError(`Unknown agent '${chosen}'. This project has: ${names.join(", ")}.`);
@@ -121,6 +125,7 @@ export async function openProjectState({ root = process.cwd(), env = process.env
           // 'input' is dropped: the turn composes its own, with the attachments.
           via: ({ input: _task, agent: _agent, ...options }) => runChatTurn({
             ...options,
+            workspaceLease: lease,
             sessionId: id,
             text: text.trim(),
             agent: chosen,
@@ -129,8 +134,9 @@ export async function openProjectState({ root = process.cwd(), env = process.env
           }),
         });
         // A failure is reported through runErrors like any run's; nothing here waits.
-        started.catch(() => {});
+        started.finally(() => lease.release()).catch(() => {});
         return { sessionId: id, agent: chosen, attached: summarizeAttachments(attachments), refused };
+        } catch (error) { lease.release(); throw error; }
       },
       // Asks the model to summarise the older turns, as a run of its own. The
       // answer is not awaited; it lands in the session as a 'compact' line.
@@ -789,16 +795,16 @@ export async function withCurrentPricing(receipt, { root, config, runId }) {
   if (!usage || !(usage.unpricedInvocations > 0) || usage.estimatedCost !== undefined) return receipt;
   await refreshPricing({ root, config }).catch(() => undefined);
   const file = resolve(root, config?.observability?.file ?? ".etnpilot/state/telemetry.jsonl");
-  const fresh = await summarizeTelemetryFile(file, { workflowRunId: receipt.terminal?.runId ?? runId }).catch(() => undefined);
+  const fresh = await summarizeTelemetryFile(file, { workflowRunId: receipt.terminal?.runId ?? runId, root, config }).catch(() => undefined);
   if (!fresh || fresh.estimatedCost === undefined) return receipt;
-  const merged = { ...usage, ...fresh };
+  const merged = { ...usage, ...fresh, retrospective: true };
   if (!fresh.unpricedModels) delete merged.unpricedModels;
   return { ...receipt, outcome: { ...receipt.outcome, usage: merged } };
 }
 
 export async function readReceipt(directory, file) {
   assertReceiptName(file);
-  const content = await readFile(join(directory, file), "utf8");
+  const content = await readRegularFile(join(directory, file), 16 * 1024 * 1024).then((bytes) => bytes.toString("utf8"));
   const entries = [];
   for (const line of content.split("\n").filter(Boolean)) {
     try {
@@ -889,7 +895,7 @@ export async function readAgents({ root, config }) {
   });
   const agents = [];
   for (const file of files.filter((name) => name.endsWith(".yaml") || name.endsWith(".yml")).sort()) {
-    const content = await readFile(join(directory, file), "utf8").catch(() => "");
+    const content = await readRegularFile(join(directory, file), 16 * 1024 * 1024).then((bytes) => bytes.toString("utf8")).catch(() => "");
     let manifest;
     try {
       manifest = YAML.parse(content) ?? {};
@@ -936,9 +942,9 @@ export async function readUsage({ root, config }) {
         : "observability.enabled is false, so nothing records what a run costs.",
     };
   }
-  const key = `${file}:${stats.mtimeMs}:${stats.size}`;
+  const key = JSON.stringify([file, stats.mtimeMs, stats.size, config?.observability?.pricing, config?.observability?.budgets, pricingCatalogRevision()]);
   if (usageCache?.key === key) return usageCache.value;
-  const summary = await summarizeTelemetryFile(file);
+  const summary = await summarizeTelemetryFile(file, { root, config });
   const value = { available: true, file, ...summary, budgets: config?.observability?.budgets ?? {} };
   usageCache = { key, value };
   return value;

@@ -1,4 +1,5 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { readRegularFile, readResponseBytes } from "../runtime/bounded-io.js";
+import { mkdir, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { useLearnedRates } from "./known-pricing.js";
 
@@ -25,7 +26,8 @@ export function normalizeModelKey(id) {
 // OpenRouter quotes USD per token as strings; the table speaks per million.
 export function ratesFromCatalog(catalog) {
   const rates = {};
-  for (const entry of catalog?.data ?? []) {
+  if (!Array.isArray(catalog?.data) || catalog.data.length > 10_000) throw new Error("Invalid or oversized price catalog.");
+  for (const entry of catalog.data) {
     const input = Number(entry?.pricing?.prompt);
     const output = Number(entry?.pricing?.completion);
     if (!entry?.id || !Number.isFinite(input) || !Number.isFinite(output) || input < 0 || output < 0) continue;
@@ -47,21 +49,22 @@ export async function refreshPricing({ root, config, fetchImpl = globalThis.fetc
   // too. The test runner is the one place that stays offline by itself; tests
   // of this module pass 'autoUpdate: true' and a fetch of their own.
   const underTest = Boolean(process.env.NODE_TEST_CONTEXT) && pricing?.autoUpdate !== true;
-  if (pricing?.autoUpdate === false || underTest || typeof fetchImpl !== "function") return { used: "none" };
+  if (pricing?.autoUpdate === false || underTest || typeof fetchImpl !== "function") { useLearnedRates({}, { root: resolve(root) }); return { used: "none" }; }
   const file = resolve(root, ".etnpilot", "state", "pricing-cache.json");
-  const cache = await readFile(file, "utf8").then(JSON.parse).catch(() => undefined);
-  if (cache?.rates) useLearnedRates(cache.rates, { asOf: cache.fetchedAt, source: CATALOG_URL });
+  const cache = await readRegularFile(file, 4 * 1024 * 1024).then((bytes) => JSON.parse(bytes.toString("utf8"))).catch(() => undefined);
+  if (cache?.rates) useLearnedRates(cache.rates, { asOf: cache.fetchedAt, source: cache.source ?? CATALOG_URL, root: resolve(root) });
   const age = cache ? now() - (cache.fetchedAt ?? 0) : Infinity;
   const retryAfter = cache?.failedAt ? now() - cache.failedAt : Infinity;
   if (age < DAY || retryAfter < HOUR) return { used: cache?.rates ? "cache" : "none" };
   try {
-    const response = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs), headers: { accept: "application/json" } });
+    const signal = AbortSignal.timeout(timeoutMs);
+    const response = await fetchImpl(url, { signal, headers: { accept: "application/json" } });
     if (!response?.ok) throw new Error(`catalog answered ${response?.status}`);
-    const rates = ratesFromCatalog(await response.json());
+    const rates = ratesFromCatalog(JSON.parse((await readResponseBytes(response, 4 * 1024 * 1024, { signal })).bytes.toString("utf8")));
     if (Object.keys(rates).length === 0) throw new Error("catalog held no prices");
     const fetchedAt = now();
     await save(file, { fetchedAt, source: url, rates });
-    useLearnedRates(rates, { asOf: fetchedAt, source: url });
+    useLearnedRates(rates, { asOf: fetchedAt, source: url, root: resolve(root) });
     return { used: "network", models: Object.keys(rates).length };
   } catch (error) {
     // Remembered, so an offline phone does not wait for a timeout on every run.

@@ -100,7 +100,7 @@ test("the OpenAI-compatible provider runs an approved tool loop", async () => {
 
   assert.equal(result.text, "Wrote out.txt.");
   assert.equal(await readFile(join(root, "out.txt"), "utf8"), "generated");
-  assert.deepEqual(approvals, ["write"]);
+  assert.deepEqual(approvals, ["read", "write"]);
   // The record says what was asked of the tool, not only that it ran.
   assert.deepEqual(result.toolCalls, [{ tool: "write_file", label: "write_file out.txt", ok: true }]);
   assert.deepEqual(result.usage, { inputTokens: 22, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0, requests: 2 });

@@ -1,10 +1,13 @@
-import { spawn } from "node:child_process";
+import { workspaceFile } from "../runtime/workspace-files.js";
+import { readResponseBytes, utf8Prefix, cancelBody } from "../runtime/bounded-io.js";
+import { searchLines } from "./search-worker-host.js";
+import { runChild } from "../runtime/child-process.js";
+import { commandEnvironment } from "../runtime/command-environment.js";
 import { tail } from "../checks/runner.js";
 import { unifiedDiff } from "./text-diff.js";
 import { validateProposal } from "../content/proposals.js";
 import { git } from "../git/command.js";
-import { readdir, readFile, mkdir, stat, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 
 const DEFAULT_LIMITS = Object.freeze({
   maxFetchBytes: 128 * 1024,
@@ -13,6 +16,9 @@ const DEFAULT_LIMITS = Object.freeze({
   maxOutputBytes: 64 * 1024,
   maxEntries: 500,
   shellTimeoutMs: 120_000,
+  searchTimeoutMs: 1000,
+  maxSearchBytes: 4 * 1024 * 1024,
+  fetchTimeoutMs: 30_000,
 });
 
 // The tools a chat provider may call. Each one is mediated: the workspace
@@ -50,6 +56,7 @@ export const WORKSPACE_TOOL_DEFINITIONS = Object.freeze([
       properties: {
         pattern: { type: "string", description: "Regular expression matched against each line." },
         glob: { type: "string", description: "Path pattern, for example 'src/**/*.js' or '*.md'." },
+        literal: { type: "boolean", description: "Match literal text rather than a regular expression." },
         ignoreCase: { type: "boolean", description: "Match the pattern without regard to case." },
         maxResults: { type: "integer", description: "Stop after this many matches (default 100)." },
       },
@@ -233,6 +240,7 @@ export function createWorkspaceTools({
   if (!workingDirectory) throw new TypeError("Workspace tools require a workingDirectory.");
   const root = resolve(workingDirectory);
   const bounds = { ...DEFAULT_LIMITS, ...limits };
+  for (const [key, value] of Object.entries(bounds)) if (!(key in DEFAULT_LIMITS) || !Number.isSafeInteger(value) || value < 1 || value > 16 * 1024 * 1024) throw new TypeError(`Invalid workspace tool limit ${key}.`);
   const extra = new Map(extraTools.map((tool) => [tool.definition.name, tool]));
   const definitions = [
     ...allowedDefinitions(allowed, { canSpawn, hasSkills: skills.length > 0 }),
@@ -261,7 +269,9 @@ export function createWorkspaceTools({
     definitions,
     async invoke(name, rawArguments, context) {
       const started = Date.now();
-      let result = await invokeTool(name, rawArguments, context);
+      let result;
+      try { result = await invokeTool(name, rawArguments, context); }
+      catch (error) { result = { ok: false, error: describe(error) }; }
       if (result?.ok === true && (name === "write_file" || name === "edit_file")) {
         result = await runAfterWrite(result, context);
       }
@@ -370,12 +380,9 @@ async function readWorkspaceFile(root, bounds, args, context) {
   const decision = await context.approve({ kind: "read", fileName: path.relative, toolName: "read_file" });
   if (decision.kind !== "approve-once") return denied(decision);
   try {
-    const details = await stat(path.absolute);
-    if (!details.isFile()) return { ok: false, error: "Not a regular file." };
-    if (details.size > bounds.maxFileBytes) {
-      return { ok: false, error: `File exceeds the ${bounds.maxFileBytes}-byte read limit.` };
-    }
-    return { ok: true, path: path.relative, content: await readFile(path.absolute, "utf8") };
+    const file = await workspaceFile(root, path.relative, { maxBytes: bounds.maxFileBytes });
+    try { return { ok: true, path: path.relative, content: file.bytes.toString("utf8") }; }
+    finally { await file.close(); }
   } catch (error) {
     return { ok: false, error: describe(error) };
   }
@@ -391,16 +398,9 @@ async function listWorkspaceFiles(root, bounds, args, context) {
   const decision = await context.approve({ kind: "read", fileName: path.relative, toolName: "list_files" });
   if (decision.kind !== "approve-once") return denied(decision);
   try {
-    const entries = await readdir(path.absolute, { withFileTypes: true });
-    return {
-      ok: true,
-      path: path.relative,
-      truncated: entries.length > bounds.maxEntries,
-      entries: entries.slice(0, bounds.maxEntries).map((entry) => ({
-        name: entry.name,
-        type: entry.isDirectory() ? "directory" : entry.isFile() ? "file" : "other",
-      })),
-    };
+    const directory = await workspaceFile(root, `${path.relative}/.etnpilot-directory-list-${Date.now()}`, { maxBytes: bounds.maxFileBytes, missing: true, directory: true });
+    try { return { ok: true, path: path.relative, ...await directory.list({ maxEntries: bounds.maxEntries, maxBytes: bounds.maxOutputBytes }) }; }
+    finally { await directory.close(); }
   } catch (error) {
     return { ok: false, error: describe(error) };
   }
@@ -420,14 +420,8 @@ async function searchWorkspaceFiles(root, bounds, args, context, signal) {
   if (!hasPattern && !hasGlob) {
     return { ok: false, error: "Give 'pattern' to search inside files, 'glob' to match paths, or both." };
   }
-  let matcher;
-  if (hasPattern) {
-    try {
-      matcher = new RegExp(args.pattern, args.ignoreCase === true ? "i" : "");
-    } catch (error) {
-      // The model's own mistake, told plainly so it can fix it.
-      return { ok: false, error: `'pattern' is not a valid regular expression: ${error.message}` };
-    }
+  if ((args.pattern?.length ?? 0) > 1024 || (args.glob?.length ?? 0) > 1024) {
+    return { ok: false, error: "Search patterns may contain at most 1024 characters." };
   }
   const limit = Number.isInteger(args.maxResults) && args.maxResults > 0
     ? Math.min(args.maxResults, bounds.maxEntries)
@@ -477,36 +471,24 @@ async function searchWorkspaceFiles(root, bounds, args, context, signal) {
     };
   }
 
-  const matches = [];
-  let searched = 0;
+  const files = [];
+  let bytes = 0;
   let truncated = false;
-  for (const relativePath of paths) {
+  for (const path of paths.slice(0, bounds.maxEntries)) {
     signal?.throwIfAborted();
-    if (matches.length >= limit) {
-      truncated = true;
-      break;
-    }
-    const absolute = resolve(root, relativePath);
-    const details = await stat(absolute).catch(() => undefined);
-    if (!details?.isFile() || details.size > bounds.maxFileBytes) continue;
-    const content = await readFile(absolute, "utf8").catch(() => undefined);
-    if (content === undefined || content.includes("\0")) continue;
-    searched += 1;
-    for (const [index, line] of content.split("\n").entries()) {
-      if (matches.length >= limit) {
-        truncated = true;
-        break;
-      }
-      if (!matcher.test(line)) continue;
-      matches.push({
-        path: relativePath,
-        line: index + 1,
-        // Bounded: a minified file has lines nobody wants in a context window.
-        text: line.length > 200 ? `${line.slice(0, 200)}…` : line,
-      });
-    }
+    if (bytes >= bounds.maxSearchBytes) { truncated = true; break; }
+    let file;
+    try {
+      file = await workspaceFile(root, path, { maxBytes: Math.min(bounds.maxFileBytes, bounds.maxSearchBytes - bytes) });
+      const content = file.bytes.toString("utf8");
+      bytes += file.bytes.length;
+      if (!content.includes("\0")) files.push({ path, content });
+    } catch { /* unreadable or too large; never follow symlinks */ }
+    finally { await file?.close(); }
   }
-  return { ok: true, matches, files: searched, truncated, ...(withheld > 0 ? { withheld } : {}) };
+  const result = await searchLines({ files, pattern: args.pattern, literal: args.literal === true,
+    ignoreCase: args.ignoreCase === true, limit }, { signal, timeoutMs: bounds.searchTimeoutMs });
+  return { ...result, truncated: truncated || paths.length > bounds.maxEntries || result.truncated, ...(withheld > 0 ? { withheld } : {}) };
 }
 
 // A glob, translated rather than shelled out to: '**' crosses directories,
@@ -544,22 +526,27 @@ async function writeWorkspaceFile(root, bounds, args, context) {
   }
   // What is there now, so the person deciding sees the change rather than its
   // size. A file that does not exist yet reads as an addition.
-  const before = await readFile(path.absolute, "utf8").catch(() => undefined);
-  const decision = await context.approve({
-    kind: "write",
-    fileName: path.relative,
-    toolName: "write_file",
-    toolArguments: { path: path.relative, bytes: Buffer.byteLength(args.content) },
-    diff: unifiedDiff(before, args.content, { path: path.relative }).text,
-  });
-  if (decision.kind !== "approve-once") return denied(decision);
+  const readDecision = await context.approve({ kind: "read", fileName: path.relative, toolName: "write_file" });
+  if (readDecision.kind !== "approve-once") return denied(readDecision);
+  const file = await workspaceFile(root, path.relative, { maxBytes: bounds.maxFileBytes, missing: true });
   try {
-    await mkdir(dirname(path.absolute), { recursive: true });
-    await writeFile(path.absolute, args.content, "utf8");
-    return { ok: true, path: path.relative, bytes: Buffer.byteLength(args.content) };
-  } catch (error) {
-    return { ok: false, error: describe(error) };
-  }
+    const before = file.bytes?.toString("utf8");
+    const decision = await context.approve({
+      kind: "write",
+      fileName: path.relative,
+      toolName: "write_file",
+      toolArguments: { path: path.relative, bytes: Buffer.byteLength(args.content) },
+      diff: unifiedDiff(before, args.content, { path: path.relative }).text,
+    });
+    if (decision.kind !== "approve-once") return denied(decision);
+    try {
+      const effect = await file.write(Buffer.from(args.content));
+      await context.recordFileEffect?.({ ...effect, beforeContent: before });
+      return { ok: true, path: path.relative, bytes: Buffer.byteLength(args.content), effect };
+    } catch (error) {
+      return { ok: false, error: describe(error) };
+    }
+  } finally { await file.close(); }
 }
 
 // Replacing an exact piece of text, rather than the whole file. Rewriting 800
@@ -576,53 +563,57 @@ async function editWorkspaceFile(root, bounds, args, context) {
   if (args.old_string === args.new_string) {
     return { ok: false, error: "'old_string' and 'new_string' are identical; nothing would change." };
   }
-  const before = await readFile(path.absolute, "utf8").catch((error) => ({ error }));
-  if (typeof before !== "string") {
-    return { ok: false, error: describe(before.error) };
-  }
-  const occurrences = countOccurrences(before, args.old_string);
-  if (occurrences === 0) {
-    // The most common failure, and the one worth explaining: the model is
-    // usually one space or one newline out.
-    return {
-      ok: false,
-      error: `'old_string' does not appear in ${path.relative}. It must match the file exactly, including indentation.`,
-    };
-  }
-  if (occurrences > 1 && args.replace_all !== true) {
-    return {
-      ok: false,
-      error: `'old_string' appears ${occurrences} times in ${path.relative}.`
-        + " Include enough surrounding text to make it unique, or pass replace_all.",
-    };
-  }
-  const after = args.replace_all === true
-    ? before.split(args.old_string).join(args.new_string)
-    : before.replace(args.old_string, args.new_string);
-  if (Buffer.byteLength(after) > bounds.maxFileBytes) {
-    return { ok: false, error: `The result exceeds the ${bounds.maxFileBytes}-byte write limit.` };
-  }
-  const diff = unifiedDiff(before, after, { path: path.relative });
-  const decision = await context.approve({
-    kind: "write",
-    fileName: path.relative,
-    toolName: "edit_file",
-    toolArguments: { path: path.relative, replacements: args.replace_all === true ? occurrences : 1 },
-    diff: diff.text,
-  });
-  if (decision.kind !== "approve-once") return denied(decision);
+  const readDecision = await context.approve({ kind: "read", fileName: path.relative, toolName: "edit_file" });
+  if (readDecision.kind !== "approve-once") return denied(readDecision);
+  const file = await workspaceFile(root, path.relative, { maxBytes: bounds.maxFileBytes });
   try {
-    await writeFile(path.absolute, after, "utf8");
-    return {
-      ok: true,
-      path: path.relative,
-      replacements: args.replace_all === true ? occurrences : 1,
-      added: diff.added,
-      deleted: diff.deleted,
-    };
-  } catch (error) {
-    return { ok: false, error: describe(error) };
-  }
+    const before = file.bytes.toString("utf8");
+    const occurrences = countOccurrences(before, args.old_string);
+    if (occurrences === 0) {
+      // The most common failure, and the one worth explaining: the model is
+      // usually one space or one newline out.
+      return {
+        ok: false,
+        error: `'old_string' does not appear in ${path.relative}. It must match the file exactly, including indentation.`,
+      };
+    }
+    if (occurrences > 1 && args.replace_all !== true) {
+      return {
+        ok: false,
+        error: `'old_string' appears ${occurrences} times in ${path.relative}.`
+          + " Include enough surrounding text to make it unique, or pass replace_all.",
+      };
+    }
+    const after = args.replace_all === true
+      ? before.split(args.old_string).join(args.new_string)
+      : before.replace(args.old_string, args.new_string);
+    if (Buffer.byteLength(after) > bounds.maxFileBytes) {
+      return { ok: false, error: `The result exceeds the ${bounds.maxFileBytes}-byte write limit.` };
+    }
+    const diff = unifiedDiff(before, after, { path: path.relative });
+    const decision = await context.approve({
+      kind: "write",
+      fileName: path.relative,
+      toolName: "edit_file",
+      toolArguments: { path: path.relative, replacements: args.replace_all === true ? occurrences : 1 },
+      diff: diff.text,
+    });
+    if (decision.kind !== "approve-once") return denied(decision);
+    try {
+      const effect = await file.write(Buffer.from(after));
+      await context.recordFileEffect?.({ ...effect, beforeContent: before });
+      return {
+        ok: true,
+        path: path.relative,
+        effect,
+        replacements: args.replace_all === true ? occurrences : 1,
+        added: diff.added,
+        deleted: diff.deleted,
+      };
+    } catch (error) {
+      return { ok: false, error: describe(error) };
+    }
+  } finally { await file.close(); }
 }
 
 function countOccurrences(haystack, needle) {
@@ -714,6 +705,7 @@ async function fetchWorkspaceUrl(bounds, args, context, signal, fetchImpl) {
   if (target.protocol !== "https:" && target.protocol !== "http:") {
     return { ok: false, error: `Only http and https can be fetched; '${target.protocol}' cannot.` };
   }
+  signal = signal ? AbortSignal.any([signal, AbortSignal.timeout(bounds.fetchTimeoutMs)]) : AbortSignal.timeout(bounds.fetchTimeoutMs);
   const visited = [];
   let current = target;
   for (let redirect = 0; redirect <= bounds.maxRedirects; redirect += 1) {
@@ -738,16 +730,19 @@ async function fetchWorkspaceUrl(bounds, args, context, signal, fetchImpl) {
     }
     const location = response.status >= 300 && response.status < 400 ? response.headers.get("location") : undefined;
     if (location) {
+      await cancelBody(response);
       let next;
       try {
         next = new URL(location, current);
       } catch {
         return { ok: false, error: `${current.host} redirected to something that is not a URL.` };
       }
+      if (!["http:", "https:"].includes(next.protocol)) return { ok: false, error: "Redirect protocol is not allowed." };
       current = next;
       continue;
     }
     if (!response.ok) {
+      await cancelBody(response);
       return { ok: false, error: `${current.host} answered ${response.status}.`, status: response.status };
     }
     // From here on this run has read something from outside it. Any
@@ -757,18 +752,17 @@ async function fetchWorkspaceUrl(bounds, args, context, signal, fetchImpl) {
     context.taint?.(`fetch_url read ${current.origin}`);
     const type = response.headers.get("content-type") ?? "";
     if (!/^(text\/|application\/(json|xml|xhtml))/i.test(type)) {
+      await cancelBody(response);
       return { ok: false, error: `${current.href} is ${type || "of unknown type"}; only text can be read.` };
     }
-    const body = await response.text().catch((error) => ({ error }));
-    if (typeof body !== "string") return { ok: false, error: describe(body.error) };
-    const truncated = Buffer.byteLength(body) > bounds.maxFetchBytes;
+    const { bytes, truncated } = await readResponseBytes(response, bounds.maxFetchBytes, { signal, truncate: true });
     return {
       ok: true,
       url: current.href,
       ...(visited.length > 1 ? { redirects: visited.slice(0, -1) } : {}),
       contentType: type,
       truncated,
-      content: truncated ? body.slice(0, bounds.maxFetchBytes) : body,
+      content: utf8Prefix(bytes),
     };
   }
   return { ok: false, error: `Too many redirects, starting at ${target.href}.` };
@@ -789,47 +783,9 @@ async function runWorkspaceCommand(root, bounds, args, context, signal, sandbox)
   // The approval names the command the model asked for; the sandbox decides
   // where it actually runs.
   const executed = sandbox ? sandbox.wrap(command) : command;
-  return new Promise((resolveResult) => {
-    const [executable, ...rest] = executed;
-    // No shell: the argv array is passed through, so quoting and metacharacters
-    // are never interpreted on the agent's behalf.
-    const child = spawn(executable, rest, { cwd: root, shell: false, signal, stdio: ["ignore", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    let truncated = false;
-    const collect = (chunk, target) => {
-      const current = target === "out" ? stdout : stderr;
-      const room = Math.max(0, bounds.maxOutputBytes - Buffer.byteLength(current));
-      if (Buffer.byteLength(chunk) > room) truncated = true;
-      const text = chunk.toString("utf8", 0, room);
-      if (target === "out") stdout += text;
-      else stderr += text;
-    };
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGKILL");
-    }, bounds.shellTimeoutMs);
-    child.stdout.on("data", (chunk) => collect(chunk, "out"));
-    child.stderr.on("data", (chunk) => collect(chunk, "err"));
-    child.once("error", (error) => {
-      clearTimeout(timer);
-      resolveResult({ ok: false, error: describe(error) });
-    });
-    child.once("close", (code, exitSignal) => {
-      clearTimeout(timer);
-      resolveResult({
-        ok: code === 0,
-        ...(code === 0 ? {} : { error: commandFailure(command, code, exitSignal, timedOut, bounds, stderr, stdout) }),
-        exitCode: code,
-        signal: exitSignal ?? undefined,
-        stdout,
-        stderr,
-        truncated,
-        ...(sandbox ? { sandbox: sandbox.describe() } : {}),
-      });
-    });
-  });
+  const result = await runChild(executed, { cwd: root, signal, env: commandEnvironment(), timeoutMs: bounds.shellTimeoutMs, outputLimit: bounds.maxOutputBytes });
+  const ok = result.exitCode === 0 && !result.timedOut;
+  return { ok, ...result, ...(ok ? {} : { error: commandFailure(command, result.exitCode, result.signal, result.timedOut, bounds, result.stderr, result.stdout) }), ...(sandbox ? { sandbox: sandbox.describe() } : {}) };
 }
 
 // Why a command failed, in one line the receipt can carry: the exit code or

@@ -459,7 +459,7 @@ function modelValueControl(entry, providerName) {
     priceNote.textContent = !chosen
       ? ""
       : chosen.knownPrice
-        ? "known price: USD " + chosen.knownPrice.inputPerMillion + "/" + chosen.knownPrice.outputPerMillion + " per M, as of " + chosen.knownPrice.asOf
+        ? "known price: USD " + chosen.knownPrice.inputPerMillion + "/" + chosen.knownPrice.outputPerMillion + " per M, as of " + chosen.knownPrice.asOf + " · " + chosen.knownPrice.status + " · " + chosen.knownPrice.source
         : "no known price for this model — set observability.pricing.models by hand";
   };
   setPriceNote();
@@ -489,6 +489,7 @@ function modelValueControl(entry, providerName) {
               // Only where the source actually separated it — writing it
               // equal to the input rate would claim a discount nobody
               // published.
+              ...(model.knownPrice.cacheWritePerMillion !== undefined ? { cacheWritePerMillion: model.knownPrice.cacheWritePerMillion } : {}),
               ...(model.knownPrice.cacheReadPerMillion !== undefined
                 ? { cacheReadPerMillion: model.knownPrice.cacheReadPerMillion }
                 : {}),

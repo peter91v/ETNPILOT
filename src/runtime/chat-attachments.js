@@ -1,5 +1,7 @@
+import { workspaceFile } from "./workspace-files.js";
+import { utf8Prefix } from "./bounded-io.js";
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, readFile, readdir, realpath } from "node:fs/promises";
+import { lstat, realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
 // Files in a conversation.
@@ -64,19 +66,22 @@ export async function resolveAttachments(text, {
       continue;
     }
     const path = inside === "" ? "." : inside.split(sep).join("/");
-    const verdict = authorize?.(path);
-    if (verdict?.kind === "reject") {
-      refused.push({ path, reason: verdict.reason ?? "the read policy refuses it" });
+    const verdict = authorize ? await authorize(path) : { kind: "approve-once" };
+    if (verdict?.kind !== "approve-once" && verdict?.kind !== "allow") {
+      refused.push({ path, reason: verdict?.reason ?? "an explicit read approval is required" });
       continue;
     }
     const stats = await lstat(real);
     if (stats.isDirectory()) {
-      const names = (await readdir(real, { withFileTypes: true }))
-        .map((entry) => (entry.isDirectory() ? `${entry.name}/` : entry.name))
-        .sort();
-      const shown = names.slice(0, limits.maxDirectoryEntries);
-      const content = shown.join("\n");
-      attachments.push(record(path, "directory", content, Buffer.byteLength(content), names.length > shown.length));
+      const room = Math.min(limits.maxFileBytes, limits.maxTotalBytes - total);
+      if (room <= 0) { refused.push({ path, reason: "attachment byte limit is used up" }); continue; }
+      const directory = await workspaceFile(workspace, `${path}/.etnpilot-attachment-list-${Date.now()}`, { maxBytes: room, missing: true, directory: true });
+      let listing;
+      try { listing = await directory.list({ maxEntries: limits.maxDirectoryEntries, maxBytes: room }); }
+      finally { await directory.close(); }
+      const content = listing.entries.map((entry) => entry.type === "directory" ? `${entry.name}/` : entry.name).sort().join("\n");
+      total += Buffer.byteLength(content);
+      attachments.push(record(path, "directory", content, Buffer.byteLength(content), listing.truncated));
       continue;
     }
     if (!stats.isFile()) {
@@ -87,21 +92,21 @@ export async function resolveAttachments(text, {
       refused.push({ path, reason: `this turn's ${limits.maxTotalBytes}-byte limit for attachments is used up` });
       continue;
     }
-    const bytes = await readFile(real);
-    if (bytes.includes(0)) {
-      refused.push({ path, reason: "it looks binary" });
-      continue;
-    }
     const room = Math.min(limits.maxFileBytes, limits.maxTotalBytes - total);
-    const truncated = bytes.length > room;
-    const content = bytes.subarray(0, room).toString("utf8");
-    total += Math.min(bytes.length, room);
-    // The digest is of the whole file, not of the part that was sent: it names
-    // what the person meant, and a truncated attachment says so beside it.
-    attachments.push({
-      ...record(path, "file", content, bytes.length, truncated),
-      digest: createHash("sha256").update(bytes).digest("hex"),
-    });
+    let file;
+    let bytes;
+    let details;
+    try {
+      file = await workspaceFile(workspace, path, { maxBytes: room, truncate: true });
+      bytes = file.bytes;
+      details = file.details;
+    } catch (error) { refused.push({ path, reason: error.message }); continue; }
+    finally { await file?.close(); }
+    if (bytes.includes(0)) { refused.push({ path, reason: "it looks binary" }); continue; }
+    const content = utf8Prefix(bytes);
+    total += Buffer.byteLength(content);
+    attachments.push({ ...record(path, "file", content, details.size, details.size > bytes.length), digestScope: "sent-content" });
+
   }
   return { attachments, refused, ignored };
 }
@@ -112,6 +117,8 @@ function record(path, kind, content, bytes, truncated) {
     kind,
     bytes,
     truncated,
+    digestScope: "sent-content",
+    sentBytes: Buffer.byteLength(content),
     digest: createHash("sha256").update(content).digest("hex"),
     content,
   };
@@ -120,7 +127,7 @@ function record(path, kind, content, bytes, truncated) {
 // What goes into the turn, and what goes into the receipt: the second is the
 // first without the text.
 export function summarizeAttachments(attachments) {
-  return attachments.map(({ path, kind, bytes, digest, truncated }) => ({ path, kind, bytes, digest, truncated }));
+  return attachments.map(({ path, kind, bytes, digest, truncated, digestScope, sentBytes }) => ({ path, kind, bytes, digest, truncated, ...(digestScope ? { digestScope, sentBytes } : {}) }));
 }
 
 // The message the model receives: what the person typed, then the files in
