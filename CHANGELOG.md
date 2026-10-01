@@ -8,7 +8,18 @@ pre-1.0, so breaking changes may appear in any release.
 
 ### Checks and hygiene (follow-up to the review)
 
-- The type check covers 102 of the files in `src/` (was 12); the rest are listed in `docs/typecheck.md`.
+- **Notification when an approval is pending** (`approval.notify`, see docs/approval-inbox.md): one POST per
+  request to an https address (ntfy-style or JSON). Only the kind, agent and ids are sent unless `includeDetails`
+  is set; a failed delivery never holds the run.
+- **`etnpilot provider presets` / `provider add <preset>`**: Gemini, Mistral, OpenRouter, Groq and Ollama as
+  one command (docs/providers.md). The settings writer gained a `project` scope for the committed file.
+- **`etnpilot gc`**: shows, and with `--apply` deletes, old sealed receipts and rotated telemetry (docs/maintenance.md).
+- Architecture decision records (docs/adr/), a release process (docs/releasing.md).
+- `etnpilot content diff`: what changed, was added or removed since the reviewed lock, before you lock it.
+- The Overview of a project with no runs shows a "Getting started" list (provider key, commit, first run), read live and gone after the first run.
+- The run list can be filtered by text and status; a running run's card shows tokens and cost so far.
+- An axe-core accessibility test visits every view in both colour schemes (dev dependency).
+- The type check covers every file in `src/` (was 12), and a test keeps it that way (`docs/typecheck.md`).
 - `etnpilot doctor` warns when a key from the environment would go to a host that is not the vendor's own.
 - Seeded random-input tests for the policy's path handling and the diff parser (`test/fuzz.test.js`).
 - `CODEOWNERS` for the security-relevant paths, and a pull request template that asks what leaves the machine.

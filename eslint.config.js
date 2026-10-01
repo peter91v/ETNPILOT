@@ -20,7 +20,21 @@ export default [
       eqeqeq: ["error", "always", { null: "ignore" }],
       "no-var": "error",
       "prefer-const": ["error", { destructuring: "all" }],
+      // A ratchet, not a goal: the most complex function today is just under
+      // this. A function above it fails; lower it as the big ones are split.
+      complexity: ["error", 60],
     },
+  },
+  {
+    // The two known outliers, held at where they are so they cannot grow:
+    // the review server's request handler (one route table written as if/else)
+    // and the TUI's run detail. Splitting them is the open work.
+    files: ["src/ui/server.js"],
+    rules: { complexity: ["error", 160] },
+  },
+  {
+    files: ["src/tui/render.js"],
+    rules: { complexity: ["error", 71] },
   },
   {
     // The page's script runs in a browser as one file made of these, in order,

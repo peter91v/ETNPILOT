@@ -1,3 +1,4 @@
+// @ts-check
 import { createInterface } from "node:readline";
 import { quietSqliteWarning } from "./quiet-warnings.js";
 import { diagnose } from "../runtime/diagnose.js";
@@ -152,7 +153,7 @@ export async function runChat({
     // Before the first message rather than in its answer: a missing key found
     // by spending a turn is one turn too late.
     const health = await diagnose(projectRoot).catch(() => undefined);
-    if (health?.routing && health.routing.usable === null && health.routing.agent === choice.agent) {
+    if (health?.routing && health.routing.usable === null && /** @type {any} */ (health.routing).agent === choice.agent) {
       say(`! ${health.routing.hints.join(" ")}`);
     }
   }

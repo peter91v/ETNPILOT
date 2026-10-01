@@ -1,45 +1,10 @@
 # Type-check status
 
-`npm run typecheck` checks every file that starts with `// @ts-check` (102 of src/ today).
-The rest are listed here so the debt is visible rather than silent. To bring a file in,
-add the header, run `npx tsc -p tsconfig.json`, and fix what it finds.
+`npm run typecheck` (part of `npm run check`) checks every file under `src/` except the page's browser scripts
+in `src/ui/client/`, which run in one shared scope in the browser and are covered by `npm run test:ui`.
+Every checked file starts with `// @ts-check`; a new file without it fails `test/package.test.js`'s companion
+check below, so the list cannot quietly shrink again.
 
-Files not yet type-checked (no '// @ts-check' header), with the number of errors found when it was last tried:
-
-- `src/forge/forge.js` (9)
-- `src/tui/app.js` (8)
-- `src/runtime/project-content.js` (6)
-- `src/codegraph/codegraph.js` (6)
-- `src/runtime/chat-session.js` (5)
-- `src/ui/markdown.js` (4)
-- `src/tui/render.js` (4)
-- `src/tui/ansi.js` (4)
-- `src/runtime/workspace-lease.js` (4)
-- `src/runtime/project-checks.js` (4)
-- `src/runtime/evals.js` (4)
-- `src/policy/engine.js` (4)
-- `src/gitlab/issue-trigger.js` (4)
-- `src/cli/commands/agents.js` (4)
-- `src/runtime/workspace-files.js` (3)
-- `src/providers/search-worker.js` (3)
-- `src/workflow/queue.js` (2)
-- `src/runtime/replay.js` (2)
-- `src/providers/workspace-tools.js` (2)
-- `src/providers/sse.js` (2)
-- `src/plugins/worker.js` (2)
-- `src/plugins/vault.js` (2)
-- `src/git/worktrees.js` (2)
-- `src/config/migrate.js` (2)
-- `src/supply/attestation.js` (1)
-- `src/runtime/diagnose.js` (1)
-- `src/providers/register.js` (1)
-- `src/providers/openai-responses.js` (1)
-- `src/providers/copilot.js` (1)
-- `src/providers/anthropic.js` (1)
-- `src/gitlab/webhook-server.js` (1)
-- `src/core/text-safety.js` (1)
-- `src/config/settings.js` (1)
-- `src/cli/commands/usage.js` (1)
-- `src/cli/commands/servers.js` (1)
-- `src/cli/commands.js` (1)
-- `src/cli/chat.js` (1)
+Where the inferred type was wrong or too narrow, the code says so with a cast (`/** @type {any} */`) rather than
+a rewrite; those casts are the places to tighten when a file is next worked on. `@github/copilot-sdk` is an
+optional dependency, so its two `import()` sites carry `@ts-ignore`.

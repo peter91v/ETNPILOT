@@ -124,3 +124,88 @@ test("a key can be saved on the Accounts page, and the page never shows it back"
     await ui.close();
   }
 });
+
+test("the run list can be narrowed by text and by status", async (t) => {
+  if (skipReason) return t.skip(skipReason);
+  const setup = await project();
+  const runs = join(setup.root, ".etnpilot", "state", "runs");
+  await mkdir(runs, { recursive: true });
+  const receipt = (runId, status, terminal) => `${JSON.stringify({ mode: "execute", runId, ...(terminal ? { terminal: true, status, hash: "h".repeat(64) } : {}) })}\n`;
+  await writeFile(join(runs, "alpha-run.jsonl"), receipt("alpha-run", "succeeded", true));
+  await writeFile(join(runs, "beta-run.jsonl"), receipt("beta-run", "failed", true));
+  await writeFile(join(runs, "gamma-run.jsonl"), receipt("gamma-run", undefined, false));
+  const ui = await open(setup);
+  try {
+    await ui.page.evaluate(() => show("runs"));
+    const rows = () => ui.page.locator("#view-runs tbody tr").count();
+    await ui.page.locator("#view-runs tbody tr").first().waitFor();
+    assert.equal(await rows(), 3);
+    await ui.page.locator("#run-filter").fill("beta");
+    assert.equal(await rows(), 1);
+    assert.equal(await ui.page.locator("#run-filter").inputValue(), "beta", "typing does not rebuild the box");
+    await ui.page.locator("#run-filter").fill("");
+    await ui.page.locator("#run-status").selectOption("failed");
+    assert.equal(await rows(), 1);
+    await ui.page.locator("#run-status").selectOption("unsealed");
+    assert.equal(await rows(), 1);
+    assert.match(await ui.page.locator("#view-runs tbody").innerText(), /gamma-run/);
+    await ui.page.locator("#run-filter").fill("nothing-like-this");
+    await ui.page.getByText("No loaded run matches").waitFor();
+    assert.deepEqual(ui.problems, []);
+  } finally {
+    await ui.close();
+  }
+});
+
+// axe-core checks what a person using a screen reader or a keyboard would run
+// into: names, roles, contrast, labels. The views are visited with data in
+// them where a project can have it, in both colour schemes.
+test("no view has an accessibility violation axe can find", async (t) => {
+  if (skipReason) return t.skip(skipReason);
+  const { readFile } = await import("node:fs/promises");
+  const axeSource = await readFile(new URL("../node_modules/axe-core/axe.min.js", import.meta.url), "utf8");
+  const ui = await open(await project());
+  try {
+    await ui.page.addScriptTag({ content: axeSource });
+    const found = [];
+    for (const scheme of ["light", "dark"]) {
+      await ui.page.emulateMedia({ colorScheme: scheme });
+      for (const id of VIEWS) {
+        await ui.page.evaluate((view) => show(view), id);
+        await ui.page.waitForTimeout(250);
+        const result = await ui.page.evaluate(() => globalThis.axe.run(document, { resultTypes: ["violations"] }));
+        for (const violation of result.violations) {
+          found.push(`${scheme}/${id}: ${violation.id} (${violation.impact}) ${violation.nodes.slice(0, 2).map((node) => node.target.join(" ")).join(" | ")}`);
+        }
+      }
+    }
+    assert.deepEqual(found, []);
+  } finally {
+    await ui.close();
+  }
+});
+
+test("a project with no runs shows what is left before the first one, and the list goes once there is a run", async (t) => {
+  if (skipReason) return t.skip(skipReason);
+  const setup = await project();
+  const ui = await open(setup);
+  try {
+    await ui.page.evaluate(() => show("overview"));
+    await ui.page.getByText("Getting started").first().waitFor();
+    await ui.page.getByText("Give ETNPilot a provider key").first().waitFor();
+    assert.deepEqual(ui.problems, []);
+  } finally {
+    await ui.close();
+  }
+  const runs = join(setup.root, ".etnpilot", "state", "runs");
+  await mkdir(runs, { recursive: true });
+  await writeFile(join(runs, "done.jsonl"), `${JSON.stringify({ mode: "execute", runId: "done", terminal: true, status: "succeeded", hash: "h".repeat(64) })}\n`);
+  const later = await open(setup);
+  try {
+    await later.page.evaluate(() => show("overview"));
+    await later.page.waitForTimeout(400);
+    assert.equal(await later.page.getByText("Getting started").count(), 0);
+  } finally {
+    await later.close();
+  }
+});

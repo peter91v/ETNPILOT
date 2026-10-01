@@ -1,3 +1,4 @@
+// @ts-check
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -19,7 +20,7 @@ export async function buildRunAttestation(receiptPath, {
   const entries = (await readFile(path, "utf8")).split("\n").filter(Boolean).map((line) => JSON.parse(line));
   const terminal = entries.findLast((entry) => entry.terminal === true);
   if (!terminal) throw new Error(`Receipt '${path}' has no terminal entry; the run did not finish.`);
-  if (!verification.valid) throw new Error(`Receipt '${path}' did not verify: ${verification.reason}.`);
+  if (!verification.valid) throw new Error(`Receipt '${path}' did not verify: ${/** @type {any} */ (verification).reason}.`);
 
   const workspace = resolve(terminal.workspace?.path ?? root);
   const changed = terminal.git?.changedPaths ?? [];

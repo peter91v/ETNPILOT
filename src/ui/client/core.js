@@ -293,7 +293,11 @@ function shortValue(value, limit = 70) {
 
 function table(columns, rows, emptyText, options = {}) {
   if (rows.length === 0) return el("p", { class: "empty", text: emptyText });
-  const head = el("tr", {}, columns.map((column) => el("th", { text: column.label })));
+  // A column of buttons has no title to show, and a header without text is
+  // nothing to a screen reader.
+  const head = el("tr", {}, columns.map((column) => column.label === ""
+    ? el("th", {}, [el("span", { class: "sr-only", text: "Actions" })])
+    : el("th", { text: column.label })));
   const body = rows.map((row) => el("tr", { class: options.selected?.(row) ? "selected" : "" }, columns.map((column) => {
     const value = column.value(row);
     if (value instanceof Node || Array.isArray(value)) {

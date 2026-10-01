@@ -1,3 +1,4 @@
+// @ts-check
 import { definePlugin } from "etnpilot/plugin";
 
 let runtime;
@@ -98,7 +99,7 @@ function createVaultRuntime(context, options) {
     return request(enginePath, { method: "GET", token });
   }
 
-  function request(path, { method, token, body }) {
+  function request(path, { method, token, body } = /** @type {any} */ ({})) {
     const headers = { accept: "application/json" };
     if (body !== undefined) headers["content-type"] = "application/json";
     if (token) headers["x-vault-token"] = token;

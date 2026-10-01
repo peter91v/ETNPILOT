@@ -136,3 +136,26 @@ function configFor(lockFile = ".etnpilot/content-lock.json") {
     },
   };
 }
+
+test("content diff names what changed, was added or removed since the lock", async () => {
+  const { diffProjectContent } = await import("../src/content/provenance.js");
+  const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-diff-"));
+  await mkdir(join(root, ".etnpilot", "agents"), { recursive: true });
+  await writeFile(join(root, ".etnpilot", "agents", "a.yaml"), "name: a\nprompt: one\n");
+  await writeFile(join(root, ".etnpilot", "agents", "b.yaml"), "name: b\nprompt: one\n");
+  const config = { content: { provenance: { mode: "enforce" } } };
+  assert.equal((await diffProjectContent(root, config)).locked, false);
+  await writeContentLock(root, config);
+  assert.deepEqual(await diffProjectContent(root, config), { locked: true, changed: [], added: [], removed: [], unchanged: 2 });
+  await writeFile(join(root, ".etnpilot", "agents", "a.yaml"), "name: a\nprompt: two and longer\n");
+  await writeFile(join(root, ".etnpilot", "agents", "c.yaml"), "name: c\nprompt: new\n");
+  await rm(join(root, ".etnpilot", "agents", "b.yaml"));
+  const diff = await diffProjectContent(root, config);
+  assert.deepEqual(diff.changed.map((entry) => entry.path), [".etnpilot/agents/a.yaml"]);
+  assert.deepEqual(diff.added.map((entry) => entry.path), [".etnpilot/agents/c.yaml"]);
+  assert.deepEqual(diff.removed.map((entry) => entry.path), [".etnpilot/agents/b.yaml"]);
+  assert.ok(diff.changed[0].bytesAfter > diff.changed[0].bytesBefore);
+});

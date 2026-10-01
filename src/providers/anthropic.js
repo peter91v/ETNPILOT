@@ -1,3 +1,4 @@
+// @ts-check
 import { accountRequest } from "./usage-meter.js";
 import { providerToolNames } from "./tool-names.js";
 import { missingApiKey } from "./openai-compatible.js";
@@ -259,7 +260,7 @@ export async function listModels({ baseUrl = DEFAULT_BASE_URL, apiKey, fetchImpl
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
-async function request({ endpoint, apiKey, fetchImpl, context, body, stream }) {
+async function request({ endpoint, apiKey, fetchImpl, context, body, stream } = /** @type {any} */ ({})) {
   let response;
   try {
     response = await fetchImpl(endpoint, {

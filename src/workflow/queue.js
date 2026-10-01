@@ -1,3 +1,4 @@
+// @ts-check
 import { randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -174,7 +175,7 @@ export class WorkflowQueue {
     }
     const job = this.get(id);
     this.#assertOwned(job, id, workerId);
-    const canRetry = safeToRetry && job.attempts < job.maxAttempts;
+    const canRetry = safeToRetry && /** @type {any} */ (job).attempts < /** @type {any} */ (job).maxAttempts;
     const now = this.now();
     const status = canRetry ? "retry_scheduled" : "failed";
     const updated = this.database.prepare(`

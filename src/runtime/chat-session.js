@@ -1,3 +1,4 @@
+// @ts-check
 import { swallow } from "./swallow.js";
 import { readRegularFile } from "./bounded-io.js";
 import { acquireWorkspaceLease } from "./workspace-lease.js";
@@ -384,7 +385,7 @@ export async function compactionCheck(root, sessionId) {
 async function compactSessionUnlocked({ root, sessionId, agent, runner, now = () => new Date(), ...runOptions } = /** @type {any} */ ({})) {
   const check = await compactionCheck(root, sessionId);
   if (!check.ok) return check;
-  const { prior, covered, fresh } = check;
+  const { prior, covered, fresh } = /** @type {any} */ (check);
   await assertWithinBudget(root, prior, runOptions.env);
   const upToTurn = prior.turns.at(-1).turn;
   const run = runner ?? (await import("./project-runner.js")).runProject;
@@ -412,7 +413,7 @@ export async function runChatTurn(options = {}) {
   finally { lease.release(); }
 }
 
-export async function undoLastTurn(options = {}) {
+export async function undoLastTurn(options = /** @type {any} */ ({})) {
   const lease = options.workspaceLease ?? await acquireWorkspaceLease(options.root, { sessionId: options.sessionId });
   try { return await undoLastTurnUnlocked({ ...options, workspaceLease: lease }); }
   finally { lease.release(); }

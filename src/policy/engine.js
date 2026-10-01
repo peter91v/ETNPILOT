@@ -1,3 +1,4 @@
+// @ts-check
 import { realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 
@@ -11,7 +12,7 @@ const RULE_ID = /^[a-z0-9][a-z0-9._-]*$/i;
 const CASE_INSENSITIVE_FILESYSTEM = process.platform === "darwin" || process.platform === "win32";
 
 export class PolicyEngine {
-  constructor(config = {}, {
+  constructor(config = /** @type {any} */ ({}), {
     caseInsensitivePaths = CASE_INSENSITIVE_FILESYSTEM,
     resolveSymlinks = true,
   } = /** @type {any} */ ({})) {

@@ -1,3 +1,4 @@
+// @ts-check
 import { swallow } from "./swallow.js";
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -215,13 +216,14 @@ export async function createWorkflow({ root, config, input }) {
   }
   const directory = join(resolve(root), ".etnpilot", "workflows");
   await mkdir(directory, { recursive: true });
-  const path = join(directory, `${checked.workflow.name}.yaml`);
+  const workflow = /** @type {any} */ (checked.workflow);
+  const path = join(directory, `${workflow.name}.yaml`);
   const content = renderWorkflowFile(checked.workflow, { note: "Created in the page. Read it, then lock it with 'etnpilot content lock' (or in the Content view)." });
   await writeFile(path, content, { encoding: "utf8", flag: "wx" }).catch((error) => {
-    if (error.code === "EEXIST") throw Object.assign(new Error(`A workflow called '${checked.workflow.name}' already exists.`), { statusCode: 409 });
+    if (error.code === "EEXIST") throw Object.assign(new Error(`A workflow called '${workflow.name}' already exists.`), { statusCode: 409 });
     throw error;
   });
-  return { name: checked.workflow.name, path: `.etnpilot/workflows/${checked.workflow.name}.yaml`, unreviewed: true };
+  return { name: workflow.name, path: `.etnpilot/workflows/${workflow.name}.yaml`, unreviewed: true };
 }
 
 // ------------------------------------------------------------------------ agents
@@ -244,7 +246,7 @@ export async function createAgent({ root, config, input }) {
   const unknown = asked.filter((tool) => !known.includes(tool));
   if (unknown.length > 0) errors.push(`Unknown tools: ${unknown.join(", ")}.`);
   const etn = join(resolve(root), ".etnpilot");
-  const skillNames = (await readdir(join(etn, "skills"), { withFileTypes: true }).catch(() => [])).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+  const skillNames = /** @type {import("node:fs").Dirent[]} */ (await readdir(join(etn, "skills"), { withFileTypes: true }).catch(() => [])).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
   const agentNames = (await readdir(join(etn, "agents")).catch(() => [])).filter((file) => /\.ya?ml$/.test(file)).map((file) => file.replace(/\.ya?ml$/, ""));
   const skills = (Array.isArray(input?.skills) ? input.skills : []).map(String);
   const missingSkills = skills.filter((skill) => !skillNames.includes(skill));
@@ -305,7 +307,7 @@ export async function updateAgent({ root, config, name, input }) {
     const unknown = asked.filter((tool) => !known.includes(tool));
     if (unknown.length > 0) errors.push(`Unknown tools: ${unknown.join(", ")}.`);
   }
-  const skillNames = (await readdir(join(etn, "skills"), { withFileTypes: true }).catch(() => [])).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+  const skillNames = /** @type {import("node:fs").Dirent[]} */ (await readdir(join(etn, "skills"), { withFileTypes: true }).catch(() => [])).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
   const agentNames = (await readdir(join(etn, "agents")).catch(() => [])).filter((file) => /\.ya?ml$/.test(file)).map((file) => file.replace(/\.ya?ml$/, ""));
   const skills = Array.isArray(input?.skills) ? input.skills.map(String) : undefined;
   if (skills?.some((skill) => !skillNames.includes(skill))) errors.push(`Skills that do not exist: ${skills.filter((skill) => !skillNames.includes(skill)).join(", ")}.`);

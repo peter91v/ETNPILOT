@@ -1,3 +1,4 @@
+// @ts-check
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import YAML from "yaml";
@@ -16,7 +17,9 @@ import {
 // the review page, and the app all change settings the same way and are
 // refused for the same reasons.
 
-const SCOPES = Object.freeze(["local", "global"]);
+// "project" is the committed file: for changes that are meant to be shared, such
+// as adding a provider the whole team uses. The other two are the user's own.
+const SCOPES = Object.freeze(["local", "global", "project"]);
 
 // The values a setting actually accepts, so a surface can offer them instead
 // of asking a person to remember them. Every list here is the one the code
@@ -72,9 +75,10 @@ export function projectConfigFile(root) {
 
 export function scopeFile(scope, { root, env = process.env } = /** @type {any} */ ({})) {
   assertScope(scope);
+  if (scope === "project") return projectConfigFile(root);
   return scope === "global"
     ? globalConfigFile(env)
-    : layerPaths(projectConfigFile(root), { env }).find((layer) => layer.source === "user-local").path;
+    : layerPaths(projectConfigFile(root), { env }).find((layer) => layer.source === "user-local")?.path ?? "";
 }
 
 export async function describeSettings({ root = process.cwd(), env = process.env } = /** @type {any} */ ({})) {
@@ -137,8 +141,8 @@ async function writeSetting(path, change, { root, env, scope }) {
   assertPath(path);
   const projectFile = projectConfigFile(root);
   const file = scopeFile(scope, { root, env });
-  const source = scope === "global" ? "user-global" : "user-local";
-  const text = await readFile(file, "utf8").catch(ignoreMissing);
+  const source = scope === "global" ? "user-global" : scope === "project" ? "project" : "user-local";
+  const text = /** @type {string | undefined} */ (await readFile(file, "utf8").catch(ignoreMissing));
   const document = text === undefined ? new YAML.Document({}) : YAML.parseDocument(text);
   const keys = path.split(".");
   if (change.present) document.setIn(keys, change.value);
@@ -158,8 +162,9 @@ async function writeSetting(path, change, { root, env, scope }) {
     ?? merged.refusals[0];
   if (refusal) throw new SettingsRefused(refusal.path, refusal.reason);
 
-  await mkdir(dirname(file), { recursive: true, mode: 0o700 });
-  await writeFile(file, candidate, { encoding: "utf8", mode: 0o600 });
+  // The committed file keeps the permissions it has; the user's own are private.
+  await mkdir(dirname(file), { recursive: true, ...(scope === "project" ? {} : { mode: 0o700 }) });
+  await writeFile(file, candidate, scope === "project" ? "utf8" : { encoding: "utf8", mode: 0o600 });
   return {
     path,
     file,

@@ -1,3 +1,4 @@
+// @ts-check
 import { AUTH_USAGE } from "./auth.js";
 import { TRUST_USAGE, guardProject, runTrustCommand } from "./trust.js";
 import { agentsCommands } from "./commands/agents.js";
@@ -10,6 +11,8 @@ import { receiptsCommands } from "./commands/receipts.js";
 import { securityCommands } from "./commands/security.js";
 import { serversCommands } from "./commands/servers.js";
 import { modelsCommands } from "./commands/models.js";
+import { gcCommands } from "./commands/gc.js";
+import { providersCommands } from "./commands/providers.js";
 import { usageCommands } from "./commands/usage.js";
 import { defaultWaitForShutdown, shouldOpenBrowser } from "./shared.js";
 
@@ -32,6 +35,8 @@ export const COMMANDS = [
   ...opsCommands,
   ...usageCommands,
   ...modelsCommands,
+  ...providersCommands,
+  ...gcCommands,
 ];
 
 export const CLI_OPTIONS = Object.freeze({
@@ -94,6 +99,10 @@ export const CLI_OPTIONS = Object.freeze({
   "no-forge": { type: "boolean" },
   global: { type: "boolean", default: false },
   changed: { type: "boolean", default: false },
+  name: { type: "string" },
+  "older-than": { type: "string" },
+  keep: { type: "string" },
+  apply: { type: "boolean", default: false },
   "record-fixtures": { type: "string" },
   raw: { type: "boolean", default: false },
   fixtures: { type: "string" },
@@ -126,6 +135,7 @@ Usage:
   etnpilot smoke [--provider name] [--model id] [--skip key,reply,tools,stream,toolstream,forge] [--gitlab] [--json]
   etnpilot forge [--root directory] [--dry-run | --preview]
   etnpilot content lock [--root directory]
+  etnpilot content diff [--json] [--root directory]
   etnpilot content verify [--root directory]
   etnpilot webhook serve [--root directory] [--host address] [--port number]
   etnpilot ui [--root directory] [--host address] [--port number] [--no-open] [--rotate-token]
@@ -153,6 +163,9 @@ ${TRUST_USAGE}
   etnpilot scan secrets [--root directory]
   etnpilot attest <receipt-file> [--out file] [--root directory]
   etnpilot telemetry summary [workflow-run-id] [--root directory]
+  etnpilot provider presets
+  etnpilot provider add <preset> [--name name] [--model id] [--force] [--root directory]
+  etnpilot gc [--older-than days] [--keep n] [--apply] [--json] [--root directory]
   etnpilot models [--provider name] [--json]       what the provider offers this account, with known prices
   etnpilot usage [--json] [--root directory]       tokens, requests and cost by model and by day
   etnpilot doctor [--root directory]
@@ -178,5 +191,5 @@ export async function runCli(positionals, values, { waitForShutdown = defaultWai
 
   const [entry] = COMMANDS.filter((candidate) => candidate.match({ command, subcommand }));
   if (!entry) throw new Error(`Unknown command: ${positionals.join(" ")}`);
-  return (await entry.run({ command, subcommand, rest, positionals, values, waitForShutdown })) ?? 0;
+  return (await entry.run(/** @type {any} */ ({ command, subcommand, rest, positionals, values, waitForShutdown }))) ?? 0;
 }

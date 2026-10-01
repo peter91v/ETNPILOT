@@ -1,3 +1,4 @@
+// @ts-check
 // A deliberately small Markdown subset built with DOM nodes only. Raw HTML
 // remains text; links accept HTTP(S), mailto, and local anchors only.
 export function renderChatMarkdown(text, document = globalThis.document) {
@@ -16,7 +17,7 @@ export function renderChatMarkdown(text, document = globalThis.document) {
       else if (value.startsWith("**")) { node = document.createElement("strong"); node.textContent = value.slice(2, -2); }
       else if (value.startsWith("*")) { node = document.createElement("em"); node.textContent = value.slice(1, -1); }
       else {
-        const link = /^\[([^\]]+)\]\((.+)\)$/.exec(value);
+        const link = /** @type {RegExpExecArray} */ (/^\[([^\]]+)\]\((.+)\)$/.exec(value));
         let safe = link[2].startsWith("#");
         try { safe ||= ["http:", "https:", "mailto:"].includes(new URL(link[2]).protocol); } catch { /* text */ }
         node = document.createElement(safe ? "a" : "span"); node.textContent = link[1];

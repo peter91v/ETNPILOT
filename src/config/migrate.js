@@ -1,3 +1,4 @@
+// @ts-check
 import { createHash } from "node:crypto";
 import { lstat, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, relative } from "node:path";
@@ -324,7 +325,7 @@ async function walkForNamed(root, names, directory = root, depth = 0, found = []
 }
 
 async function listFiles(directory, extensions) {
-  const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+  const entries = /** @type {import("node:fs").Dirent[]} */ (await readdir(directory, { withFileTypes: true }).catch(() => []));
   return entries.filter((entry) => entry.isFile() && extensions.includes(extname(entry.name))).map((entry) => entry.name).sort();
 }
 

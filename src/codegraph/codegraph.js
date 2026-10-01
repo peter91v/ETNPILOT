@@ -1,3 +1,4 @@
+// @ts-check
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 
@@ -96,11 +97,12 @@ export class CodeGraph {
     if (!Number.isInteger(maxDepth) || maxDepth < 0) throw new TypeError("maxDepth must be a non-negative integer.");
     const graph = this.#requireGraph();
     const changed = paths.map(normalizePath);
+    /** @type {Array<{ path: string, depth: number, via: string | null, kind?: string }>} */
     const queue = changed.map((path) => ({ path, depth: 0, via: null }));
     const impacted = new Map(queue.map((entry) => [entry.path, entry]));
 
     while (queue.length > 0) {
-      const current = queue.shift();
+      const current = /** @type {NonNullable<typeof queue[number]>} */ (queue.shift());
       if (current.depth >= maxDepth) continue;
       for (const path of graph.getFileDependents(current.path).sort()) {
         if (impacted.has(path)) continue;

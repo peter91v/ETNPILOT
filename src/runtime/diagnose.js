@@ -1,3 +1,4 @@
+// @ts-check
 import { swallow } from "./swallow.js";
 import { access } from "node:fs/promises";
 import { join } from "node:path";
@@ -24,6 +25,7 @@ export async function diagnose(root) {
     nodeSupported: major > 22 || (major === 22 && minor >= 13),
     git: await commandExists("git"),
     sqlite: await import("node:sqlite").then(() => true, () => false),
+    // @ts-ignore -- an optional dependency: it is not installed everywhere
     copilotSdk: await import("@github/copilot-sdk").then(() => true, () => false),
     copilotSdkAvailableForPlatform: copilotSdkPlatformSupported(),
     project: await access(join(root, ".etnpilot", "etnpilot.yaml")).then(() => true, () => false),

@@ -1,3 +1,4 @@
+// @ts-check
 import { ProviderError } from "./router.js";
 
 // Server-sent events, and the two ways a provider's stream is folded back into
@@ -142,7 +143,7 @@ export async function collectAnthropicStream(response, { onDelta, onUsage, signa
       safeToRetry: true,
     });
   }
-  message.content = blocks.filter(Boolean);
+  /** @type {any} */ (message).content = blocks.filter(Boolean);
   return message;
 }
 
@@ -200,7 +201,7 @@ export async function collectChatStream(response, { onDelta, onUsage, signal } =
   const done = calls.filter(Boolean);
   if (done.length > 0) {
     message.tool_calls = done;
-    if (message.content === "") message.content = null;
+    if (message.content === "") /** @type {any} */ (message).content = null;
   }
   return { id, model, choices: [{ index: 0, message, finish_reason: finish }], usage };
 }

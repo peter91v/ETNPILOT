@@ -78,3 +78,26 @@ expires and requires inspected, forced replay. Jobs that were still queued resum
 
 Protect the project directory and approval CLI with normal operating-system access controls. Anyone
 who can write the inbox database can authorize agent operations.
+
+## Telling someone that a run is waiting
+
+A run that waits for approval is only useful if the person knows. Set `approval.notify.url` and every new
+pending request is announced with one POST (from `etnpilot run --approvals inbox`, the page, and the
+webhook service):
+
+```yaml
+approval:
+  notify:
+    url: https://ntfy.sh/my-private-topic   # https; http only to this machine
+    format: ntfy                           # ntfy (plain text, with a title) | json (default)
+    includeDetails: false                  # default
+    timeoutMs: 5000
+```
+
+What leaves the machine: the kind of operation, the agent, the run and request ids and when the request
+expires. The command, path or URL being approved are **not** sent unless `includeDetails: true`, because the
+service is a third party and a command can hold what the policy protects. With `ntfy`, the topic name is the
+only secret: use a long random one.
+
+A notification that cannot be delivered is reported on stderr (naming the host, never the address) and does
+not delay or fail the run; the request is in the inbox either way.

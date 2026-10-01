@@ -1,5 +1,6 @@
 // @ts-check
 import { ApprovalInbox, createInboxApprovalHandler } from "../core/approval-inbox.js";
+import { createApprovalNotifier } from "../core/approval-notify.js";
 import { WorkflowQueue } from "../workflow/queue.js";
 import { access } from "node:fs/promises";
 import { createTerminalApprovalHandler } from "../core/terminal-approval.js";
@@ -35,6 +36,7 @@ export async function createRunApprovalHandler(root, source = "terminal") {
     inbox,
     timeoutMs: inboxConfig.timeoutMs ?? 24 * 60 * 60_000,
     pollIntervalMs: inboxConfig.pollIntervalMs ?? 500,
+    notifier: createApprovalNotifier(config?.approval?.notify),
     onPending: (record) => {
       console.error(`Waiting for a decision on ${record.operationKind} ${record.id} — 'etnpilot tui' or 'etnpilot approval approve'.`);
     },

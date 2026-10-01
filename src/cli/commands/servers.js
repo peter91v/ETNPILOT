@@ -1,3 +1,4 @@
+// @ts-check
 import { createFirstRunApp } from "../../tui/first-run.js";
 import { createGitLabWebhookServer } from "../../gitlab/webhook-server.js";
 import { createReviewServer } from "../../ui/server.js";
@@ -100,7 +101,7 @@ export const serversCommands = [
       // there is a person to look: an interactive terminal, unless they said
       // otherwise. Nothing here can fail the server that is already listening.
       if (shouldOpenBrowser(values, process.env, process.stdout)) {
-        const opened = await openInBrowser(address.url).catch((error) => ({ opened: false, reason: error.message }));
+        const opened = /** @type {any} */ (await openInBrowser(address.url).catch((error) => ({ opened: false, reason: error.message })));
         console.log(opened.opened
           ? `Opened it with '${opened.command}'. Use --no-open to keep it in the terminal.`
           : `Could not open a browser (${opened.reason}) — copy the link above.`);
