@@ -53,7 +53,7 @@ export function renderApp(state, options = {}) {
     agentMode: options.agentMode, agentCursor: options.agentCursor,
     checks: options.checks ?? [], results: options.checkResults ?? {}, running: options.checksRunning ?? new Set(),
     verification: options.verification,
-    chat: options.chat, cursor,
+    chat: options.chat,
   };
   const rendered = help
     ? renderHelp({ style, width, height: body, offset: helpOffset })
@@ -888,18 +888,6 @@ function renderHelp({ style, width, height, offset = 0 }) {
   const more = rows.length - start - visible.length;
   visible.push(style.dim(more > 0 ? `↑↓ scroll · ${more} more lines` : "↑↓ scroll · the end"));
   return visible;
-}
-
-export function helpLength(width, height) {
-  // Minus one for the blank line the last section in a column does not get.
-  const measure = (sections) => sections.reduce(
-    (total, [title, keys]) => total + keys.length + 2,
-    0,
-  ) - (sections.length > 0 ? 1 : 0);
-  const single = measure(HELP_SECTIONS);
-  if (single <= height) return single;
-  const half = Math.ceil(HELP_SECTIONS.length / 2);
-  return Math.max(measure(HELP_SECTIONS.slice(0, half)), measure(HELP_SECTIONS.slice(half)));
 }
 
 function twoColumns(sections, render, width) {

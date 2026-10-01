@@ -9,6 +9,11 @@ export class JsonlReceiptStore {
     this.path = path;
     this.signer = signer;
     this.pending = Promise.resolve();
+    // The chain's last link, kept after the first read. A receipt file belongs
+    // to one run and one writer, so reading the whole file for every entry (it
+    // was) made a long run quadratic: 1,600 entries took ten seconds, and a
+    // file past the read limit stopped the run.
+    this.tail = undefined;
   }
 
   async append(receipt) {
@@ -20,7 +25,8 @@ export class JsonlReceiptStore {
   async #append(receipt) {
     assertReceiptPayload(receipt);
     await mkdir(dirname(this.path), { recursive: true });
-    const previous = await this.#lastEntry();
+    this.tail ??= await this.#lastEntry();
+    const previous = this.tail;
     if (previous?.terminal === true) throw new Error("Cannot append to a sealed receipt chain.");
     const previousHash = previous?.hash ?? null;
     const payload = {
@@ -35,6 +41,7 @@ export class JsonlReceiptStore {
       hash,
       ...(signature ? { signature } : {}),
     })}\n`, "utf8");
+    this.tail = { hash, terminal: payload.terminal === true };
     return hash;
   }
 
@@ -44,7 +51,7 @@ export class JsonlReceiptStore {
       throw error;
     });
     const lastLine = content.trim().split("\n").filter(Boolean).at(-1);
-    return lastLine ? JSON.parse(lastLine) : undefined;
+    return lastLine ? JSON.parse(lastLine) : { hash: null, terminal: false };
   }
 }
 

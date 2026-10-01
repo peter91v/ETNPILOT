@@ -1,3 +1,4 @@
+import { swallow } from "./swallow.js";
 import { join, resolve } from "node:path";
 import { loadConfig } from "../config/load.js";
 import { verifyProjectContent } from "../content/provenance.js";
@@ -209,7 +210,7 @@ export async function runProjectCheck(id, { root, config, now = Date.now } = {})
   // JSON reader see the same thing.
   const ranAt = new Date(startedAt).toISOString();
   const resolved = config === undefined
-    ? await loadConfig(join(root, ".etnpilot", "etnpilot.yaml")).catch(() => undefined)
+    ? await loadConfig(join(root, ".etnpilot", "etnpilot.yaml")).catch(swallow("reading the configuration for checks", undefined))
     : config;
   try {
     const result = await check.run({ root, config: resolved });

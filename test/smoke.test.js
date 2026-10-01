@@ -123,3 +123,36 @@ test("an unknown provider is named", async () => {
   const report = await runSmoke(root, { config, env, provider: "nope" });
   assert.match(report.steps[0].detail, /No provider named 'nope'/);
 });
+
+test("doctor warns about what does not stop a run", async () => {
+  const { diagnose } = await import("../src/runtime/diagnose.js");
+  const { root } = await project();
+  const { mkdir, writeFile: write } = await import("node:fs/promises");
+  await mkdir(join(root, ".etnpilot"), { recursive: true });
+  await write(join(root, ".etnpilot", "etnpilot.yaml"), "version: 1\nproviders: {}\n");
+  const report = await diagnose(root);
+  const text = (report.warnings ?? []).join("\n");
+  assert.match(text, /Receipts are not signed/);
+  assert.match(text, /sandbox\.enabled is false/);
+});
+
+test("--gitlab reads who the token is and that the project can be seen, and writes nothing", async () => {
+  const { root, config, env } = await project();
+  config.git = { baseUrl: "https://git.example.test", project: "team/app" };
+  const calls = [];
+  const gitlabApi = async (url, options = {}) => {
+    calls.push({ url: String(url), method: options.method ?? "GET" });
+    if (String(url).endsWith("/api/v4/user")) return json({ username: "peter" });
+    if (String(url).includes("/projects/team%2Fapp")) return json({ path_with_namespace: "team/app", default_branch: "main" });
+    return json({}, 404);
+  };
+  const withToken = { ...env, ETNPILOT_GITLAB_TOKEN: ["glpat", "test", "not", "a", "real", "token", "value"].join("-") };
+  const report = await runSmoke(root, { config, env: withToken, skip: ["key", "reply", "tools", "stream", "toolstream", "forge"], gitlab: true, fetchImpl: gitlabApi });
+  const step = report.steps.find((entry) => entry.id === "gitlab");
+  assert.equal(step.status, "pass");
+  assert.match(step.detail, /signed in as peter, project team\/app is visible/);
+  assert.ok(calls.every((call) => call.method === "GET"));
+  // Not part of an ordinary run.
+  const plain = await runSmoke(root, { config, env: withToken, skip: ["key", "reply", "tools", "stream", "toolstream", "forge"], fetchImpl: gitlabApi });
+  assert.equal(plain.steps.some((entry) => entry.id === "gitlab"), false);
+});

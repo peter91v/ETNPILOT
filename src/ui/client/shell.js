@@ -1,7 +1,4 @@
-// Modals, the run form, the palette, the poll and start-up.
-// Client-side code, kept as text and joined by ../page.js into one script. It
-// is not a module in the browser: no imports, no build step.
-export const CLIENT_SHELL = `function openModal(id) {
+function openModal(id) {
   lastFocus = document.activeElement;
   $(id).classList.add("open");
   document.body.style.overflow = "hidden";
@@ -38,7 +35,7 @@ function showRunReadiness(readiness) {
   $("run-banner-text").textContent = readiness.message + ((readiness.fixes ?? []).includes("in-place")
     ? " Commit it, or work in this directory instead."
     : " Run the command below in the project's terminal, then start again.");
-  $("run-banner-commands").textContent = (readiness.commands ?? []).join("\\n");
+  $("run-banner-commands").textContent = (readiness.commands ?? []).join("\n");
   $("run-copy").hidden = (readiness.commands ?? []).length === 0;
   $("run-inplace").hidden = !(readiness.fixes ?? []).includes("in-place");
   // Starting would only fail, so it waits for one of the two ways out.
@@ -381,4 +378,7 @@ renderNav();
 show(location.hash.slice(1) || "overview");
 refresh();
 loadUsage();
-setInterval(refresh, 5000);`;
+// A page nobody is looking at does not ask: on a phone that is battery and data.
+// It catches up the moment it is shown again.
+setInterval(() => { if (!document.hidden) refresh(); }, 5000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh({ force: true }); });

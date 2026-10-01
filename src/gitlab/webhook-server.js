@@ -31,6 +31,7 @@ export async function createGitLabWebhookServer({
     }),
     secrets.get("gitlab.apiToken", {
       fallback: { provider: "env", key: "ETNPILOT_GITLAB_TOKEN" },
+      baseUrl: config.git?.baseUrl,
     }),
   ]);
   if (!signingSecret && !token) {

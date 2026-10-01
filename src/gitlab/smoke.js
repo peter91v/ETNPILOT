@@ -51,7 +51,10 @@ export async function runGitLabSmoke({ client, project, receiptPath, confirmWrit
       catch { cleanupErrors.push("branch-delete-failed"); }
     }
     await store.append({ terminal: true, type: "gitlab-smoke", runId: branch, status: failure || cleanupErrors.length ? "failed" : "succeeded", operations, cleanupErrors, ...(report ? { report } : {}) });
-    if (cleanupErrors.length) throw new Error(`GitLab smoke cleanup failed: ${cleanupErrors.join(", ")}. Review the dedicated project.`);
+    // Cleanup that failed is the more urgent news (something is left behind in
+    // the project), and it keeps the failure of the smoke itself as its cause.
+    // eslint-disable-next-line no-unsafe-finally
+    if (cleanupErrors.length) throw new Error(`GitLab smoke cleanup failed: ${cleanupErrors.join(", ")}. Review the dedicated project.`, { cause: failure });
   }
   const verification = await verifyReceiptFile(receiptPath, { requireTerminal: true });
   if (!verification.valid) throw new Error("GitLab smoke receipt did not verify.");

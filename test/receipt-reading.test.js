@@ -422,3 +422,26 @@ test("'--raw' shows the provider's own response body; without it, it stays off s
     console.log = log;
   }
 });
+
+test("a long run does not slow down: appending reads the chain's tail once, not the whole file each time", async () => {
+  const { mkdtemp } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { JsonlReceiptStore, verifyReceiptFile } = await import("../src/core/receipt-store.js");
+  const dir = await mkdtemp(join(tmpdir(), "etnpilot-chain-"));
+  const path = join(dir, "r.jsonl");
+  const store = new JsonlReceiptStore(path);
+  const blob = "x".repeat(2000);
+  const started = Date.now();
+  for (let index = 0; index < 1500; index += 1) await store.append({ type: "tool", index, blob });
+  assert.ok(Date.now() - started < 4000, `1,500 appends took ${Date.now() - started} ms`);
+  // A second store on the same file (a resumed process) picks the chain up where it is.
+  const resumed = new JsonlReceiptStore(path);
+  await resumed.append({ type: "tool", index: 1500, blob });
+  await resumed.append({ type: "end", terminal: true, status: "succeeded" });
+  await assert.rejects(resumed.append({ type: "late" }), /sealed/);
+  await assert.rejects(new JsonlReceiptStore(path).append({ type: "late" }), /sealed/);
+  const verified = await verifyReceiptFile(path, { requireTerminal: true });
+  assert.equal(verified.valid, true);
+  assert.equal(verified.entries, 1502);
+});

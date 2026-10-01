@@ -1,11 +1,12 @@
+// @ts-check
 import { awaitDeviceFlow, checkDeviceFlow, DeviceFlowError, refreshToken, startDeviceFlow } from "./device-flow.js";
 import { openCredentialStore } from "./credential-store.js";
-import { SERVICE_IDS, SERVICES, serviceFor } from "./services.js";
+import { SERVICE_IDS, SERVICES, normalizeAuthHost, serviceFor } from "./services.js";
 
 // Sign in, sign out, and say who is signed in. The terminal and the web page
 // both call this; neither holds any of it itself.
 
-export function storeFor({ env = process.env, fetchImpl } = {}) {
+export function storeFor({ env = process.env, fetchImpl } = /** @type {any} */ ({})) {
   const store = openCredentialStore({
     env,
     refresher: (entry) => refreshToken(entry, { fetchImpl }),
@@ -17,7 +18,7 @@ export function storeFor({ env = process.env, fetchImpl } = {}) {
 // Asks the service whether the credential works. A refusal is final; a network
 // failure says nothing about the credential, so it is reported separately and
 // the caller decides whether to keep it anyway.
-export async function verifyCredential(service, value, { fetchImpl = globalThis.fetch, host, baseUrl } = {}) {
+export async function verifyCredential(service, value, { fetchImpl = globalThis.fetch, host, baseUrl } = /** @type {any} */ ({})) {
   const definition = serviceFor(service);
   const request = verification(definition, value, { host, baseUrl });
   let response;
@@ -58,18 +59,18 @@ function verification(service, value, { host, baseUrl }) {
 }
 
 // A key or a token someone typed. Checked first; a refused one is not stored.
-export async function saveKey(serviceId, value, { env, fetchImpl, verify = true, host, baseUrl } = {}) {
+export async function saveKey(serviceId, value, { env, fetchImpl, verify = true, host: given, baseUrl } = /** @type {any} */ ({})) {
   const service = serviceFor(serviceId);
+  const host = given ? normalizeAuthHost(given) : undefined;
   const key = String(value ?? "").trim();
   if (key === "") throw new Error(`Enter the ${service.label} ${service.method === "key" ? "key" : "token"}.`);
   if (/\s/.test(key)) throw new Error("That does not look like a key: it contains spaces or line breaks.");
+  /** @type {{ ok: boolean, reason?: string, message?: string, status?: number, account?: string }} */
   let result = { ok: false, reason: "skipped" };
   if (verify) {
     result = await verifyCredential(service.id, key, { fetchImpl, host, baseUrl });
     if (!result.ok && result.reason === "rejected") {
-      const error = new Error(result.message);
-      error.code = "rejected";
-      throw error;
+      throw Object.assign(new Error(result.message), { code: "rejected" });
     }
   }
   const store = storeFor({ env, fetchImpl });
@@ -86,13 +87,13 @@ export async function saveKey(serviceId, value, { env, fetchImpl, verify = true,
 }
 
 // Starts the browser sign-in. The client id is remembered, so it is typed once.
-export async function beginDeviceLogin(serviceId, { env = process.env, fetchImpl, clientId, host } = {}) {
+export async function beginDeviceLogin(serviceId, { env = process.env, fetchImpl, clientId, host } = /** @type {any} */ ({})) {
   const service = serviceFor(serviceId);
   if (service.method !== "device") throw new DeviceFlowError(`${service.label} has no browser sign-in; use a key.`, "unsupported");
   const store = storeFor({ env, fetchImpl });
   const app = await store.app(service.id);
   const id = clientId ?? env[`ETNPILOT_${service.id.toUpperCase()}_CLIENT_ID`] ?? app?.clientId;
-  const base = (host ?? app?.host ?? service.host).replace(/\/$/, "");
+  const base = normalizeAuthHost(host ?? app?.host ?? service.host);
   if (!id) {
     const error = new DeviceFlowError(`Browser sign-in needs the client id of an OAuth application. ${service.appHelp}`, "client_id_required");
     throw error;
@@ -102,7 +103,7 @@ export async function beginDeviceLogin(serviceId, { env = process.env, fetchImpl
   return flow;
 }
 
-export async function finishDeviceLogin(flow, token, { env, fetchImpl, verify = true } = {}) {
+export async function finishDeviceLogin(flow, token, { env, fetchImpl, verify = true } = /** @type {any} */ ({})) {
   const service = serviceFor(flow.service);
   const result = verify ? await verifyCredential(service.id, token.value, { fetchImpl, host: flow.host }) : { ok: false };
   const store = storeFor({ env, fetchImpl });
@@ -120,7 +121,7 @@ export async function finishDeviceLogin(flow, token, { env, fetchImpl, verify = 
 }
 
 // Terminal: start, show the code, wait, store.
-export async function loginWithDevice(serviceId, { env, fetchImpl, clientId, host, onCode, onWait, sleep, signal } = {}) {
+export async function loginWithDevice(serviceId, { env, fetchImpl, clientId, host, onCode, onWait, sleep, signal } = /** @type {any} */ ({})) {
   const flow = await beginDeviceLogin(serviceId, { env, fetchImpl, clientId, host });
   onCode?.(flow);
   const result = await awaitDeviceFlow(flow, { fetchImpl, sleep, signal, onWait });
@@ -131,14 +132,23 @@ export async function loginWithDevice(serviceId, { env, fetchImpl, clientId, hos
 
 export { checkDeviceFlow };
 
-export async function logout(serviceId, { env } = {}) {
+// A host the owner chose to send a stored login to, such as a proxy in front of
+// the service. Without this a login is only used with the hosts it was issued for.
+export async function allowHost(serviceId, host, { env } = /** @type {any} */ ({})) {
+  const service = serviceFor(serviceId);
+  const clean = String(host ?? "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/[/:].*$/, "");
+  if (!/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/.test(clean)) throw new Error(`'${host}' is not a host name.`);
+  return { service: service.id, hosts: await storeFor({ env }).allowHost(service.secret, clean) };
+}
+
+export async function logout(serviceId, { env } = /** @type {any} */ ({})) {
   const service = serviceFor(serviceId);
   const removed = await storeFor({ env }).remove(service.secret);
   return { service: service.id, removed };
 }
 
 // For every service: connected or not, from where, and as whom. Values never.
-export async function authStatus({ env = process.env } = {}) {
+export async function authStatus({ env = process.env } = /** @type {any} */ ({})) {
   let store;
   try { store = storeFor({ env }); } catch { store = undefined; }
   const entries = [];
@@ -147,7 +157,9 @@ export async function authStatus({ env = process.env } = {}) {
     const stored = await store?.describe(service.secret);
     const fromEnvironment = typeof env[service.env] === "string" && env[service.env] !== "";
     const app = await store?.app(id);
+    const problem = id === SERVICE_IDS[0] ? await store?.permissionsProblem() : undefined;
     entries.push({
+      ...(problem ? { storeProblem: problem } : {}),
       id,
       label: service.label,
       method: service.method,
@@ -158,6 +170,7 @@ export async function authStatus({ env = process.env } = {}) {
       environmentVariable: service.env,
       stored: stored ?? undefined,
       clientId: app?.clientId ? true : false,
+      usedFor: service.usedFor,
       help: service.keyHelp,
       appHelp: service.appHelp,
       defaultHost: service.host,

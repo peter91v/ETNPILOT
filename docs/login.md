@@ -54,3 +54,35 @@ still provides one.
 A key is checked with one harmless request (list models, read the user) before
 it is kept. A key the service refuses is not stored. If the service could not be
 reached the key is kept and marked *not verified*.
+
+## Where a stored login is sent
+
+A stored login is handed over only for a host it was issued for, and only over https:
+
+| Login | Hosts |
+| --- | --- |
+| `anthropic` | `api.anthropic.com` |
+| `openai` | `api.openai.com` |
+| `github` | `github.com`, `api.github.com`, `models.github.ai` |
+| `gitlab` | the host you signed in to |
+
+A project's configuration names the address each provider talks to. If a repository points a provider
+at another address (a hostile one, or a proxy you set up), the stored login is **not** sent; `doctor`,
+`smoke` and the provider's own error say why. To use a proxy, add it once:
+`etnpilot login openai --allow-host my-proxy.example.com`.
+
+Variables in the environment are not bound to hosts (you set them, so they are a decision) — which is one more
+reason `etnpilot trust` asks before acting on a project you did not make.
+
+## What is stored, and what is not safe about it
+
+The file is plain JSON with mode 0600, in `~/.config/etnpilot/` (or `$XDG_CONFIG_HOME/etnpilot/`,
+`$ETNPILOT_HOME/`). There is no keychain integration: Termux has none, and a dependency for it would be
+the first runtime package beyond YAML and CodeGraph. Anyone who can read your home directory can read it, and
+an approved shell command without a sandbox can too — a run's command that *names* the file is refused
+before it is shown, but a determined command line could still reach it. `etnpilot auth status` warns when the
+file's permissions are too wide. On a shared machine, prefer environment variables from a secret manager.
+
+Plugins never receive stored logins. `GitHub Models` (`github-models` provider) uses the stored GitHub token;
+it needs the `models` permission, which a personal access token can have and a browser sign-in's scope may not
+(not verified against the live service).

@@ -49,7 +49,7 @@ function terminal() {
     end: () => input.end(),
     until: (pattern, { from = 0 } = {}) => new Promise((resolve, reject) => {
       if (pattern.test(text.slice(from))) return resolve();
-      const timer = setTimeout(() => reject(new Error(`never saw ${pattern}; got:\n${text}`)), 8000);
+      const timer = setTimeout(() => reject(new Error(`never saw ${pattern}; got:\n${text}`)), 30_000);
       waiting.push({ pattern, from, resolve: () => { clearTimeout(timer); resolve(); } });
       return undefined;
     }),

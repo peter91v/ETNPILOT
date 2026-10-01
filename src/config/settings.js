@@ -10,7 +10,6 @@ import {
   mergeLayers,
   modeFor,
   readLayers,
-  setIn,
 } from "./layers.js";
 
 // Reading and changing settings, kept out of the CLI so the terminal, the TUI,
@@ -55,10 +54,6 @@ function choicesFor(path, value, config) {
   if (path === "routing.defaults" && providers.length > 0) return { kind: "set", values: providers };
   if (/^providers\.[^.]+\.type$/.test(path)) return { kind: "one", values: [...PROVIDER_TYPES] };
   return undefined;
-}
-
-export function settingChoices(path, { value, config } = {}) {
-  return choicesFor(path, value, config);
 }
 
 export class SettingsRefused extends Error {

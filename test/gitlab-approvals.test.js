@@ -9,7 +9,7 @@ import { createGitLabApprovalHandler } from "../src/gitlab/approvals.js";
 test("a GitLab comment approves only when an allowed user wrote it", async () => {
   const { inbox } = await createInbox();
   const notes = [];
-  let posted = [];
+  const posted = [];
   const client = {
     addIssueNote: async (_project, _iid, body) => posted.push(body),
     issueNotes: async () => notes,

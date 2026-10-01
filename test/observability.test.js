@@ -234,3 +234,60 @@ test("a rate reaches the dated snapshot a provider actually served", async () =>
   });
   assert.equal(other.estimatedCost, undefined);
 });
+
+test("a growing telemetry file is moved aside, and the totals still cover every file", async () => {
+  const { mkdtemp, readdir } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-rotate-"));
+  const file = join(root, "telemetry.jsonl");
+  let clock = 1_000;
+  const telemetry = new Telemetry({
+    file, now: () => (clock += 7), rotateBytes: 1200,
+    pricing: { currency: "USD", models: { m: { inputPerMillion: 1, outputPerMillion: 1 } } },
+  });
+  for (let index = 0; index < 12; index += 1) {
+    const accounting = telemetry.recordProviderUsage({ workflowRunId: `w${index}`, agentRunId: `a${index}`, provider: "p", model: "m", usage: { inputTokens: 100, outputTokens: 10 } });
+    const span = telemetry.startSpan("gen_ai.invoke_agent", { attributes: { "etnpilot.workflow.run_id": `w${index}`, "etnpilot.provider.name": "p" } });
+    await span.end({ attributes: telemetryProviderAttributes(accounting) });
+  }
+  const files = (await readdir(root)).filter((name) => name.startsWith("telemetry.jsonl"));
+  assert.ok(files.length > 2, `expected archives, saw ${files.join(", ")}`);
+  const summary = await summarizeTelemetryFile(file);
+  assert.equal(summary.inputTokens, 1200);
+  assert.equal(summary.outputTokens, 120);
+  assert.equal((await summarizeTelemetryFile(file, { workflowRunId: "w0" })).inputTokens, 100);
+});
+
+test("rotation can be set or switched off", async () => {
+  const { createTelemetry } = await import("../src/observability/telemetry.js");
+  const on = await createTelemetry({ root: "/tmp/x", config: { observability: { enabled: true, rotateBytes: 5000 } } });
+  assert.equal(on.rotateBytes, 5000);
+  const off = await createTelemetry({ root: "/tmp/x", config: { observability: { enabled: true, rotateBytes: false } } });
+  assert.equal(off.rotateBytes, 0);
+  await assert.rejects(createTelemetry({ root: "/tmp/x", config: { observability: { enabled: true, rotateBytes: -1 } } }), /positive/);
+});
+
+test("usage is totalled by model and by UTC day, the way a provider's dashboard groups it", async () => {
+  const { mkdtemp } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-usage-"));
+  const file = join(root, "t.jsonl");
+  const days = [Date.UTC(2026, 9, 1, 23, 59), Date.UTC(2026, 9, 2, 0, 1), Date.UTC(2026, 9, 2, 12, 0)];
+  let at = 0;
+  const telemetry = new Telemetry({ file, now: () => days[at], pricing: { currency: "USD", models: { a: { inputPerMillion: 1, outputPerMillion: 2 }, b: { inputPerMillion: 10, outputPerMillion: 20 } } } });
+  for (const [index, model] of ["a", "a", "b"].entries()) {
+    at = index;
+    const accounting = telemetry.recordProviderUsage({ workflowRunId: "w", agentRunId: `r${index}`, provider: "p", model, usage: { inputTokens: 1000, outputTokens: 100, requests: 2 } });
+    const span = telemetry.startSpan("gen_ai.invoke_agent", { attributes: { "etnpilot.workflow.run_id": "w", "gen_ai.request.model": model } });
+    await span.end({ attributes: { ...telemetryProviderAttributes(accounting), "gen_ai.request.model": model } });
+  }
+  const summary = await summarizeTelemetryFile(file);
+  assert.deepEqual(Object.keys(summary.models).sort(), ["a", "b"]);
+  assert.equal(summary.models.a.calls, 2);
+  assert.equal(summary.models.a.inputTokens, 2000);
+  assert.deepEqual(Object.keys(summary.days), ["2026-10-01", "2026-10-02"]);
+  assert.equal(summary.days["2026-10-02"].inputTokens, 2000);
+  assert.ok(Math.abs(summary.models.b.estimatedCost - 0.012) < 1e-9);
+});

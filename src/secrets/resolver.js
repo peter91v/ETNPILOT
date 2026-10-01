@@ -1,9 +1,10 @@
+// @ts-check
 import { BUILTIN_SECRET_PROVIDER_FACTORIES, createEnvironmentSecretProvider } from "./builtins.js";
 import { defineSecretProvider } from "./provider.js";
 import { openCredentialStore } from "../auth/credential-store.js";
 
 export class SecretResolver {
-  constructor({ values = {}, store } = {}) {
+  constructor({ values = {}, store } = /** @type {any} */ ({})) {
     if (!values || Array.isArray(values) || typeof values !== "object") {
       throw new TypeError("Secret values configuration must be an object.");
     }
@@ -16,6 +17,9 @@ export class SecretResolver {
     // source has nothing: a variable somebody set is a decision, a stored login
     // is a convenience, so the variable wins.
     this.store = store;
+    // Why a stored login was not handed out, by secret name, so that the
+    // message about the missing key can say so instead of blaming the variable.
+    this.refusals = new Map();
   }
 
   register(provider) {
@@ -37,34 +41,51 @@ export class SecretResolver {
     return Object.keys(this.values).sort();
   }
 
-  async get(name, { fallback, required = false } = {}) {
+  // 'baseUrl' is where the value is about to be sent. A stored login is only
+  // handed to a host it was issued for, and never to a plugin ('storedLogin:
+  // false'): a plugin reads what the project explicitly maps for it.
+  async get(name, { fallback, required = false, baseUrl, storedLogin = true } = /** @type {any} */ ({})) {
     const reference = this.values[name] ?? fallback;
     if (!reference) {
-      const stored = await this.stored(name);
+      const stored = storedLogin ? await this.stored(name, baseUrl) : undefined;
       if (stored !== undefined) return stored;
-      if (required) throw new SecretResolutionError(`Required secret '${name}' is not configured.`, { code: "not_configured" });
+      if (required) throw this.missing(name, `Required secret '${name}' is not configured.`, { code: "not_configured" });
       return undefined;
     }
     const value = await this.resolve(reference, { name, required: false });
     if (value !== undefined) return value;
-    const stored = await this.stored(name);
+    const stored = storedLogin ? await this.stored(name, baseUrl) : undefined;
     if (stored !== undefined) return stored;
     if (required) {
-      throw new SecretResolutionError(`Required secret '${name}' is unavailable.`, { code: "unavailable", provider: reference.provider });
+      throw this.missing(name, `Required secret '${name}' is unavailable.`, { code: "unavailable", provider: reference.provider });
     }
     return undefined;
   }
 
-  async stored(name) {
+  // A stored login that was refused is the reason, when there is one.
+  missing(name, message, details) {
+    const refused = this.refusals.get(name);
+    return refused
+      ? new SecretResolutionError(`Required secret '${name}' was not used: ${refused}`, { code: "stored_login_refused" })
+      : new SecretResolutionError(message, details);
+  }
+
+  async stored(name, baseUrl) {
     if (!this.store) return undefined;
     try {
-      return await this.store.get(name);
+      const answer = await this.store.resolve(name, { baseUrl });
+      if (answer?.refused) {
+        this.refusals.set(name, answer.refused);
+        return undefined;
+      }
+      this.refusals.delete(name);
+      return answer?.value;
     } catch {
       return undefined;
     }
   }
 
-  async resolve(reference, { name = "secret", required = true } = {}) {
+  async resolve(reference, { name = "secret", required = true } = /** @type {any} */ ({})) {
     validateReference(reference, name);
     const provider = this.providers.get(reference.provider);
     if (!provider) {
@@ -97,18 +118,18 @@ export class SecretResolver {
     return value;
   }
 
-  async check(name) {
+  async check(name, { baseUrl } = /** @type {any} */ ({})) {
     const reference = this.values[name];
     if (!reference) {
-      const stored = await this.stored(name);
-      return { name, configured: stored !== undefined, available: stored !== undefined, ...(stored !== undefined ? { provider: "stored-login" } : {}) };
+      const stored = await this.stored(name, baseUrl);
+      return { name, configured: stored !== undefined, available: stored !== undefined, ...(stored !== undefined ? { provider: "stored-login" } : {}), ...(this.refusals.has(name) ? { refused: this.refusals.get(name) } : {}) };
     }
     try {
       const value = await this.resolve(reference, { name, required: false });
-      if (value === undefined && (await this.stored(name)) !== undefined) {
+      if (value === undefined && (await this.stored(name, baseUrl)) !== undefined) {
         return { name, configured: true, available: true, provider: "stored-login" };
       }
-      return { name, configured: true, available: value !== undefined, provider: reference.provider };
+      return { name, configured: true, available: value !== undefined, provider: reference.provider, ...(value === undefined && this.refusals.has(name) ? { refused: this.refusals.get(name) } : {}) };
     } catch (error) {
       return {
         name,
@@ -121,7 +142,7 @@ export class SecretResolver {
   }
 }
 
-export function createSecretResolver({ root = process.cwd(), config = {}, env = process.env, factories = {} } = {}) {
+export function createSecretResolver({ root = process.cwd(), config = {}, env = process.env, factories = {} } = /** @type {any} */ ({})) {
   const secretConfig = config.secrets ?? {};
   const resolver = new SecretResolver({ values: secretConfig.values ?? {}, store: openCredentialStore({ env }) });
   const configuredProviders = secretConfig.providers ?? {};
@@ -139,7 +160,7 @@ export function createSecretResolver({ root = process.cwd(), config = {}, env = 
 }
 
 export class SecretResolutionError extends Error {
-  constructor(message, { code, provider } = {}) {
+  constructor(message, { code, provider } = /** @type {any} */ ({})) {
     super(message);
     this.name = "SecretResolutionError";
     this.code = code;

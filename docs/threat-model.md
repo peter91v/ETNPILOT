@@ -11,6 +11,7 @@ statement here is wrong, that is a bug.
 | Repository contents | The agent can modify them and publish the result. |
 | GitLab API token | Grants push and merge-request access to the project. |
 | Receipt signing key | Signs evidence others rely on. |
+| Stored logins (`~/.config/etnpilot/credentials.json`) | Provider keys and GitHub/GitLab tokens, in plain text with owner-only permissions. |
 | Secrets reachable from the host environment | Anything the process can read, the agent may be able to exfiltrate through an approved command. |
 | The reviewer's attention | Every control ends in a human decision. |
 
@@ -23,6 +24,8 @@ statement here is wrong, that is a bug.
    or land a commit in the repository the agent reads.
 3. **A malicious or careless plugin.** Third-party code loaded by configuration.
 4. **A network attacker** between ETNPilot and GitLab or an OTLP collector.
+5. **A repository someone else wrote.** Its `.etnpilot/etnpilot.yaml` names the address each provider talks to,
+   the secrets they read, the commands checks run and the plugins loaded. That is authority, not data.
 
 Out of scope: an attacker with local code execution as the ETNPilot user, a
 malicious operator, and compromise of the provider itself. Any of these ends the
@@ -40,6 +43,10 @@ game.
 | Hash-chained, signed receipts | Later tampering with the record of a run | Signing key is not readable by the agent; verifier holds the public key |
 | Webhook signature and delivery de-duplication | Forged or replayed GitLab deliveries | Signing secret stays secret; clock skew below tolerance |
 | `git.issueTrigger.allowedUsers` | Untrusted contributor starting runs | The GitLab account list is maintained |
+| Host-bound stored logins (`src/auth/services.js`, `hostAllowed`) | A repository's configuration pointing a provider at a server of its own to collect a stored key | The service's hosts are the ones listed in `docs/login.md`; https only; environment variables are *not* bound (they are a decision of the person who set them) |
+| Project trust (`src/trust/trust.js`, `etnpilot trust`) | Running a freshly cloned repository's configuration, plugins and checks unseen | The person reads what is shown; the fingerprint covers the configuration, plugin code and non-content files under `.etnpilot/`, and content has its own lock |
+| `Host` check and framing headers on the review page | DNS rebinding and framing of the local page | IP literals and `localhost` cannot be rebound to another machine; a name has to be listed in `ETNPILOT_UI_HOSTS` |
+| Lock around renewing a stored login | Losing a single-use refresh token to a second process | One machine, one file system |
 
 ## Accepted risks
 
@@ -64,7 +71,19 @@ game.
 - **Plugin network access is blocked in the worker only by removing the client
   globals and refusing network imports.** The Node permission model in the
   supported versions does not restrict sockets, so a determined plugin that
-  finds another path to the network is not stopped by the kernel.
+  finds another path to the network is not stopped by the kernel. One such path
+  existed and is closed: the HTTP client keeps its dispatcher on a well-known
+  global symbol, created when a plugin touches `Headers` or `Response`, and
+  that object can send a request without `fetch`. The worker now puts a refusal
+  there first (`lockDownGlobals`), with a regression test. A block-list is only
+  as good as the list; treat any plugin you did not write as able to find the
+  next path.
+- **A stored login is plain text.** There is no keychain on Termux. An approved
+  shell command without a sandbox can read it; a command that names the file is
+  refused before it is shown, which stops a model asking for it and not a
+  determined command line.
+- **Environment variables are not host-bound.** `OPENAI_API_KEY` goes wherever the
+  project's configuration says. `etnpilot trust` is the control for that.
 - **Receipts record decisions, not consequences.** A signed receipt proves what
   ETNPilot observed and approved. It cannot prove that an approved command did
   nothing else.

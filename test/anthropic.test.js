@@ -217,14 +217,14 @@ test("a configured anthropic provider resolves its key from the environment", as
   }
 });
 
-test("the generated project configures all three providers, and one setting switches them", async () => {
+test("the generated project configures every provider, and one setting switches them", async () => {
   const root = await mkdtemp(join(tmpdir(), "etnpilot-providers-"));
   await initializeProject(root);
   const file = join(root, ".etnpilot", "etnpilot.yaml");
   const env = { ...process.env, ETNPILOT_CONFIG_HOME: join(root, "config-home") };
 
   const config = await loadConfig(file, env);
-  assert.deepEqual(Object.keys(config.providers), ["github-copilot", "anthropic", "openai"]);
+  assert.deepEqual(Object.keys(config.providers), ["github-copilot", "anthropic", "openai", "github-models"]);
   assert.equal(config.providers.anthropic.type, "anthropic");
   assert.equal(config.providers.openai.type, "openai-compatible");
   // Every configured provider is one the policy allows; a provider the project

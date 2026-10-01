@@ -158,7 +158,7 @@ test("@ offers the files that may be attached, Tab completes, and the file goes 
     await app.handle("t");
     await type(app, "what is in @src/");
     await waitFor(() => (app.compose?.suggestions ?? []).length === 2, "the suggestions");
-    assert.match(screen(app), /\[src\/a\.js\]  src\/b\.js/);
+    assert.match(screen(app), /\[src\/a\.js\] {2}src\/b\.js/);
     await app.handle("\t");
     assert.equal(app.compose.buffer, "what is in @src/a.js ");
     await type(app, "and @.env");

@@ -35,6 +35,9 @@ settings:
 #                   use 'anthropic' or 'openai'.
 #   anthropic       ANTHROPIC_API_KEY, from console.anthropic.com
 #   openai          OPENAI_API_KEY, from platform.openai.com
+#   github-models   models served by GitHub with your GitHub token
+#                   ('etnpilot login github'); no Copilot SDK needed, so it runs
+#                   on a phone too. The token needs the models permission.
 defaultProvider: github-copilot
 providers:
   github-copilot:
@@ -64,6 +67,13 @@ providers:
     # models do). 'responses' always speaks it; 'chat' never does. 'stream: true'
     # applies to either.
     # api: auto
+  github-models:
+    type: openai-compatible
+    baseUrl: https://models.github.ai/inference
+    # An id as GitHub lists it, publisher first.
+    model: openai/gpt-4.1
+    apiKeySecret: github.token
+    tools: true
     # Uncomment for a reasoning model that refuses function tools on
     # /v1/chat/completions ("set reasoning_effort to 'none'"). It turns that
     # model's reasoning off, which is why it is not on by default.
@@ -254,7 +264,7 @@ policy:
     rules:
       - id: configured-providers
         effect: allow
-        providers: [github-copilot, anthropic, openai]
+        providers: [github-copilot, anthropic, openai, github-models]
 checks:
   # Checks run agent-authored code. They inherit only these variables, so
   # repository and provider credentials stay out of their environment.

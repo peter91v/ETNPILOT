@@ -29,7 +29,7 @@ export async function loadPlugins(entries, harness, projectRoot = process.cwd(),
           secretInputs: descriptor.secretInputs ?? [],
           networkAllow: descriptor.networkAllow ?? [],
           resolveSecret: runtime.secretResolver
-            ? (name) => runtime.secretResolver.get(name, { required: true })
+            ? (name) => runtime.secretResolver.get(name, { required: true, storedLogin: false })
             : undefined,
           fetchImpl: runtime.fetchImpl,
           authorizeNetwork: (request, plugin) => harness.approveOperation(request, {

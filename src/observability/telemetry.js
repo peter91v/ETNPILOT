@@ -1,7 +1,7 @@
 import { readRegularFile } from "../runtime/bounded-io.js";
 import { randomBytes } from "node:crypto";
-import { appendFile, mkdir } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { appendFile, mkdir, readdir, rename, stat } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
 import { knownPriceForModel } from "./known-pricing.js";
 
 const TELEMETRY_VERSION = 1;
@@ -44,7 +44,9 @@ export class Telemetry {
     budgets = {},
     fetchImpl = globalThis.fetch,
     now = () => Date.now(),
+    rotateBytes = DEFAULT_ROTATE_BYTES,
   } = {}) {
+    this.rotateBytes = rotateBytes;
     this.root = root;
     this.file = file;
     this.serviceName = serviceName;
@@ -151,6 +153,7 @@ export class Telemetry {
     const operation = async () => {
       if (this.file) {
         await mkdir(dirname(this.file), { recursive: true });
+        await rotateIfLarge(this.file, this.rotateBytes, this.now());
         await appendFile(this.file, `${JSON.stringify(payload)}\n`, "utf8");
       }
       if (this.otlp?.enabled) await exportOtlp(payload, this.otlp, this.fetchImpl);
@@ -171,11 +174,37 @@ export class Telemetry {
   }
 }
 
+// The file is moved aside when it gets large, so no single file grows without
+// bound and the reader's per-file limit is never reached. Totals still cover
+// every file: the moved ones are named '<file>.<time>' and are read with it.
+const DEFAULT_ROTATE_BYTES = 16 * 1024 * 1024;
+
+async function rotateIfLarge(file, limit, now) {
+  if (!limit) return;
+  const details = await stat(file).catch(() => undefined);
+  if (!details || details.size < limit) return;
+  await rename(file, `${file}.${now}`).catch(() => {});
+}
+
+async function telemetryParts(path) {
+  const file = resolve(path);
+  const base = basename(file);
+  const archives = (await readdir(dirname(file)).catch(() => []))
+    .filter((name) => name.startsWith(`${base}.`) && /^\d+$/.test(name.slice(base.length + 1)))
+    .sort((a, b) => Number(a.slice(base.length + 1)) - Number(b.slice(base.length + 1)))
+    .map((name) => join(dirname(file), name));
+  return [...archives, file];
+}
+
 export async function summarizeTelemetryFile(path, { workflowRunId, root = "", config = {} } = {}) {
-  const content = await readRegularFile(resolve(path), 64 * 1024 * 1024).then((bytes) => bytes.toString("utf8")).catch((error) => {
-    if (error.code === "ENOENT") return "";
-    throw error;
-  });
+  const pieces = [];
+  for (const part of await telemetryParts(path)) {
+    pieces.push(await readRegularFile(part, 64 * 1024 * 1024).then((bytes) => bytes.toString("utf8")).catch((error) => {
+      if (error.code === "ENOENT") return "";
+      throw error;
+    }));
+  }
+  const content = pieces.join("\n");
   const summary = emptySummary();
   // Which models went without a rate. 'not priced' with no model named leaves
   // someone setting a rate for a model the runs never used, and the card says
@@ -183,6 +212,20 @@ export async function summarizeTelemetryFile(path, { workflowRunId, root = "", c
   const unpriced = new Map();
   const priced = new Set();
   const pricingSources = new Map();
+  // The same totals by model and by (UTC) day, which is how a provider's
+  // dashboard groups them, so the two can be compared line by line.
+  const byModel = new Map();
+  const byDay = new Map();
+  const tally = (map, key, attributes, cost) => {
+    const row = map.get(key) ?? { calls: 0, requests: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, estimatedCost: undefined };
+    row.calls += 1;
+    row.requests += attributes["etnpilot.provider.requests"] ?? 0;
+    row.inputTokens += attributes["gen_ai.usage.input_tokens"] ?? 0;
+    row.outputTokens += attributes["gen_ai.usage.output_tokens"] ?? 0;
+    row.cacheReadTokens += attributes["gen_ai.usage.cache_read.input_tokens"] ?? 0;
+    if (cost !== undefined) row.estimatedCost = (row.estimatedCost ?? 0) + cost;
+    map.set(key, row);
+  };
   let spans = 0;
   for (const line of content.split("\n").filter(Boolean)) {
     const payload = JSON.parse(line);
@@ -207,6 +250,9 @@ export async function summarizeTelemetryFile(path, { workflowRunId, root = "", c
             pricingSources.set(JSON.stringify(provenance), provenance);
           }
           const retrospectiveCost = retroactive(attributes, summary, model, { root, autoUpdate: config.observability?.pricing?.autoUpdate, pricing: config.observability?.pricing });
+          const day = span.startTimeUnixNano ? new Date(Number(BigInt(span.startTimeUnixNano) / 1_000_000n)).toISOString().slice(0, 10) : "unknown";
+          tally(byModel, model, attributes, attributes["etnpilot.cost.estimated"] ?? retrospectiveCost);
+          tally(byDay, day, attributes, attributes["etnpilot.cost.estimated"] ?? retrospectiveCost);
           if (attributes["etnpilot.cost.estimated"] !== undefined) {
             summary.estimatedCost = (summary.estimatedCost ?? 0) + attributes["etnpilot.cost.estimated"];
             summary.pricedInvocations += 1;
@@ -234,6 +280,8 @@ export async function summarizeTelemetryFile(path, { workflowRunId, root = "", c
     spans,
     workflowRunId,
     ...summary,
+    models: Object.fromEntries([...byModel].sort((a, b) => b[1].inputTokens - a[1].inputTokens)),
+    days: Object.fromEntries([...byDay].sort((a, b) => a[0].localeCompare(b[0]))),
     ...(pricingSources.size ? { pricingSources: [...pricingSources.values()], pricing: pricingSources.size === 1 ? [...pricingSources.values()][0] : { source: "multiple rate observations", status: "mixed" } } : {}),
     // A cost is recorded when the call happens, so a rate set afterwards
     // never reaches a call already on disk. Naming the models says which rate
@@ -264,7 +312,7 @@ function normalizeConfig(config = {}) {
   if (!config || Array.isArray(config) || typeof config !== "object") {
     throw new TypeError("observability must be an object.");
   }
-  rejectUnknown(config, ["enabled", "file", "serviceName", "environment", "failureMode", "otlp", "pricing", "budgets"], "observability");
+  rejectUnknown(config, ["enabled", "file", "serviceName", "environment", "failureMode", "otlp", "pricing", "budgets", "rotateBytes"], "observability");
   const enabled = config.enabled === true;
   const failureMode = config.failureMode ?? "ignore";
   if (!["ignore", "fail"].includes(failureMode)) throw new TypeError("observability.failureMode must be ignore or fail.");
@@ -287,6 +335,7 @@ function normalizeConfig(config = {}) {
     otlp,
     pricing: config.pricing ?? {},
     budgets: config.budgets ?? {},
+    ...(config.rotateBytes !== undefined ? { rotateBytes: config.rotateBytes === false ? 0 : positiveInteger(config.rotateBytes, "observability.rotateBytes") } : {}),
   };
 }
 

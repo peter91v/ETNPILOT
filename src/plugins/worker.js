@@ -250,6 +250,15 @@ function lockDownGlobals() {
   for (const name of ["WebSocket", "EventSource"]) {
     if (name in globalThis) Object.defineProperty(globalThis, name, { value: undefined, configurable: false, writable: false });
   }
+  // Replacing fetch is not enough: the HTTP client behind it keeps its dispatcher
+  // on a well-known global symbol, created the moment a plugin touches Headers or
+  // Response, and that object can send a request on its own. Putting a refusal there
+  // first means the client finds one and never makes its own. Several versions of the
+  // client use several keys, so each known key is taken.
+  const refuseAll = new Proxy(Object.create(null), { get: () => () => { throw permissionError("Plugin network access is not permitted."); } });
+  for (const key of ["undici.globalDispatcher.1", "undici.globalDispatcher.2", "undici.globalDispatcher.3", "undici.globalOrigin.1"]) {
+    Object.defineProperty(globalThis, Symbol.for(key), { value: refuseAll, configurable: false, writable: false, enumerable: false });
+  }
   const safeProcess = Object.freeze({
     arch: rawProcess.arch,
     platform: rawProcess.platform,

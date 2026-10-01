@@ -1,3 +1,4 @@
+import { swallow } from "./swallow.js";
 import { readRegularFile } from "./bounded-io.js";
 import { acquireWorkspaceLease } from "./workspace-lease.js";
 import { undoFileEffects } from "./file-effects.js";
@@ -189,7 +190,7 @@ export function sessionTokens(session) {
 // conversation as a whole, so a long chat could spend without limit one
 // affordable turn at a time. This does, and says how to go on.
 async function assertWithinBudget(root, session, env) {
-  const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"), env ?? process.env).catch(() => undefined);
+  const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"), env ?? process.env).catch(swallow("reading the configuration for a chat", undefined));
   const limit = config?.chat?.budget?.maxTotalTokens ?? DEFAULT_MAX_SESSION_TOKENS;
   const used = sessionTokens(session);
   if (used >= limit) {

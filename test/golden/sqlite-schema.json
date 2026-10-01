@@ -1,0 +1,48 @@
+{
+  "approvals": [
+    {
+      "type": "index",
+      "name": "approvals_run",
+      "sql": "CREATE INDEX approvals_run ON approvals(run_id, created_at)"
+    },
+    {
+      "type": "index",
+      "name": "approvals_status_created",
+      "sql": "CREATE INDEX approvals_status_created ON approvals(status, created_at DESC)"
+    },
+    {
+      "type": "index",
+      "name": "approvals_workflow_job",
+      "sql": "CREATE INDEX approvals_workflow_job ON approvals(workflow_job_id, created_at)"
+    },
+    {
+      "type": "table",
+      "name": "approvals",
+      "sql": "CREATE TABLE approvals ( id TEXT PRIMARY KEY, status TEXT NOT NULL, run_id TEXT, agent TEXT, operation_kind TEXT NOT NULL, details_json TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, decided_at INTEGER, decided_by TEXT, reason TEXT, service_instance_id TEXT , workflow_job_id TEXT, policy_json TEXT, scope TEXT)"
+    }
+  ],
+  "queue": [
+    {
+      "type": "index",
+      "name": "workflow_jobs_lease",
+      "sql": "CREATE INDEX workflow_jobs_lease ON workflow_jobs(status, lease_expires_at)"
+    },
+    {
+      "type": "index",
+      "name": "workflow_jobs_ready",
+      "sql": "CREATE INDEX workflow_jobs_ready ON workflow_jobs(status, available_at, created_at)"
+    },
+    {
+      "type": "table",
+      "name": "workflow_jobs",
+      "sql": "CREATE TABLE workflow_jobs ( id TEXT PRIMARY KEY, kind TEXT NOT NULL, delivery_id TEXT UNIQUE, status TEXT NOT NULL, payload_json TEXT NOT NULL, metadata_json TEXT NOT NULL, checkpoint_json TEXT NOT NULL, result_json TEXT, error_json TEXT, attempts INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 1, available_at INTEGER NOT NULL, lease_owner TEXT, lease_expires_at INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, started_at INTEGER, finished_at INTEGER )"
+    }
+  ],
+  "lease": [
+    {
+      "type": "table",
+      "name": "workspace_lease",
+      "sql": "CREATE TABLE workspace_lease (id INTEGER PRIMARY KEY CHECK(id=1), owner TEXT NOT NULL, session TEXT, pid INTEGER NOT NULL, acquired_at TEXT NOT NULL)"
+    }
+  ]
+}

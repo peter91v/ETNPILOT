@@ -1,3 +1,4 @@
+import { swallow } from "./swallow.js";
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import YAML from "yaml";
@@ -94,8 +95,24 @@ function summarize(item) {
 
 // The text of one pinned file, found by its exact path in the snapshot: this
 // never opens a path the person typed.
-export async function readContentFile({ root, config, path }) {
+// Opening several files of one review in a row captured the whole project's
+// content each time. A capture made a moment ago is good enough for showing a
+// file; locking never uses this, it reads fresh.
+const RECENT_MS = 1500;
+const recentSnapshots = new Map();
+
+async function recentSnapshot(root, config) {
+  const key = resolve(root);
+  const kept = recentSnapshots.get(key);
+  if (kept && Date.now() - kept.at < RECENT_MS) return kept.snapshot;
   const snapshot = await captureProjectContent(root, normalizeContentProvenance(config ?? {}));
+  recentSnapshots.set(key, { at: Date.now(), snapshot });
+  if (recentSnapshots.size > 8) recentSnapshots.delete(recentSnapshots.keys().next().value);
+  return snapshot;
+}
+
+export async function readContentFile({ root, config, path }) {
+  const snapshot = await recentSnapshot(root, config);
   const item = snapshot.items.find((candidate) => candidate.path === path);
   if (!item) return undefined;
   return { type: item.type, name: item.name, path: item.path, digest: item.digest, content: item.content, ...(originOf(item.content) ? { origin: originOf(item.content) } : {}) };
@@ -104,6 +121,7 @@ export async function readContentFile({ root, config, path }) {
 // Locks exactly what was shown. The digest the person saw comes back with the
 // request; if the content is not the same now, nothing is locked.
 export async function lockReviewedContent({ root, config, manifestDigest }) {
+  recentSnapshots.delete(resolve(root));
   const review = await readContentReview({ root, config });
   if (review.problem) throw Object.assign(new Error(review.problem), { statusCode: 409 });
   if (!manifestDigest || review.manifestDigest !== manifestDigest) throw new ContentChanged();
@@ -115,7 +133,7 @@ export async function lockReviewedContent({ root, config, manifestDigest }) {
 
 export async function readAgentDetails({ root, config }) {
   const etn = join(resolve(root), ".etnpilot");
-  const review = await readContentReview({ root, config }).catch(() => ({ items: [] }));
+  const review = await readContentReview({ root, config }).catch(swallow("content review", () => ({ items: [] })));
   const statusOf = new Map(review.items.map((item) => [item.path, item.status]));
   const out = [];
   for (const file of (await readdir(join(etn, "agents")).catch(() => [])).filter((name) => /\.ya?ml$/.test(name)).sort()) {
@@ -160,7 +178,7 @@ export async function readWorkflows({ root, config }) {
   const etn = join(resolve(root), ".etnpilot");
   const { agents } = await readAgentDetails({ root, config });
   const names = agents.filter((agent) => !agent.error).map((agent) => agent.name);
-  const review = await readContentReview({ root, config }).catch(() => ({ items: [] }));
+  const review = await readContentReview({ root, config }).catch(swallow("content review", () => ({ items: [] })));
   const statusOf = new Map(review.items.map((item) => [item.path, item.status]));
   const workflows = [];
   for (const file of (await readdir(join(etn, "workflows")).catch(() => [])).filter((name) => /\.ya?ml$/.test(name)).sort()) {
@@ -189,6 +207,7 @@ export async function readWorkflows({ root, config }) {
 }
 
 export async function createWorkflow({ root, config, input }) {
+  recentSnapshots.delete(resolve(root));
   const { agents } = await readAgentDetails({ root, config });
   const checked = validateWorkflowDefinition(input, { agents: agents.filter((agent) => !agent.error).map((agent) => agent.name), maxSteps: config?.workflow?.maxSteps ?? 50 });
   if (!checked.ok) {
@@ -213,6 +232,7 @@ const EFFORTS = ["low", "medium", "high"];
 // every tool, and a form that did that by omission would hand out the most
 // when someone ticked nothing.
 export async function createAgent({ root, config, input }) {
+  recentSnapshots.delete(resolve(root));
   const errors = [];
   const known = WORKSPACE_TOOL_DEFINITIONS.map((definition) => definition.name);
   const name = slugName(input?.name);
@@ -269,6 +289,7 @@ function ownName(name) {
 // does not know about (provider, model, requires, the comment on the first
 // line): the page edits what it shows and leaves the rest as it found it.
 export async function updateAgent({ root, config, name, input }) {
+  recentSnapshots.delete(resolve(root));
   ownName(name);
   const etn = join(resolve(root), ".etnpilot");
   const path = join(etn, "agents", `${name}.yaml`);
@@ -339,6 +360,7 @@ export async function updateAgent({ root, config, name, input }) {
 }
 
 export async function updateWorkflow({ root, config, name, input }) {
+  recentSnapshots.delete(resolve(root));
   ownName(name);
   const path = join(resolve(root), ".etnpilot", "workflows", `${name}.yaml`);
   if (await readFile(path, "utf8").then(() => false, () => true)) throw Object.assign(new Error(`There is no workflow called '${name}'.`), { statusCode: 404 });
@@ -353,6 +375,7 @@ export async function updateWorkflow({ root, config, name, input }) {
 // Refused while something still points at it: a workflow that names a deleted
 // agent, or an agent that hands work to one, would only fail at the next run.
 export async function removeContent({ root, config, kind, name }) {
+  recentSnapshots.delete(resolve(root));
   ownName(name);
   if (!["agent", "workflow"].includes(kind)) throw Object.assign(new Error("Only an agent or a workflow can be removed here."), { statusCode: 400 });
   const etn = join(resolve(root), ".etnpilot");

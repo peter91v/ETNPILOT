@@ -4,18 +4,18 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { listChecks } from "../src/runtime/project-checks.js";
+import { USAGE } from "../src/cli/commands.js";
 
 // A walkthrough that tells somebody to run a command that does not exist wastes
 // their evening, and a document is the one part of a project nothing compiles.
 // These check the parts that can be checked mechanically.
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const usage = (await readFile(join(root, "src/cli/commands.js"), "utf8"))
-  .split("Exit codes:")[0];
+const usage = USAGE.split("Exit codes:")[0];
 
 test("every 'etnpilot ...' command the docs name is one the CLI has", async () => {
   const unknown = [];
-  for (const file of ["docs/first-real-run.md", "docs/trying-it-out.md", "docs/roadmap-ui.md"]) {
+  for (const file of ["docs/first-real-run.md", "docs/trying-it-out.md", "docs/roadmap-ui.md", "docs/first-15-minutes.md", "docs/login.md", "docs/index.md"]) {
     const text = await readFile(join(root, file), "utf8");
     for (const [, command] of text.matchAll(/\betnpilot ([a-z]+(?: [a-z]+)?)/g)) {
       const [first, second] = command.split(" ");
@@ -49,4 +49,17 @@ test("the checks the docs name are the checks that exist", async () => {
   for (const [, named] of text.matchAll(/etnpilot check ([a-z]+)/g)) {
     assert.equal(ids.includes(named), true, "'" + named + "' is not a check");
   }
+});
+
+test("every relative link in the README and the documentation index points at a file that exists", async () => {
+  const { access } = await import("node:fs/promises");
+  const missing = [];
+  for (const file of ["README.md", "docs/index.md", "docs/first-15-minutes.md"]) {
+    const text = await readFile(join(root, file), "utf8");
+    for (const [, target] of text.matchAll(/\]\(((?!https?:|#|mailto:)[^)\s]+)\)/g)) {
+      const path = join(root, dirname(file), target.split("#")[0]);
+      if (!(await access(path).then(() => true, () => false))) missing.push(`${file}: ${target}`);
+    }
+  }
+  assert.deepEqual(missing, []);
 });

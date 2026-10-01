@@ -1,12 +1,4 @@
-// The Chat view: a conversation with an agent, in the page.
-// Client-side code, kept as text and joined by ../page.js into one script. It
-// is not a module in the browser: no imports, no build step.
-//
-// Everything here is a view of what the server keeps. The conversation is the
-// session file and the receipts of its turns; a question from the agent is an
-// approval in the same inbox the Approvals view reads, shown here where it is
-// asked. Nothing about a turn is decided in the browser.
-export const CLIENT_CHAT = `let chatBuilt = false;
+let chatBuilt = false;
 let chatSession;
 let chatTurns = [];
 let chatCompactions = [];
@@ -84,7 +76,7 @@ function buildChat() {
   const attach = button("@ File", { class: "btn small", title: "Attach a file of this project", onClick: () => {
     text.focus();
     const at = text.selectionStart ?? text.value.length;
-    text.setRangeText(at > 0 && !/\\s$/.test(text.value.slice(0, at)) ? " @" : "@", at, at, "end");
+    text.setRangeText(at > 0 && !/\s$/.test(text.value.slice(0, at)) ? " @" : "@", at, at, "end");
     scheduleMention();
   } });
   const sendButton = button("Send", { class: "btn primary", onClick: () => void sendChat() });
@@ -109,7 +101,7 @@ function buildChat() {
   void loadChatSessions();
   // While a turn runs the answer may be forming: read it once a second rather
   // than on the page's slower beat.
-  setInterval(() => { if (view === "chat" && chatSession && (chatRunning || chatPending)) void syncChat(); }, 1000);
+  setInterval(() => { if (!document.hidden && view === "chat" && chatSession && (chatRunning || chatPending)) void syncChat(); }, 1000);
 }
 
 async function loadChatChoices() {
@@ -269,7 +261,7 @@ async function syncChat() {
 function currentMention() {
   const text = chatControl("chat-text");
   const caret = text.selectionStart ?? text.value.length;
-  const match = /(^|\\s)@([^\\s]*)$/.exec(text.value.slice(0, caret));
+  const match = /(^|\s)@([^\s]*)$/.exec(text.value.slice(0, caret));
   return match ? { query: match[2], from: caret - match[2].length - 1, to: caret } : undefined;
 }
 
@@ -465,4 +457,5 @@ function drawThread(thread) {
   const last = thread.lastElementChild;
   if (last && (chatRunning || chatPending)) last.scrollIntoView({ block: "nearest" });
 }
-`;
+
+registerView("chat", { render: renderChat, load: syncChat });
