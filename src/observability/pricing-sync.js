@@ -1,3 +1,4 @@
+// @ts-check
 import { readRegularFile, readResponseBytes } from "../runtime/bounded-io.js";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -69,7 +70,7 @@ export function ratesFromCatalog(catalog) {
   return rates;
 }
 
-export async function refreshPricing({ root, config, fetchImpl = globalThis.fetch, now = Date.now, url = CATALOG_URL, timeoutMs = 3000 } = {}) {
+export async function refreshPricing({ root, config, fetchImpl = globalThis.fetch, now = Date.now, url = CATALOG_URL, timeoutMs = 3000 } = /** @type {any} */ ({})) {
   const pricing = config?.observability?.pricing;
   // On unless switched off, so projects created before the key existed get it
   // too. The test runner is the one place that stays offline by itself; tests

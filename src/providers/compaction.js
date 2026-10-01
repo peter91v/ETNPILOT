@@ -1,3 +1,4 @@
+// @ts-check
 // Keeping a tool loop inside a context window.
 //
 // The loop appended: up to twelve iterations, each carrying a whole file or a

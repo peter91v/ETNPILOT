@@ -1,3 +1,4 @@
+// @ts-check
 // The experimental notice for node:sqlite, kept out of an interactive screen.
 //
 // Node prints it once, the first time the module is loaded, and here that is

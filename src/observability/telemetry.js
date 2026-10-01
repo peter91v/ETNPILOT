@@ -14,7 +14,7 @@ export async function createTelemetry({
   secretResolver,
   fetchImpl = globalThis.fetch,
   now = () => Date.now(),
-} = {}) {
+} = /** @type {any} */ ({})) {
   const options = normalizeConfig(config.observability);
   if (!options.enabled) return undefined;
   let headers = {};
@@ -45,7 +45,7 @@ export class Telemetry {
     fetchImpl = globalThis.fetch,
     now = () => Date.now(),
     rotateBytes = DEFAULT_ROTATE_BYTES,
-  } = {}) {
+  } = /** @type {any} */ ({})) {
     this.rotateBytes = rotateBytes;
     this.root = root;
     this.file = file;
@@ -62,7 +62,7 @@ export class Telemetry {
     this.errors = [];
   }
 
-  startSpan(name, { traceId, parentSpanId, kind = 1, attributes = {} } = {}) {
+  startSpan(name, { traceId, parentSpanId, kind = 1, attributes = {} } = /** @type {any} */ ({})) {
     if (typeof name !== "string" || name.length === 0) throw new TypeError("Span name is required.");
     if (traceId !== undefined && !/^[a-f0-9]{32}$/.test(traceId)) {
       throw new TypeError("traceId must be 32 lowercase hexadecimal characters.");
@@ -88,7 +88,7 @@ export class Telemetry {
     return Object.freeze({
       traceId: span.traceId,
       spanId: span.spanId,
-      end: async ({ status = "ok", attributes: finalAttributes = {} } = {}) => {
+      end: async ({ status = "ok", attributes: finalAttributes = {} } = /** @type {any} */ ({})) => {
         if (ended) throw new Error(`Span '${name}' has already ended.`);
         ended = true;
         const completed = {
@@ -196,7 +196,7 @@ async function telemetryParts(path) {
   return [...archives, file];
 }
 
-export async function summarizeTelemetryFile(path, { workflowRunId, root = "", config = {} } = {}) {
+export async function summarizeTelemetryFile(path, { workflowRunId, root = "", config = {} } = /** @type {any} */ ({})) {
   const pieces = [];
   for (const part of await telemetryParts(path)) {
     pieces.push(await readRegularFile(part, 64 * 1024 * 1024).then((bytes) => bytes.toString("utf8")).catch((error) => {

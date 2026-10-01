@@ -1,3 +1,4 @@
+// @ts-check
 import { resolve } from "node:path";
 import { mergeLayers, readLayers, SETTINGS, SettingsError } from "./layers.js";
 
@@ -7,7 +8,7 @@ import { mergeLayers, readLayers, SETTINGS, SettingsError } from "./layers.js";
 export async function loadConfig(path = ".etnpilot/etnpilot.yaml", env = process.env, {
   layerRoot,
   userLayers = env.ETNPILOT_IGNORE_USER_CONFIG !== "1",
-} = {}) {
+} = /** @type {any} */ ({})) {
   const projectFile = resolve(path);
   const layers = await readLayers(projectFile, { env, layerRoot, userLayers });
   const merged = mergeLayers(layers);

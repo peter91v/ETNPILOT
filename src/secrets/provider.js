@@ -1,3 +1,4 @@
+// @ts-check
 const SECRET_PROVIDER_API_VERSION = 1;
 
 export function defineSecretProvider(definition) {

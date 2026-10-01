@@ -5,7 +5,7 @@ import { dirname } from "node:path";
 import { verifyReceiptSignature } from "./receipt-signing.js";
 
 export class JsonlReceiptStore {
-  constructor(path, { signer } = {}) {
+  constructor(path, { signer } = /** @type {any} */ ({})) {
     this.path = path;
     this.signer = signer;
     this.pending = Promise.resolve();
@@ -58,7 +58,7 @@ export async function verifyReceiptFile(path, {
   verifiers = new Map(),
   requireSignatures = false,
   requireTerminal = false,
-} = {}) {
+} = /** @type {any} */ ({})) {
   // Line by line: a receipt is as long as the run was, and a limit on the whole
   // file would make a long run impossible to verify.
   const chain = new ChainVerifier({ verifiers, requireSignatures, requireTerminal });
@@ -73,7 +73,7 @@ export async function verifyReceiptFile(path, {
   return chain.finish();
 }
 
-export function verifyReceiptText(content, { verifiers = new Map(), requireSignatures = false, requireTerminal = false } = {}) {
+export function verifyReceiptText(content, { verifiers = new Map(), requireSignatures = false, requireTerminal = false } = /** @type {any} */ ({})) {
   const lines = content.split("\n");
   if (lines.at(-1) === "") lines.pop();
   const chain = new ChainVerifier({ verifiers, requireSignatures, requireTerminal });

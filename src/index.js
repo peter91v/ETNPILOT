@@ -1,3 +1,4 @@
+// @ts-check
 export { Harness } from "./core/harness.js";
 export { ApprovalPolicy } from "./core/approval-policy.js";
 export {

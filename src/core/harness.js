@@ -52,7 +52,7 @@ export class Harness {
     telemetry,
     secrets,
     maxSubagentDepth = DEFAULT_MAX_SUBAGENT_DEPTH,
-  } = {}) {
+  } = /** @type {any} */ ({})) {
     if (!Number.isInteger(maxSubagentDepth) || maxSubagentDepth < 1) {
       throw new TypeError("maxSubagentDepth must be a positive integer.");
     }

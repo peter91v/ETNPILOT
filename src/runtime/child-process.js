@@ -1,3 +1,4 @@
+// @ts-check
 import { spawn } from "node:child_process";
 import { utf8Prefix } from "./bounded-io.js";
 
@@ -12,7 +13,7 @@ export function signalTree(child, signal = "SIGTERM") {
   child.kill(signal);
 }
 
-export async function stopChild(child, { graceMs = 250 } = {}) {
+export async function stopChild(child, { graceMs = 250 } = /** @type {any} */ ({})) {
   if (!child?.pid) return;
   const closed = new Promise((resolve) => child.once("close", resolve));
   signalTree(child);
@@ -25,7 +26,7 @@ export async function stopChild(child, { graceMs = 250 } = {}) {
   } finally { clearTimeout(timer); }
 }
 
-export async function runChild(command, { cwd, env, signal, input, timeoutMs = 120_000, outputLimit = 1024 * 1024 } = {}) {
+export async function runChild(command, { cwd, env, signal, input, timeoutMs = 120_000, outputLimit = 1024 * 1024 } = /** @type {any} */ ({})) {
   signal?.throwIfAborted();
   const child = spawn(command[0], command.slice(1), { cwd, env, shell: false, ...processGroupOptions(), stdio: ["pipe", "pipe", "pipe"] });
   const chunks = { stdout: [], stderr: [] };

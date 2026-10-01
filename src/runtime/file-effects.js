@@ -1,3 +1,4 @@
+// @ts-check
 import { workspaceFile, digestBytes } from "./workspace-files.js";
 
 export async function undoFileEffects(root, effects) {

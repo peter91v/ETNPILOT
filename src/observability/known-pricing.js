@@ -1,3 +1,4 @@
+// @ts-check
 // A snapshot of published per-token rates, for filling in
 // 'observability.pricing.models' without retyping them — never a live
 // source, because neither Anthropic nor OpenAI publishes prices through an
@@ -92,7 +93,7 @@ export function knownPriceFor(providerType, modelId) {
 // provider's configured name, not its type). Ids do not collide across the
 // tables — 'claude-…' versus 'gpt-…' — so the first table that knows the id
 // answers. Undefined when none does.
-export function knownPriceForModel(modelId, { root = "", now = Date.now(), autoUpdate = true } = {}) {
+export function knownPriceForModel(modelId, { root = "", now = Date.now(), autoUpdate = true } = /** @type {any} */ ({})) {
   const builtIn = Object.keys(RATE_TABLES).map((type) => knownPriceFor(type, modelId)).find(Boolean);
   const snapshot = autoUpdate ? learned.get(root) : undefined;
   const key = typeof modelId === "string" ? modelId.toLowerCase().replace(/^[a-z0-9-]+\//, "").replace(/\./g, "-").replace(/-\d{4}-\d{2}-\d{2}$/, "") : "";
@@ -110,7 +111,7 @@ const learned = new Map();
 const catalogKeys = new Map();
 let catalogRevision = 0;
 export function pricingCatalogRevision() { return catalogRevision; }
-export function useLearnedRates(rates, { asOf, source, root = "" } = {}) {
+export function useLearnedRates(rates, { asOf, source, root = "" } = /** @type {any} */ ({})) {
   const validated = Object.create(null);
   for (const [model, rate] of Object.entries(rates ?? {})) {
     if (!rate || typeof rate !== "object" || ![rate.inputPerMillion, rate.outputPerMillion].every((value) => Number.isFinite(value) && value >= 0)) continue;

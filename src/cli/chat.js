@@ -31,7 +31,7 @@ export async function runChat({
   interactive = Boolean(input.isTTY && output.isTTY),
   runner,
   providerFactories,
-} = {}) {
+} = /** @type {any} */ ({})) {
   if (!interactive) {
     throw new Error("Chat needs an interactive terminal. For a single request use 'etnpilot run'.");
   }

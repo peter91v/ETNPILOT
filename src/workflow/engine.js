@@ -1,5 +1,5 @@
 export class WorkflowEngine {
-  constructor({ concurrency = 1, failFast = true, timeoutMs = 30 * 60_000, maxSteps = 100, events } = {}) {
+  constructor({ concurrency = 1, failFast = true, timeoutMs = 30 * 60_000, maxSteps = 100, events } = /** @type {any} */ ({})) {
     if (!Number.isInteger(concurrency) || concurrency < 1) throw new TypeError("concurrency must be a positive integer.");
     this.concurrency = concurrency;
     this.failFast = failFast;
@@ -8,7 +8,7 @@ export class WorkflowEngine {
     this.events = events;
   }
 
-  async run(steps, execute, { signal, context = {} } = {}) {
+  async run(steps, execute, { signal, context = {} } = /** @type {any} */ ({})) {
     const normalized = validateSteps(steps, this.maxSteps);
     const states = new Map(normalized.map((step) => [step.id, {
       id: step.id,

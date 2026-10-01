@@ -1,3 +1,4 @@
+// @ts-check
 // The page for a directory with no project in it. It is a page of its own
 // rather than an eighth view, for the same reason the terminal interface makes
 // it a screen of its own: there is nothing else to look at yet.

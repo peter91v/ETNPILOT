@@ -1,3 +1,4 @@
+// @ts-check
 import { readFile, readdir } from "node:fs/promises";
 
 // procfs may expose host PIDs while Node runs in a nested PID namespace.

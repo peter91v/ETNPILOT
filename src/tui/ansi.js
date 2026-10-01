@@ -14,7 +14,7 @@ export const COLORS = Object.freeze({
   ink: 252,
 });
 
-export function createStyle({ color = true } = {}) {
+export function createStyle({ color = true } = /** @type {any} */ ({})) {
   const paint = (text, code) => (color ? `\u001B[38;5;${code}m${text}\u001B[39m` : String(text));
   return {
     enabled: color,
@@ -113,7 +113,7 @@ export function until(iso, now = Date.now()) {
 
 // A run id carries its date up front, so the distinctive half is the tail.
 // A job id is a UUID, where the head is what people quote.
-export function shortId(value, { kind = "job" } = {}) {
+export function shortId(value, { kind = "job" } = /** @type {any} */ ({})) {
   if (!value) return "—";
   const text = String(value);
   if (kind === "run") {

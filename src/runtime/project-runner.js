@@ -82,7 +82,7 @@ async function setUpRun({
   agentOverride,
   secretResolver,
   onEvent,
-} = {}) {
+} = /** @type {any} */ ({})) {
   if (!input) throw new TypeError("A task prompt is required.");
   const repositoryRoot = resolve(root);
   const bootstrapConfig = await loadConfig(join(repositoryRoot, ".etnpilot", "etnpilot.yaml"), env);
@@ -829,7 +829,7 @@ function selectNamedWorkflow(workflows, name) {
   return found;
 }
 
-function normalizeWorkflow(workflow = {}, { requested, fallback, named } = {}) {
+function normalizeWorkflow(workflow = {}, { requested, fallback, named } = /** @type {any} */ ({})) {
   // Asking for an agent by name means running that agent. Letting the
   // configured steps win would make '--agent', the issue trigger's agent, and
   // the run prompt quietly decorative wherever a project defines a workflow.
@@ -980,7 +980,7 @@ function codegraphAsServer(descriptor) {
   };
 }
 
-function createCodegraph(workspaceRoot, config, { importer } = {}) {
+function createCodegraph(workspaceRoot, config, { importer } = /** @type {any} */ ({})) {
   if (config.codegraph?.enabled === false || config.codegraph?.autoIndex === false) return null;
   return {
     graph: new CodeGraph(workspaceRoot, importer ? { importer } : undefined),

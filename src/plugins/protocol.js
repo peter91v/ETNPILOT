@@ -1,3 +1,4 @@
+// @ts-check
 const INTEGER_LIMITS = Object.freeze({
   setupTimeoutMs: [100, 120_000],
   callTimeoutMs: [100, 3_600_000],
@@ -24,7 +25,7 @@ export const DEFAULT_PLUGIN_LIMITS = Object.freeze({
 });
 
 export class PluginProcessError extends Error {
-  constructor(message, { code = "plugin_process_error", plugin, cause } = {}) {
+  constructor(message, { code = "plugin_process_error", plugin, cause } = /** @type {any} */ ({})) {
     super(message, cause ? { cause } : undefined);
     this.name = "PluginProcessError";
     this.code = code;

@@ -1,3 +1,4 @@
+// @ts-check
 import { createHash } from "node:crypto";
 
 export function providerToolName(name) {

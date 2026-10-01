@@ -10,7 +10,7 @@ import { ProviderError } from "./router.js";
 // 'response.json()' would have returned — so tool calls, usage and the receipt
 // do not learn a second shape.
 
-export async function* readEvents(response, { signal, maxBytes = 16 * 1024 * 1024, maxEventBytes = 1024 * 1024 } = {}) {
+export async function* readEvents(response, { signal, maxBytes = 16 * 1024 * 1024, maxEventBytes = 1024 * 1024 } = /** @type {any} */ ({})) {
   if (!response.body?.getReader) {
     throw new ProviderError("The provider sent no stream to read.", { code: "stream_missing", retryable: false, safeToRetry: false });
   }
@@ -85,7 +85,7 @@ function parseJson(text, what) {
 // message_delta with the stop reason and the final output count.
 // 'onDelta' hears each piece of answer text as it arrives; the return value is
 // still the whole message, so nothing downstream depends on it being called.
-export async function collectAnthropicStream(response, { onDelta, onUsage, signal } = {}) {
+export async function collectAnthropicStream(response, { onDelta, onUsage, signal } = /** @type {any} */ ({})) {
   const message = { content: [], usage: {} };
   const blocks = [];
   for await (const { event, data } of readEvents(response, { signal })) {
@@ -148,7 +148,7 @@ export async function collectAnthropicStream(response, { onDelta, onUsage, signa
 
 // OpenAI-compatible: chat.completion.chunk objects, tool calls arriving in
 // pieces keyed by index, and a final chunk with usage when asked for.
-export async function collectChatStream(response, { onDelta, onUsage, signal } = {}) {
+export async function collectChatStream(response, { onDelta, onUsage, signal } = /** @type {any} */ ({})) {
   const message = { role: "assistant", content: "" };
   const calls = [];
   let finish;
@@ -211,7 +211,7 @@ export async function collectChatStream(response, { onDelta, onUsage, signal } =
 // 'response.completed'. So the pieces are only for showing, and what is returned
 // is that final object: tool calls and reasoning items never have to be
 // reassembled from fragments.
-export async function collectResponsesStream(response, { onDelta, onUsage, signal } = {}) {
+export async function collectResponsesStream(response, { onDelta, onUsage, signal } = /** @type {any} */ ({})) {
   let final;
   for await (const { event, data } of readEvents(response, { signal })) {
     if (!data || data === "[DONE]") continue;

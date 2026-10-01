@@ -17,7 +17,7 @@ export function createTuiApp({
   worktreeIntervalMs = 5000,
   actor = process.env.USER ?? "tui",
   now = Date.now,
-} = {}) {
+} = /** @type {any} */ ({})) {
   if (!state) throw new TypeError("The TUI requires an open project state.");
   if (!Number.isInteger(pollIntervalMs) || pollIntervalMs < 50) {
     throw new TypeError("pollIntervalMs must be at least 50.");
@@ -453,7 +453,7 @@ export function createTuiApp({
     }
   }
 
-  async function load(which, { force = false } = {}) {
+  async function load(which, { force = false } = /** @type {any} */ ({})) {
     if (which === "worktrees") {
       if (worktrees !== undefined && !force) return;
       try {

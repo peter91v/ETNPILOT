@@ -32,7 +32,7 @@ export async function createReviewServer({
   getNetworkInterfaces = networkInterfaces,
   fetchImpl,
   allowedHosts = [],
-} = {}) {
+} = /** @type {any} */ ({})) {
   // Kept between starts, because an installed app holds a link: a token minted
   // per start locks that icon out at the next restart. A caller may still pass
   // one, which is what the tests do.
@@ -378,7 +378,7 @@ export async function createReviewServer({
     get state() { return state; },
     get inbox() { return state?.inbox; },
     get queue() { return state?.queue; },
-    listen({ host = "127.0.0.1", port = 8788 } = {}) {
+    listen({ host = "127.0.0.1", port = 8788 } = /** @type {any} */ ({})) {
       return new Promise((resolveListen, reject) => {
         const onError = (error) => {
           server.off("listening", onListening);

@@ -1,10 +1,11 @@
+// @ts-check
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 
 // One pending approval blocks only its own worker. Claims are atomic in the
 // queue, so workers never take the same job.
 export class WorkflowQueueWorkerPool {
-  constructor({ workers = 1, ...options } = {}) {
+  constructor({ workers = 1, ...options } = /** @type {any} */ ({})) {
     if (!Number.isInteger(workers) || workers < 1) throw new TypeError("workers must be a positive integer.");
     this.workers = Array.from({ length: workers }, (_, index) => new WorkflowQueueWorker({
       ...options,
@@ -21,7 +22,7 @@ export class WorkflowQueueWorkerPool {
     for (const worker of this.workers) worker.wake();
   }
 
-  async waitForIdle({ timeoutMs = 30_000 } = {}) {
+  async waitForIdle({ timeoutMs = 30_000 } = /** @type {any} */ ({})) {
     const [first] = this.workers;
     const startedAt = Date.now();
     for (;;) {
@@ -53,7 +54,7 @@ export class WorkflowQueueWorker {
     leaseMs = 30_000,
     retryDelayMs = 5_000,
     onError = () => {},
-  } = {}) {
+  } = /** @type {any} */ ({})) {
     if (!queue) throw new TypeError("A workflow queue is required.");
     if (typeof execute !== "function") throw new TypeError("A workflow job executor is required.");
     if (!Number.isInteger(pollIntervalMs) || pollIntervalMs < 10) {
@@ -83,7 +84,7 @@ export class WorkflowQueueWorker {
     this.sleepController?.abort();
   }
 
-  async waitForIdle({ timeoutMs = 30_000 } = {}) {
+  async waitForIdle({ timeoutMs = 30_000 } = /** @type {any} */ ({})) {
     const startedAt = Date.now();
     while (true) {
       const counts = this.queue.counts();

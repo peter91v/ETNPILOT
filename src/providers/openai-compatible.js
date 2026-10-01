@@ -355,7 +355,7 @@ export function looksLikeChatModel(id) {
 // The models an OpenAI-compatible endpoint currently offers. Read live, on
 // request — never cached here — because the answer changes on the server's
 // own schedule, not this project's.
-export async function listModels({ baseUrl, apiKey, fetchImpl = globalThis.fetch } = {}) {
+export async function listModels({ baseUrl, apiKey, fetchImpl = globalThis.fetch } = /** @type {any} */ ({})) {
   if (!baseUrl) throw new TypeError("baseUrl is required.");
   const endpoint = `${baseUrl.replace(/\/$/, "")}/models`;
   let response;

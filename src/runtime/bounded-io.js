@@ -1,3 +1,4 @@
+// @ts-check
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 
@@ -6,7 +7,7 @@ export function utf8Prefix(bytes, limit = bytes.length) {
   return new TextDecoder("utf-8", { fatal: false }).decode(prefix, { stream: true });
 }
 
-export async function readHandle(handle, maxBytes, { signal, truncate = false } = {}) {
+export async function readHandle(handle, maxBytes, { signal, truncate = false } = /** @type {any} */ ({})) {
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new TypeError("Read byte limit must be a positive integer.");
   const details = await handle.stat();
   if (!details.isFile()) throw new Error("Not a regular file.");
@@ -33,7 +34,7 @@ export async function readRegularFile(path, maxBytes, options = {}) {
 }
 
 // Read at most limit bytes, and cancel the source even when the body is endless.
-export async function readResponseBytes(response, limit, { signal, truncate = false } = {}) {
+export async function readResponseBytes(response, limit, { signal, truncate = false } = /** @type {any} */ ({})) {
   if (!response.body?.getReader) throw new Error("Response has no readable body.");
   const reader = response.body.getReader();
   const chunks = [];

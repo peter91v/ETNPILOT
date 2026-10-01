@@ -21,7 +21,7 @@ const DEFAULTS = Object.freeze({
 // operator's privileges and reaches whatever that process can reach. A sandbox
 // closes it by running commands in a disposable container that sees only the
 // workspace and, by default, no network.
-export function createSandbox(config = {}, { workspace, probe = probeRuntime } = {}) {
+export function createSandbox(config = {}, { workspace, probe = probeRuntime } = /** @type {any} */ ({})) {
   if (config.enabled !== true) return undefined;
   if (!workspace) throw new TypeError("A sandbox requires a workspace path.");
   const options = normalizeSandbox(config);
@@ -49,7 +49,7 @@ export function createSandbox(config = {}, { workspace, probe = probeRuntime } =
         + " Install it, or set sandbox.enabled to false to accept host execution.",
       );
     },
-    wrap(command, { env = {}, cwd } = {}) {
+    wrap(command, { env = {}, cwd } = /** @type {any} */ ({})) {
       return buildSandboxCommand(command, {
         ...options,
         workspace: root,
@@ -135,7 +135,7 @@ function probeRuntime(runtime) {
 // from a Dockerfile is a separate job ETNPilot does not take on.
 export async function readDevcontainerImage(root, {
   path = join(".devcontainer", "devcontainer.json"),
-} = {}) {
+} = /** @type {any} */ ({})) {
   let content;
   try {
     content = await readFile(resolve(root, path), "utf8");
@@ -207,7 +207,7 @@ export async function buildDevcontainerImage(root, {
   build,
   runtime = "docker",
   run = runCommand,
-} = {}) {
+} = /** @type {any} */ ({})) {
   if (!build?.dockerfile) throw new TypeError("A devcontainer build requires a dockerfile path.");
   const projectRoot = resolve(root);
   const dockerfilePath = resolve(projectRoot, build.dockerfile);
@@ -246,7 +246,7 @@ function assertInside(root, path, label) {
   }
 }
 
-function runCommand(command, args, { allowFailure = false } = {}) {
+function runCommand(command, args, { allowFailure = false } = /** @type {any} */ ({})) {
   return new Promise((resolveRun, reject) => {
     const child = spawn(command, args, { stdio: ["ignore", "inherit", "inherit"] });
     child.once("error", (error) => (allowFailure ? resolveRun({ code: 1, error }) : reject(error)));

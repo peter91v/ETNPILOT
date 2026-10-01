@@ -3,7 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-export async function acquireWorkspaceLease(root, { sessionId } = {}) {
+export async function acquireWorkspaceLease(root, { sessionId } = /** @type {any} */ ({})) {
   const directory = join(root, ".etnpilot", "state");
   await mkdir(directory, { recursive: true });
   const database = new DatabaseSync(join(directory, "workspace-lease.sqlite"));

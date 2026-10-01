@@ -1,3 +1,4 @@
+// @ts-check
 import { readLines } from "./jsonl.js";
 import { join, resolve } from "node:path";
 import { loadReceiptVerifiers } from "../core/receipt-signing.js";
@@ -28,7 +29,7 @@ export async function countRuns(directory) {
   return entries.filter((name) => name.endsWith(".jsonl")).length;
 }
 
-export async function readRuns(directory, { limit = 20, cache = receiptCache } = {}) {
+export async function readRuns(directory, { limit = 20, cache = receiptCache } = /** @type {any} */ ({})) {
   const entries = await readdir(directory).catch((error) => {
     if (error.code === "ENOENT") return [];
     throw error;
@@ -113,7 +114,7 @@ export async function readRuns(directory, { limit = 20, cache = receiptCache } =
 // Why a run ended the way it did, from what the receipt already holds. Both
 // surfaces ask this module rather than each reading the entries their own way,
 // so neither can give a different answer about the same run.
-export function describeOutcome(receipt, { running = false } = {}) {
+export function describeOutcome(receipt, { running = false } = /** @type {any} */ ({})) {
   const terminal = receipt?.terminal ?? {};
   const summary = terminal.summary ?? {};
   const steps = Object.entries(summary.steps ?? {}).map(([id, step]) => ({ id, ...step }));
@@ -330,7 +331,7 @@ function publicationReason(publication) {
 // Verifying is a different question from reading: the chain and the signature,
 // rather than what the run did. A receipt whose chain is broken still reads —
 // that is exactly why this answer has to be available next to it.
-export async function verifyProjectReceipt(directory, file, { root, config } = {}) {
+export async function verifyProjectReceipt(directory, file, { root, config } = /** @type {any} */ ({})) {
   assertReceiptName(file);
   const configured = config?.receipts?.signing?.publicKeyFile;
   const verifiers = configured
@@ -351,7 +352,7 @@ export async function verifyProjectReceipt(directory, file, { root, config } = {
 // A reason code is for a program; this is the sentence a person reads. Every
 // failure here means someone or something changed a sealed record, so it says
 // which line and what kind of change it was, not 'invalid'.
-function describeVerification(report, { signaturesChecked = false } = {}) {
+function describeVerification(report, { signaturesChecked = false } = /** @type {any} */ ({})) {
   if (report.valid) {
     const chain = `${report.entries} ${report.entries === 1 ? "entry" : "entries"}, each hashed onto the one before it`;
     const signatures = signaturesChecked
@@ -440,7 +441,7 @@ export async function readReceipt(directory, file) {
 // A unified diff, read as the lines it touches: every line carries the number
 // it has on each side, so a surface can show where a change is rather than
 // only what it says.
-export function parseDiff(text, { limit = 2000 } = {}) {
+export function parseDiff(text, { limit = 2000 } = /** @type {any} */ ({})) {
   const lines = [];
   let oldLine = 0;
   let newLine = 0;

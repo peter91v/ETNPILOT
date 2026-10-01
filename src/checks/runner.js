@@ -2,7 +2,7 @@ import { runChild } from "../runtime/child-process.js";
 
 const DEFAULT_OUTPUT_LIMIT = 1024 * 1024;
 
-export async function runCheck(check, { cwd, signal, env = process.env, outputLimit = DEFAULT_OUTPUT_LIMIT } = {}) {
+export async function runCheck(check, { cwd, signal, env = process.env, outputLimit = DEFAULT_OUTPUT_LIMIT } = /** @type {any} */ ({})) {
   const command = normalizeCommand(check.command);
   const startedAt = Date.now();
   const result = await spawnCommand(command, {

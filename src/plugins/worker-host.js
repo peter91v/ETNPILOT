@@ -47,7 +47,7 @@ export class PluginWorkerHost {
   #networkControllers = new Set();
   #resolveSecretInput;
 
-  static async start({ specifier, projectRoot = process.cwd(), limits, moduleRoot, signal, resources = {} } = {}) {
+  static async start({ specifier, projectRoot = process.cwd(), limits, moduleRoot, signal, resources = {} } = /** @type {any} */ ({})) {
     if (typeof specifier !== "string" || specifier.length === 0) {
       throw new TypeError("A plugin worker requires a module specifier.");
     }
@@ -146,7 +146,7 @@ export class PluginWorkerHost {
     return this.#pluginName;
   }
 
-  setup(options = {}, { signal } = {}) {
+  setup(options = {}, { signal } = /** @type {any} */ ({})) {
     return this.#request("setup", {
       options: cloneIpcValue(options, this.#limits.maxMessageBytes, "Plugin options"),
     }, { timeoutMs: this.#limits.setupTimeoutMs, signal });
@@ -250,7 +250,7 @@ export class PluginWorkerHost {
     await this.#exitPromise;
   }
 
-  #request(method, params, { timeoutMs, signal, fatalOnTimeout = true } = {}) {
+  #request(method, params, { timeoutMs, signal, fatalOnTimeout = true } = /** @type {any} */ ({})) {
     if (this.#closed || this.#fatalError) {
       return Promise.reject(this.#fatalError ?? new PluginProcessError("Plugin worker is closed.", {
         code: "plugin_process_exit",

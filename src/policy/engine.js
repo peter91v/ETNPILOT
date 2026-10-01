@@ -14,7 +14,7 @@ export class PolicyEngine {
   constructor(config = {}, {
     caseInsensitivePaths = CASE_INSENSITIVE_FILESYSTEM,
     resolveSymlinks = true,
-  } = {}) {
+  } = /** @type {any} */ ({})) {
     this.caseInsensitivePaths = caseInsensitivePaths === true;
     this.resolveSymlinks = resolveSymlinks !== false;
     if (!config || Array.isArray(config) || typeof config !== "object") {
@@ -114,7 +114,7 @@ function normalizeSection(section, { name, effects, defaultEffect, matchers }) {
   return Object.freeze({ default: effect, rules: Object.freeze(rules), matchers: Object.freeze(matchers) });
 }
 
-function selectDecision(section, facts, { pathOutsideWorkspace = false, caseInsensitivePaths = false } = {}) {
+function selectDecision(section, facts, { pathOutsideWorkspace = false, caseInsensitivePaths = false } = /** @type {any} */ ({})) {
   const matches = section.rules.filter((rule) => section.matchers.every((matcher) => {
     if (rule[matcher] === undefined) return true;
     if (facts[matcher] === undefined) return false;
@@ -158,7 +158,7 @@ function policyReason(subject, match) {
     : `${subject} is denied by policy rule '${match.id}'.`;
 }
 
-function normalizeRequestPath(value, workspace, { resolveSymlinks = true } = {}) {
+function normalizeRequestPath(value, workspace, { resolveSymlinks = true } = /** @type {any} */ ({})) {
   if (typeof value !== "string" || value.length === 0) return { value: undefined, outside: false };
   const root = workspace ? resolve(workspace) : undefined;
   if (isAbsolute(value)) {

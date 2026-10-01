@@ -1,10 +1,11 @@
+// @ts-check
 import { spawn } from "node:child_process";
 import { processGroupOptions, stopChild } from "../runtime/child-process.js";
 
 const PROTOCOL_VERSION = "2025-06-18";
 const DEFAULTS = { maxMessageBytes: 1024 * 1024, maxOutputBytes: 16 * 1024 * 1024, maxTools: 256, maxPendingRequests: 32, shutdownTimeoutMs: 250 };
 
-export function createMcpClient({ name, command, args = [], cwd, env, timeoutMs = 30_000, limits = {}, spawnImpl = spawn } = {}) {
+export function createMcpClient({ name, command, args = [], cwd, env, timeoutMs = 30_000, limits = {}, spawnImpl = spawn } = /** @type {any} */ ({})) {
   if (!name || !command) throw new TypeError("An MCP server needs a name and command.");
   const bounds = { ...DEFAULTS, ...limits };
   for (const [key, value] of Object.entries(bounds)) if (!(key in DEFAULTS) || !Number.isSafeInteger(value) || value < 1 || value > 64 * 1024 * 1024) throw new TypeError(`Invalid MCP limit '${key}'.`);
@@ -65,7 +66,7 @@ export function createMcpClient({ name, command, args = [], cwd, env, timeoutMs 
     child.once("error", (error) => fatal(`could not start: ${error.message}`));
     child.once("exit", (code) => fatal(`exited (${code ?? "signal"}) while a call was outstanding`));
   };
-  const send = (method, params, { signal } = {}) => new Promise((resolve, reject) => {
+  const send = (method, params, { signal } = /** @type {any} */ ({})) => new Promise((resolve, reject) => {
     if (closed || !child) return reject(new Error(`MCP server '${name}' is not running.`));
     if (signal?.aborted) return reject(signal.reason);
     if (pending.size >= bounds.maxPendingRequests) { reject(new Error("MCP pending-request limit exceeded.")); return; }
@@ -117,7 +118,7 @@ function textOf(content) {
 // knows how to handle: named 'server.tool' so two servers may offer the same
 // name, and asked for under their own operation kind because a tool from
 // somebody else's process is not a file read.
-export async function connectMcpTools(servers = {}, { onError } = {}) {
+export async function connectMcpTools(servers = {}, { onError } = /** @type {any} */ ({})) {
   const clients = [];
   const tools = [];
   for (const [name, config] of Object.entries(servers)) {

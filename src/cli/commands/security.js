@@ -1,3 +1,4 @@
+// @ts-check
 import { ApprovalPolicy } from "../../core/approval-policy.js";
 import { Harness } from "../../core/harness.js";
 import { PolicyEngine } from "../../policy/engine.js";

@@ -1,3 +1,4 @@
+// @ts-check
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 export function authenticateGitLabWebhook({

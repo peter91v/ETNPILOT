@@ -165,7 +165,7 @@ Exit codes:
   1  the command failed, or a run, verification, or policy check was rejected
 `;
 
-export async function runCli(positionals, values, { waitForShutdown = defaultWaitForShutdown } = {}) {
+export async function runCli(positionals, values, { waitForShutdown = defaultWaitForShutdown } = /** @type {any} */ ({})) {
   const [command, subcommand, ...rest] = positionals;
 
   if (values.help || !command) {

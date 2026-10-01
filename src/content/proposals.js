@@ -1,3 +1,4 @@
+// @ts-check
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -63,7 +64,7 @@ export async function writeProposals(workspacePath, proposals, runId) {
 }
 
 // The paragraph a merge request carries so nobody merges one by accident.
-export function describeProposals(proposals, { tainted } = {}) {
+export function describeProposals(proposals, { tainted } = /** @type {any} */ ({})) {
   if (proposals.length === 0) return "";
   const lines = [
     "",

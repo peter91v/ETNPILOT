@@ -33,7 +33,7 @@ export class WorktreeManager {
   // is one ETNPilot made, and whether removing it would throw away work. The
   // same ignore list as removeIfClean decides the last one, so the screen and
   // the removal can never disagree about 'clean'.
-  async describe({ ignoredUntracked = DEFAULT_IGNORED_UNTRACKED } = {}) {
+  async describe({ ignoredUntracked = DEFAULT_IGNORED_UNTRACKED } = /** @type {any} */ ({})) {
     const described = [];
     for (const entry of await this.list()) {
       const path = typeof entry.worktree === "string" ? entry.worktree : undefined;
@@ -81,7 +81,7 @@ export class WorktreeManager {
   // What a worktree is actually holding. The surfaces ask for this when a
   // person opens one, so 'it keeps unsaved work' can be read as a list of
   // files rather than as a number they have to take on trust.
-  async changesAt(path, { ignoredUntracked = DEFAULT_IGNORED_UNTRACKED, limit = 500, countUntrackedBytes = 2 * 1024 * 1024 } = {}) {
+  async changesAt(path, { ignoredUntracked = DEFAULT_IGNORED_UNTRACKED, limit = 500, countUntrackedBytes = 2 * 1024 * 1024 } = /** @type {any} */ ({})) {
     // Untrimmed: the first of the two status columns is a space for a change
     // that is not staged, and trimming it would shift every path by one.
     const status = await git(["status", "--porcelain"], { cwd: path, trim: false });
@@ -145,7 +145,7 @@ export class WorktreeManager {
 
   // One file's diff, for reading the lines rather than counting them. The
   // caller decides which files exist; this only reads what it is handed.
-  async diffAt(path, file, { maxBytes = 512 * 1024, untracked = false } = {}) {
+  async diffAt(path, file, { maxBytes = 512 * 1024, untracked = false } = /** @type {any} */ ({})) {
     const result = untracked
       ? await git(["diff", "--no-index", "--no-color", "--", "/dev/null", file], {
           cwd: path,
@@ -167,7 +167,7 @@ export class WorktreeManager {
     return this.changesAt(this.#path(name), options);
   }
 
-  async removeIfClean(name, { ignoredUntracked = DEFAULT_IGNORED_UNTRACKED } = {}) {
+  async removeIfClean(name, { ignoredUntracked = DEFAULT_IGNORED_UNTRACKED } = /** @type {any} */ ({})) {
     assertRef(name, "worktree name");
     const path = this.#path(name);
     const status = await git(["status", "--porcelain"], { cwd: path });

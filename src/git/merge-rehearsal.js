@@ -1,3 +1,4 @@
+// @ts-check
 import { git } from "./command.js";
 
 // Publishing a branch that cannot merge wastes a review cycle. A rehearsal
@@ -9,7 +10,7 @@ export async function rehearseMerge({
   targetBranch = "main",
   fetch = true,
   head = "HEAD",
-} = {}) {
+} = /** @type {any} */ ({})) {
   if (!cwd) throw new TypeError("A merge rehearsal requires a working directory.");
   let target = `refs/remotes/${remote}/${targetBranch}`;
   if (fetch && remote) {

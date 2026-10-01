@@ -1,3 +1,4 @@
+// @ts-check
 import { setTimeout as delay } from "node:timers/promises";
 
 const TERMINAL_STATES = new Set(["success", "failed", "canceled", "skipped", "manual"]);
@@ -19,7 +20,7 @@ export async function waitForPipeline({
   pollIntervalMs = 15_000,
   signal,
   now = Date.now,
-} = {}) {
+} = /** @type {any} */ ({})) {
   if (!client || !project || !ref) throw new TypeError("A pipeline wait requires a client, project, and ref.");
   const startedAt = now();
   let seen;

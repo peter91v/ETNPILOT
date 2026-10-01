@@ -1,3 +1,4 @@
+// @ts-check
 import { resolve } from "node:path";
 import { withApprovalInbox, withWorkflowQueue } from "../shared.js";
 

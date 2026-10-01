@@ -1,3 +1,4 @@
+// @ts-check
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 
@@ -20,7 +21,7 @@ async function openRegular(path) {
 
 // Yields each line (without its newline) as a string. An empty line in the middle
 // is yielded as ""; the empty piece after a final newline is not a line.
-export async function* readLines(path, { maxLineBytes = MAX_LINE_BYTES, signal } = {}) {
+export async function* readLines(path, { maxLineBytes = MAX_LINE_BYTES, signal } = /** @type {any} */ ({})) {
   const { handle, size } = await openRegular(path);
   try {
     const buffer = Buffer.alloc(CHUNK);
@@ -58,7 +59,7 @@ export async function* readLines(path, { maxLineBytes = MAX_LINE_BYTES, signal }
 }
 
 // The last non-empty line, read from the end: the cost does not grow with the file.
-export async function readLastLine(path, { maxLineBytes = MAX_LINE_BYTES } = {}) {
+export async function readLastLine(path, { maxLineBytes = MAX_LINE_BYTES } = /** @type {any} */ ({})) {
   const { handle, size } = await openRegular(path);
   try {
     let end = size;

@@ -1,3 +1,4 @@
+// @ts-check
 import { join, resolve } from "node:path";
 import { loadConfig } from "../../config/load.js";
 import { openProjectState } from "../../runtime/project-state.js";

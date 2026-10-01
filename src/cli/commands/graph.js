@@ -1,3 +1,4 @@
+// @ts-check
 import { CodeGraph } from "../../codegraph/codegraph.js";
 import { resolve } from "node:path";
 

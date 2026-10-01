@@ -1,3 +1,4 @@
+// @ts-check
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import {
@@ -129,7 +130,7 @@ export async function loadPinnedProjectContent(root, config = {}) {
   };
 }
 
-export function normalizeContentProvenance(config = {}, { defaultMode = "off" } = {}) {
+export function normalizeContentProvenance(config = {}, { defaultMode = "off" } = /** @type {any} */ ({})) {
   const value = config.content?.provenance;
   const mode = value?.mode ?? defaultMode;
   if (!["off", "enforce"].includes(mode)) {

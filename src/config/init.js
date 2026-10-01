@@ -1,3 +1,4 @@
+// @ts-check
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { importExistingProject, importedAgentNames } from "./migrate.js";
 import { chooseProvider, forgeProject } from "../forge/forge.js";
@@ -464,7 +465,7 @@ export function renderProjectConfig(template = "default") {
   return String(document);
 }
 
-export async function initializeProject(root, { template = "default", importExisting = true, forge = "auto", env = process.env, onProgress } = {}) {
+export async function initializeProject(root, { template = "default", importExisting = true, forge = "auto", env = process.env, onProgress } = /** @type {any} */ ({})) {
   const config = renderProjectConfig(template);
   const configDir = join(root, ".etnpilot");
   await Promise.all([

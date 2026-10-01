@@ -71,7 +71,7 @@ const EVERY_TOOL = Object.freeze(["read_file", "list_files", "search_files", "wr
 
 // With 'dryRun' nothing is written: the report says what would be imported, so a
 // surface can show it before anyone has chosen to create the project.
-export async function importExistingProject(root, { configDir = join(root, ".etnpilot"), dryRun = false } = {}) {
+export async function importExistingProject(root, { configDir = join(root, ".etnpilot"), dryRun = false } = /** @type {any} */ ({})) {
   const report = { instructions: [], agents: [], skills: [], skipped: [], notes: [], dryRun };
   const seen = new Set();
   dry = dryRun;

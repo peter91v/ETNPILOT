@@ -1,9 +1,10 @@
+// @ts-check
 import { readdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 // Reads what is actually installed rather than what the manifest asks for:
 // a lockfile says what should be there, node_modules says what is.
-export async function readInstalledPackages(root, { directory = "node_modules" } = {}) {
+export async function readInstalledPackages(root, { directory = "node_modules" } = /** @type {any} */ ({})) {
   const base = resolve(root, directory);
   const entries = await readdir(base, { withFileTypes: true }).catch((error) => {
     if (error.code === "ENOENT") return [];

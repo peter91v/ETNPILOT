@@ -1,3 +1,4 @@
+// @ts-check
 import { agentRawResponses, openProjectState } from "../../runtime/project-state.js";
 import { basename, resolve } from "node:path";
 import { buildRunAttestation } from "../../supply/attestation.js";

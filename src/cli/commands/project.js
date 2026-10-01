@@ -1,3 +1,4 @@
+// @ts-check
 import { WorktreeManager } from "../../git/worktrees.js";
 import { createRunApprovalHandler, ignoreMissing, resolveReceiptPublicKeys } from "../shared.js";
 import { diagnose } from "../../runtime/diagnose.js";

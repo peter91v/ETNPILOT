@@ -1,3 +1,4 @@
+// @ts-check
 // A single self-contained page: no framework, no CDN, no build step. Every
 // value from a run is inserted with textContent, never as markup, because all
 // of it is text an agent controlled.

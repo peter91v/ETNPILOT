@@ -1,3 +1,4 @@
+// @ts-check
 import { dirname, join, resolve } from "node:path";
 import YAML from "yaml";
 import { loadConfig } from "../config/load.js";

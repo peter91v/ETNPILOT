@@ -222,7 +222,7 @@ function describeSpawn(definition, subagents) {
 // Enforced twice on purpose. The filtered list is what the model is offered,
 // and 'invoke' refuses anything outside it — a model can name a tool nobody
 // showed it, and an offer is not a boundary.
-function allowedDefinitions(allowed, { canSpawn = true, hasSkills = true } = {}) {
+function allowedDefinitions(allowed, { canSpawn = true, hasSkills = true } = /** @type {any} */ ({})) {
   // An agent with no 'subagents' has nothing it may spawn, and one with no
   // skills has nothing to load: offering either is offering a refusal.
   const offered = WORKSPACE_TOOL_DEFINITIONS.filter((definition) => (
@@ -256,7 +256,7 @@ export function createWorkspaceTools({
   // beneath their scope — so they cost nothing in a run that never goes there.
   scopedInstructions = [],
   fetchImpl = globalThis.fetch,
-} = {}) {
+} = /** @type {any} */ ({})) {
   if (!workingDirectory) throw new TypeError("Workspace tools require a workingDirectory.");
   const root = resolve(workingDirectory);
   const bounds = { ...DEFAULT_LIMITS, ...limits };

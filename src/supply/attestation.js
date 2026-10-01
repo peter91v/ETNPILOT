@@ -13,7 +13,7 @@ export async function buildRunAttestation(receiptPath, {
   root = process.cwd(),
   builderId = "https://github.com/peter91v/ETNPILOT",
   verifiers = new Map(),
-} = {}) {
+} = /** @type {any} */ ({})) {
   const path = resolve(receiptPath);
   const verification = await verifyReceiptFile(path, { verifiers });
   const entries = (await readFile(path, "utf8")).split("\n").filter(Boolean).map((line) => JSON.parse(line));

@@ -54,7 +54,7 @@ export function createReceiptVerifier(publicKeyInput) {
   });
 }
 
-export async function loadReceiptSigner({ root, config = {}, env = process.env, secretResolver } = {}) {
+export async function loadReceiptSigner({ root, config = {}, env = process.env, secretResolver } = /** @type {any} */ ({})) {
   const signing = config.receipts?.signing ?? {};
   if (signing.enabled !== true) return undefined;
   if (signing.privateKeySecret) {
@@ -91,7 +91,7 @@ export async function loadReceiptVerifiers(paths) {
   return verifiers;
 }
 
-export async function generateReceiptKeyPair({ privateKeyPath, publicKeyPath } = {}) {
+export async function generateReceiptKeyPair({ privateKeyPath, publicKeyPath } = /** @type {any} */ ({})) {
   if (!privateKeyPath || !publicKeyPath) throw new TypeError("Private and public key paths are required.");
   const privatePath = resolve(privateKeyPath);
   const publicPath = resolve(publicKeyPath);

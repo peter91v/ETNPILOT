@@ -1,3 +1,4 @@
+// @ts-check
 const DEFAULT_ALLOW = Object.freeze([
   "PATH", "HOME", "LANG", "LC_ALL", "TZ", "TMPDIR",
   "PREFIX", "ANDROID_DATA", "ANDROID_ROOT",

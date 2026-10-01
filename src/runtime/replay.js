@@ -20,7 +20,7 @@ export async function replayRun(receiptPath, {
   env = process.env,
   signal,
   execute = runCheck,
-} = {}) {
+} = /** @type {any} */ ({})) {
   const path = resolve(receiptPath);
   const content = (await readRegularFile(path, 16 * 1024 * 1024, { signal })).toString("utf8");
   const verification = verifyReceiptText(content, { verifiers, requireSignatures, requireTerminal });
