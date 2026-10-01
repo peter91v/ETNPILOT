@@ -124,6 +124,10 @@ export async function forgeProject(root, {
     return report;
   }
   report.notes.push(...plan.notes);
+  if (plan.covered) {
+    report.notes.push("AgentsForge found nothing missing: the agents, skills and instructions this project has already cover what it saw. Nothing was written.");
+    return report;
+  }
   await writePlan(plan, { root, configDir, report, provider: report.provider });
   return report;
 }
@@ -284,7 +288,14 @@ export function validatePlan(raw, { root }) {
     }
     instructions.push({ name, scope, body });
   }
-  if (agents.length + skills.length + instructions.length === 0) throw new Error("it proposed nothing");
+  if (agents.length + skills.length + instructions.length === 0) {
+    // All three lists there and empty is an answer: the project has it covered.
+    // Anything else (nothing usable in what was proposed) is not.
+    const lists = [raw.agents, raw.skills, raw.instructions];
+    const answeredEmpty = lists.every((list) => Array.isArray(list) && list.length === 0);
+    if (!answeredEmpty) throw new Error("it proposed nothing");
+    return { agents, skills, instructions, notes, root, covered: true };
+  }
   return { agents, skills, instructions, notes, root };
 }
 

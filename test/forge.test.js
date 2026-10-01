@@ -231,4 +231,12 @@ test("an answer with nothing to add is fine and writes nothing", async () => {
   const report = await forgeProject(root, { config: {}, runModel: async () => ({ text: '{"agents":[],"skills":[],"instructions":[]}' }) });
   assert.equal(report.agents.length + report.skills.length + report.instructions.length, 0);
   assert.deepEqual(summarizeForge(report).filter((line) => /Forged/.test(line)), []);
+  assert.match(report.notes.join("\n"), /found nothing missing/);
+  assert.doesNotMatch(report.notes.join("\n"), /could not be used/);
+});
+
+test("lists with nothing usable in them are still not an answer", async () => {
+  const root = await repository();
+  const report = await forgeProject(root, { config: {}, runModel: async () => ({ text: '{"agents":[{"name":"","prompt":""}],"skills":[],"instructions":[]}' }) });
+  assert.match(report.notes.join("\n"), /could not be used \(it proposed nothing\)/);
 });
