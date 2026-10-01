@@ -1,7 +1,4 @@
-// State, the small DOM helpers and the navigation.
-// Client-side code, kept as text and joined by ../page.js into one script. It
-// is not a module in the browser: no imports, no build step.
-export const CLIENT_CORE = `const $ = (id) => document.getElementById(id);
+const $ = (id) => document.getElementById(id);
 
 // What the page is showing and what the person is in the middle of doing. The
 // poll below never throws either of these away.
@@ -45,6 +42,17 @@ let changedOnly = false;
 let settingsLimit = 25;
 let paletteIndex = 0;
 let lastFocus;
+
+// What each view does, registered by the file that owns it:
+//   render()   draws the view from what is already known
+//   load()     reads what the view needs when it is opened (optional)
+//   actions()  the buttons next to the page title (optional)
+// A new view is a file that defines these and calls registerView, plus an entry
+// in VIEWS below and a section in markup.html.
+const viewHooks = {};
+function registerView(id, hooks) {
+  viewHooks[id] = hooks;
+}
 
 const VIEWS = [
   {
@@ -432,24 +440,17 @@ function show(next) {
   renderNav();
   renderPageActions();
   render();
-  // These two are read on demand: one runs 'git status' per worktree, the
-  // other crosses the network, so neither belongs in the poll.
-  if (view === "chat") void syncChat();
-  if (view === "worktrees" && worktrees === undefined) void loadWorktrees();
-  if (view === "merges" && merges === undefined) void loadMerges();
-  // Read from disk each time it is opened: it is the files that are being reviewed.
-  if (view === "agents" || view === "content") void loadProjectViews();
-  if (view === "accounts") void loadAccounts();
+  // What each view reads when it is opened is its own file's business: see
+  // registerView at the bottom of each client file.
+  const hooks = viewHooks[view];
+  if (hooks && hooks.load) void hooks.load();
 }
 
 function renderPageActions() {
   const host = $("page-actions");
   host.replaceChildren();
-  if (view === "worktrees") host.append(button("Read again", { class: "btn", onClick: () => loadWorktrees({ notify: true }) }));
-  if (view === "agents" || view === "content") host.append(button("Read again", { class: "btn", onClick: () => loadProjectViews({ notify: true }) }));
-  if (view === "accounts") host.append(button("Read again", { class: "btn", onClick: () => loadAccounts({ notify: true }) }));
-  if (view === "merges") host.append(button("Ask GitLab", { class: "btn", onClick: () => loadMerges({ notify: true }) }));
-  if (view === "runs" && openRun) host.append(button("Close the receipt", { class: "btn", onClick: () => { openRun = undefined; expandedAgents = new Set(); render(); } }));
+  const hooks = viewHooks[view];
+  if (hooks && hooks.actions) for (const action of hooks.actions()) host.append(action);
   host.append(button("Refresh", { class: "btn", onClick: () => refresh({ force: true }) }));
 }
 
@@ -549,17 +550,6 @@ function render() {
 function draw() {
   renderNav();
   renderRuntime();
-  if (view === "overview") renderOverview();
-  if (view === "chat") renderChat();
-  if (view === "approvals") renderApprovals();
-  if (view === "queue") renderQueue();
-  if (view === "runs") renderRuns();
-  if (view === "worktrees") renderWorktrees();
-  if (view === "merges") renderMerges();
-  if (view === "checks") renderChecks();
-  if (view === "settings") renderSettings();
-  if (view === "agents") renderAgents();
-  if (view === "content") renderContent();
-  if (view === "accounts") renderAccounts();
+  const hooks = viewHooks[view];
+  if (hooks && hooks.render) hooks.render();
 }
-`;

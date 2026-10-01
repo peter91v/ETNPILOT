@@ -1,7 +1,4 @@
-// Checks, overview, approvals, the queue and runs.
-// Client-side code, kept as text and joined by ../page.js into one script. It
-// is not a module in the browser: no imports, no build step.
-export const CLIENT_RUNS = `// The same registry the terminal interface lists, over the same read path.
+// The same registry the terminal interface lists, over the same read path.
 // Each row says which of four states it is in — never run, running, what it
 // found, or no verdict to give — because three of those look identical on a
 // surface that only knows 'ok'.
@@ -205,7 +202,7 @@ function runFailureBanner(failure) {
     el("div", { class: "banner-text" }, [
       el("p", { class: "banner-title", text: fixable ? "The run could not start: the project is not committed" : "A run failed" }),
       el("p", { text: "“" + failure.task + "” — " + failure.error }),
-      ...(fixable ? [el("pre", { class: "banner-code", text: "git add .etnpilot && git commit -m \\\"Add ETNPilot configuration\\\"" })] : []),
+      ...(fixable ? [el("pre", { class: "banner-code", text: "git add .etnpilot && git commit -m \"Add ETNPilot configuration\"" })] : []),
     ]),
     ...(actions.length > 0 ? [el("div", { class: "banner-actions" }, actions)] : []),
   ]);
@@ -777,4 +774,12 @@ async function loadWorktrees({ notify = false } = {}) {
   renderNav();
   if (view === "worktrees") renderWorktrees();
 }
-`;
+
+registerView("overview", { render: renderOverview });
+registerView("approvals", { render: renderApprovals });
+registerView("queue", { render: renderQueue });
+registerView("checks", { render: renderChecks });
+registerView("runs", {
+  render: renderRuns,
+  actions: () => (openRun ? [button("Close the receipt", { class: "btn", onClick: () => { openRun = undefined; expandedAgents = new Set(); render(); } })] : []),
+});

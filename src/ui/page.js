@@ -12,15 +12,15 @@
 // does not follow is the draft's screens for things that do not exist yet: a
 // surface that shows an empty 'Plugins' page teaches the wrong thing.
 import { renderChatMarkdown } from "./markdown.js";
-import { CLIENT_ACCOUNTS } from "./page/client-accounts.js";
-import { CLIENT_CHAT } from "./page/client-chat.js";
-import { CLIENT_CORE } from "./page/client-core.js";
-import { CLIENT_PROJECT } from "./page/client-project.js";
-import { CLIENT_RUNS } from "./page/client-runs.js";
-import { CLIENT_SHELL } from "./page/client-shell.js";
-import { CLIENT_WORKTREES } from "./page/client-worktrees.js";
-import { MARKUP } from "./page/markup.js";
-import { STYLES } from "./page/styles.js";
+import { readFileSync } from "node:fs";
+
+// The page's script is written as ordinary JavaScript files under ./client/
+// (so it can be read, linted and syntax-checked like the rest of the code) and
+// joined here, in this order: later files use what earlier ones define.
+const CLIENT_FILES = ["core", "chat", "runs", "worktrees", "project", "accounts", "shell"];
+const STYLES = readFileSync(new URL("./client/styles.css", import.meta.url), "utf8");
+const MARKUP = readFileSync(new URL("./client/markup.html", import.meta.url), "utf8");
+const client = Object.fromEntries(CLIENT_FILES.map((name) => [name, readFileSync(new URL(`./client/${name}.js`, import.meta.url), "utf8")]));
 
 export function renderReviewPage(token) {
   return `<!doctype html>
@@ -41,14 +41,14 @@ ${STYLES}
 ${MARKUP}
 <script>
 const TOKEN = ${JSON.stringify(token)};
-${CLIENT_CORE}
+${client.core}
 ${renderChatMarkdown.toString()}
-${CLIENT_CHAT}
-${CLIENT_RUNS}
-${CLIENT_WORKTREES}
-${CLIENT_PROJECT}
-${CLIENT_ACCOUNTS}
-${CLIENT_SHELL}
+${client.chat}
+${client.runs}
+${client.worktrees}
+${client.project}
+${client.accounts}
+${client.shell}
 </script>
 </body>
 </html>

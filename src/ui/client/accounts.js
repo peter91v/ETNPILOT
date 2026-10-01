@@ -1,8 +1,4 @@
-// The Accounts view: who ETNPilot is signed in as, and the ways to sign in.
-// The page never holds a credential after sending it: a key goes to the server
-// once and the answer says whose it is; a browser sign-in shows a code and then
-// asks the server, every few seconds, whether it was confirmed.
-export const CLIENT_ACCOUNTS = `let accountsData;
+let accountsData;
 let accountsError;
 let accountDrafts = {};
 let accountBusy = {};
@@ -193,4 +189,9 @@ function cancelDeviceSignIn() {
   deviceSignIn = undefined;
   render();
 }
-`;
+
+registerView("accounts", {
+  render: renderAccounts,
+  load: loadAccounts,
+  actions: () => [button("Read again", { class: "btn", onClick: () => loadAccounts({ notify: true }) })],
+});

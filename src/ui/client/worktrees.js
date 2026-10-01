@@ -1,7 +1,4 @@
-// Worktrees, diffs, merge requests and settings.
-// Client-side code, kept as text and joined by ../page.js into one script. It
-// is not a module in the browser: no imports, no build step.
-export const CLIENT_WORKTREES = `function renderWorktrees() {
+function renderWorktrees() {
   const host = $("view-worktrees");
   host.replaceChildren();
   if (worktrees === undefined) {
@@ -118,11 +115,11 @@ function unifiedDiffView(text) {
   let newLine = 0;
   // Doubled on purpose: this file is one template literal, so an escape here
   // is consumed when the page is rendered unless it is escaped twice.
-  for (const line of String(text).split("\\n")) {
+  for (const line of String(text).split("\n")) {
     // The '---' and '+++' headers name the file, which the panel says above.
     if (line.startsWith("---") || line.startsWith("+++")) continue;
     if (line.startsWith("@@")) {
-      const position = /^@@ -(\\d+)(?:,\\d+)? \\+(\\d+)/.exec(line);
+      const position = /^@@ -(\d+)(?:,\d+)? \+(\d+)/.exec(line);
       if (position) {
         oldLine = Number(position[1]);
         newLine = Number(position[2]);
@@ -366,7 +363,7 @@ function valueControl(entry) {
   // Which model a provider uses: offered as a live dropdown once fetched,
   // because typing a model id by hand is how a stale, retired, or misspelled
   // one ends up configured with nothing to say so until a run fails.
-  const modelMatch = entry.mode !== "locked" && /^providers\.([^.]+)\.model$/.exec(entry.path);
+  const modelMatch = entry.mode !== "locked" && /^providers.([^.]+).model$/.exec(entry.path);
   if (modelMatch) return modelValueControl(entry, modelMatch[1]);
   if (entry.mode === "locked") {
     const shown = shortValue(entry.value);
@@ -656,4 +653,17 @@ function choiceControl(entry) {
 }
 
 // --------------------------------------------------------- start a run
-`;
+
+// These two are read on demand: one runs 'git status' per worktree, the other
+// crosses the network, so neither belongs in the poll.
+registerView("worktrees", {
+  render: renderWorktrees,
+  load: () => (worktrees === undefined ? loadWorktrees() : undefined),
+  actions: () => [button("Read again", { class: "btn", onClick: () => loadWorktrees({ notify: true }) })],
+});
+registerView("merges", {
+  render: renderMerges,
+  load: () => (merges === undefined ? loadMerges() : undefined),
+  actions: () => [button("Ask GitLab", { class: "btn", onClick: () => loadMerges({ notify: true }) })],
+});
+registerView("settings", { render: renderSettings });

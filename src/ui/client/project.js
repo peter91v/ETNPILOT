@@ -1,12 +1,4 @@
-// The Agents and Content views, and the workflow builder.
-// Client-side code, kept as text and joined by ../page.js into one script. It
-// is not a module in the browser: no imports, no build step, and no
-// backslashes or backticks in here, because this is a template literal.
-//
-// Content is what a run is allowed to use: agents, prompts, skills,
-// instructions, workflows. A person reads it and locks it; a run refuses what
-// is not locked. These views are where that reading happens on a phone.
-export const CLIENT_PROJECT = `let contentData;
+let contentData;
 let agentData;
 let workflowData;
 let contentFilter = "review";
@@ -628,4 +620,11 @@ function startRunWith({ agent, workflow }) {
     describeRunChoice();
   });
 }
-`;
+
+// Read from disk each time they are opened: it is the files that are being reviewed.
+const projectViewHooks = {
+  load: () => loadProjectViews(),
+  actions: () => [button("Read again", { class: "btn", onClick: () => loadProjectViews({ notify: true }) })],
+};
+registerView("agents", { ...projectViewHooks, render: renderAgents });
+registerView("content", { ...projectViewHooks, render: renderContent });

@@ -133,7 +133,7 @@ const sources = {
   // The page is text assembled from several files; the claims are about all of it.
   page: (await Promise.all([
     "src/ui/page.js",
-    ...(await readdir(join(root, "src/ui/page"))).sort().map((name) => `src/ui/page/${name}`),
+    ...(await readdir(join(root, "src/ui/client"))).sort().map((name) => `src/ui/client/${name}`),
   ].map((path) => readFile(join(root, path), "utf8")))).join("\n"),
 };
 
