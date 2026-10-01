@@ -15,6 +15,7 @@ import { join, resolve } from "node:path";
 import { loadConfig } from "../config/load.js";
 import { describeSettings, setSetting, unsetSetting } from "../config/settings.js";
 import { ApprovalInbox, createInboxApprovalHandler } from "../core/approval-inbox.js";
+import { addUsage } from "./usage-total.js";
 import { createApprovalNotifier } from "../core/approval-notify.js";
 import { listChecks, runProjectCheck } from "./project-checks.js";
 import { runProject } from "./project-runner.js";
@@ -259,6 +260,7 @@ export async function openProjectState({ root = process.cwd(), env = process.env
             if (record.agents.length < 40) record.agents.push({ runId: event.runId, parentRunId: event.parentRunId, name: event.agent, status: "working", startedAt: new Date().toISOString(), step: record.step });
           }
           if (event.type === "run.completed" || event.type === "run.failed") {
+            record.usage = addUsage(record.usage, event.usage);
             const found = record.agents?.find((entry) => entry.runId === event.runId);
             if (found) {
               found.status = event.type === "run.completed" ? "done" : "failed";
@@ -451,6 +453,7 @@ function presentRun(record) {
     ...(record.agents ? { agents: record.agents } : {}),
     ...(record.step ? { step: record.step, stepSince: record.stepSince } : {}),
     ...(record.stepAgent ? { stepAgent: record.stepAgent } : {}),
+    ...(record.usage ? { usage: record.usage } : {}),
     ...(record.failed ? { failedStep: record.failed, error: record.error } : {}),
   };
 }

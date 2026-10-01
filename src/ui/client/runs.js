@@ -256,6 +256,10 @@ function runningPanel(run) {
       timeSpan("since", run.stepSince ?? run.startedAt),
     ]),
   ];
+  if (run.usage) {
+    const cost = run.usage.estimatedCost === undefined ? "" : " · " + (run.usage.currency ? run.usage.currency + " " : "") + run.usage.estimatedCost.toFixed(4) + (run.usage.unpriced ? "+" : "");
+    body.push(el("p", { class: "muted", text: "So far: " + (run.usage.inputTokens + run.usage.outputTokens).toLocaleString() + " tokens" + cost + " (finished agents only; the exact figure is in the receipt)" }));
+  }
   // The steps with what each uses, and under them the agents that actually
   // ran: a step names one agent, and an orchestrator hands work to others.
   if (steps.length > 0) {
@@ -438,26 +442,6 @@ function runsHidden() {
 function runsMeta() {
   const total = state.runsTotal ?? state.runs.length;
   return runsHidden() > 0 ? "newest " + state.runs.length + " of " + total + " on disk" : total + " on disk";
-}
-
-function renderRuns() {
-  const host = $("view-runs");
-  host.replaceChildren();
-  host.append(panel("All runs", {
-    meta: runsMeta(),
-    body: [table([
-      { label: "Run", value: (run) => openReceipt(run), mono: true },
-      { label: "Status", value: (run) => pill(run.status, run.status === "succeeded" ? "ok" : "bad") },
-      { label: "Mode", value: (run) => run.mode },
-      { label: "Sealed", value: (run) => ({ text: run.terminal ? "yes" : "no", class: run.terminal ? "ok" : "warn" }) },
-      { label: "Signed", value: (run) => run.signed ? "yes" : "no" },
-      { label: "Approvals", value: (run) => String(run.approvals) },
-      { label: "Took", value: (run) => run.durationMs === undefined ? "—" : (run.durationMs / 1000).toFixed(1) + "s" },
-      { label: "Receipt", value: (run) => (run.hash ?? "—").slice(0, 12), mono: true },
-    ], state.runs, "No runs have been recorded yet.", { selected: (run) => run.receiptFile === openRun?.file }),
-      ...(runsHidden() > 0 && runLimit < 500 ? [button("Show " + Math.min(50, runsHidden()) + " more", { class: "btn tonal", onClick: () => { runLimit = Math.min(500, runLimit + 50); refresh({ force: true }); } })] : [])],
-  }));
-  if (openRun) host.append(renderRunDetail());
 }
 
 function stepDuration(step) {
