@@ -16,6 +16,7 @@
 | use the page or the terminal screen | [review-ui.md](review-ui.md), [tui.md](tui.md), [settings.md](settings.md) |
 | run it from GitLab | [gitlab-webhooks.md](gitlab-webhooks.md), [workflow-queue.md](workflow-queue.md) |
 | write a plugin | [plugin-isolation.md](plugin-isolation.md), [secrets.md](secrets.md) |
+| see what could be better, measured | [besser-machen.md](besser-machen.md) |
 | know what could go wrong | [threat-model.md](threat-model.md), [../SECURITY.md](../SECURITY.md), [review-2026-10.md](review-2026-10.md) |
 | see where the project is going | [roadmap.md](roadmap.md), [roadmap-ui.md](roadmap-ui.md), [roadmap-agent.md](roadmap-agent.md) |
 | understand how it is built | [architecture.md](architecture.md), [supply-chain.md](supply-chain.md) |
