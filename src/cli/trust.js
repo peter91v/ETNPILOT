@@ -11,7 +11,7 @@ import { requireTrust, revokeTrust, trustProject, trustState } from "../trust/tr
 export const TRUST_USAGE = `  etnpilot trust [--revoke] [--root directory]      look at what this project can do, and trust it (or stop trusting it)
   (commands that act on a project ask once; --trust answers yes, ETNPILOT_TRUST=all skips the question in a pipeline)`;
 
-const ACTING = new Set(["run", "resume", "replay", "smoke", "forge", "tui", "ui", "chat", "eval", "check"]);
+const ACTING = new Set(["run", "resume", "replay", "smoke", "forge", "author", "tui", "ui", "chat", "eval", "check"]);
 const ACTING_WITH_SUBCOMMAND = new Set(["webhook serve", "queue resume", "pipeline status"]);
 
 export function needsTrust(command, subcommand) {

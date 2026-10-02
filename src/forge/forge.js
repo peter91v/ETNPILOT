@@ -109,6 +109,7 @@ export async function forgeProject(root, {
       return report;
     }
     report.provider = { name: chosen.name, model: chosen.config.model };
+    if (chosen.preferred) report.notes.push(`forge.provider is '${chosen.preferred}', which has no key here; '${chosen.name}' answered instead.`);
     onProgress(`AgentsForge: asking ${chosen.name} (${chosen.config.model ?? "its default model"}) about ${survey.files} files, ${Math.round(survey.bytes / 1024)} KiB of digest…`);
     answer = await askProvider({ chosen, root, env, input, fetchImpl, factories, signal, config });
   }
@@ -171,22 +172,33 @@ export function summarizeForge(report) {
 
 // ------------------------------------------------------------------ the model call
 
-// A provider the project configures and has a key for. The project's default
-// first, then the first other one that can answer.
+// A provider the project configures and has a key for. Order: the one named by
+// 'forge.provider', then any Anthropic provider (the stronger default for this
+// job), then the project's default, then the rest. 'forge.model' replaces the
+// model of the provider 'forge.provider' names, and of no other: a model name
+// from one vendor is not valid at another.
 export async function chooseProvider(config, root, env = process.env) {
   const providers = config?.providers ?? {};
   const resolver = createSecretResolver({ root, config, env });
-  const order = [config?.defaultProvider, ...Object.keys(providers)].filter((name, index, all) => name && all.indexOf(name) === index);
+  const wanted = typeof config?.forge?.provider === "string" ? config.forge.provider : undefined;
+  const anthropic = Object.keys(providers).filter((name) => providers[name]?.type === "anthropic");
+  const order = [wanted, ...anthropic, config?.defaultProvider, ...Object.keys(providers)].filter((name, index, all) => name && all.indexOf(name) === index);
   for (const name of order) {
     const entry = providers[name];
     if (!entry || !["anthropic", "openai-compatible"].includes(entry.type)) continue;
     const key = await resolveConfiguredApiKey(entry.type, entry, { secretResolver: resolver, env }).catch(() => undefined);
-    if (key) return { name, config: entry };
+    if (!key) continue;
+    const model = name === wanted && typeof config.forge.model === "string" && config.forge.model.trim() !== "" ? config.forge.model.trim() : undefined;
+    return {
+      name,
+      config: model ? { ...entry, model } : entry,
+      ...(wanted && name !== wanted ? { preferred: wanted } : {}),
+    };
   }
   return undefined;
 }
 
-async function askProvider({ chosen, root, env, input, fetchImpl, factories, signal, config }) {
+export async function askProvider({ chosen, root, env, input, fetchImpl, factories, signal, config, system = FORGE_PROMPT }) {
   const harness = new Harness({});
   const secretResolver = createSecretResolver({ root, config, env });
   // The project's own provider entry, with tools off: this request reads text
@@ -203,7 +215,7 @@ async function askProvider({ chosen, root, env, input, fetchImpl, factories, sig
       ...(fetchImpl ? { fetchImpl } : {}),
     },
   }, { workingDirectory: root, env, secretResolver, ...(factories ? { factories } : {}) });
-  harness.registerAgent({ name: "agents-forge", provider: "forge", prompt: FORGE_PROMPT, tools: [], requires: ["chat"] });
+  harness.registerAgent({ name: "agents-forge", provider: "forge", prompt: system, tools: [], requires: ["chat"] });
   // What this request costs goes into the usage record like any run's, so it is
   // not a cost that only the provider's dashboard shows. If it cannot be
   // recorded the answer is still wanted, and the report says so.
@@ -331,7 +343,7 @@ export function validatePlan(raw, { root }) {
 
 // ------------------------------------------------------------------------ writing
 
-async function writePlan(plan, { root, configDir, report, provider }) {
+export async function writePlan(plan, { root, configDir, report, provider }) {
   const stamp = `Forged by AgentsForge from this repository${provider?.model ? ` (${provider.model})` : ""}. Generated text: read it, then run 'etnpilot content lock'.`;
   for (const skill of plan.skills) {
     const path = join(configDir, "skills", skill.name, "SKILL.md");
