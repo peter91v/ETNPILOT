@@ -11,8 +11,8 @@ export const providersCommands = [
     match: ({ command, subcommand }) => command === "provider" && (subcommand === "presets" || subcommand === undefined),
     async run() {
       for (const [name, preset] of Object.entries(PRESETS)) {
-        console.log(`${name.padEnd(11)}${preset.label}`);
-        console.log(`${"".padEnd(11)}${preset.baseUrl}  (key: ${preset.env ?? "none"})`);
+        console.log(`${name.padEnd(14)}${preset.label}`);
+        console.log(`${"".padEnd(14)}${preset.baseUrl}  (key: ${preset.env ?? (preset.secret ? "the stored login (etnpilot login github)" : "none")})`);
       }
       console.log("\nAdd one with: etnpilot provider add <preset> [--name <name>] [--model <id>]");
     },
@@ -39,6 +39,8 @@ export const providersCommands = [
         console.log(`Set ${entry.env} in your environment, then: etnpilot smoke --provider ${id}`);
         console.log(`Secret '${secret}' is read from ${entry.env} only; no login is stored for it.`);
         console.log("The committed file changed, so run 'etnpilot trust' to look at it again.");
+      } else if (entry.secret) {
+        console.log(`Its key is the stored login for '${entry.secret}': sign in with 'etnpilot login github' (the token needs the "models" permission), then: etnpilot smoke --provider ${id}`);
       } else {
         console.log(`Start the server, then: etnpilot models --provider ${id}   (the model '${settings[0][1].model}' is a guess)`);
       }

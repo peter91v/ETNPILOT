@@ -64,3 +64,19 @@ test("an existing provider is not replaced unless asked", async () => {
   await quietly(() => runCli(["provider", "add", "groq"], { root, name: "groq-fast" }));
   assert.ok((await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"))).providers["groq-fast"]);
 });
+
+test("github-models uses the stored GitHub login, so it needs no secret mapping and stays in the user's own settings", async () => {
+  const root = await project();
+  // The default template already has one; a project from before that does not.
+  const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"));
+  const before = await readFile(join(root, ".etnpilot", "etnpilot.yaml"), "utf8");
+  await quietly(() => runCli(["provider", "add", "github-models", "--force"].slice(0, 3), { root, name: "gh-models" }));
+  assert.equal(await readFile(join(root, ".etnpilot", "etnpilot.yaml"), "utf8"), before, "the committed file is not touched");
+  const after = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"));
+  assert.equal(after.providers["gh-models"].baseUrl, "https://models.github.ai/inference");
+  assert.equal(after.providers["gh-models"].apiKeySecret, "github.token");
+  assert.equal(after.providers["gh-models"].model, "openai/gpt-4.1");
+  assert.equal(after.providers["gh-models"].tools, true);
+  assert.equal(config.secrets.values["gh-models-key"], undefined);
+  assert.equal(after.secrets.values["gh-models-key"], undefined);
+});

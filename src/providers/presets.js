@@ -4,6 +4,7 @@
 // the entry; the model is a starting point, not a promise: 'etnpilot models'
 // lists what the account actually has.
 
+/** @type {Readonly<Record<string, { label: string, baseUrl: string, model: string, env: string | undefined, secret?: string, tools: boolean }>>} */
 export const PRESETS = Object.freeze({
   gemini: {
     label: "Google Gemini (OpenAI-compatible endpoint)",
@@ -33,6 +34,17 @@ export const PRESETS = Object.freeze({
     env: "GROQ_API_KEY",
     tools: true,
   },
+  "github-models": {
+    label: "GitHub Models (your GitHub login; no Copilot library needed)",
+    baseUrl: "https://models.github.ai/inference",
+    // An id as GitHub lists it, publisher first.
+    model: "openai/gpt-4.1",
+    env: undefined,
+    // The key is the stored GitHub login ('etnpilot login github'), which is
+    // only ever sent to GitHub's own hosts. It needs the "models" permission.
+    secret: "github.token",
+    tools: true,
+  },
   ollama: {
     label: "Ollama on this machine (no key)",
     baseUrl: "http://localhost:11434/v1",
@@ -52,13 +64,13 @@ export function presetSettings(preset, name = undefined, { project = false } = /
   if (!entry) throw new Error(`Unknown preset '${preset}'. Presets: ${Object.keys(PRESETS).join(", ")}.`);
   const id = name ?? preset;
   if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error(`'${id}' is not a usable provider name (letters, digits, - and _).`);
-  const secret = `${id}-key`;
+  const secret = entry.secret ?? `${id}-key`;
   /** @type {Array<[string, any]>} */
   const settings = [[`providers.${id}`, {
     type: "openai-compatible",
     baseUrl: entry.baseUrl,
     model: entry.model,
-    ...(entry.env ? { apiKeySecret: secret } : {}),
+    ...(entry.env ? { apiKeySecret: secret } : entry.secret ? { apiKeySecret: entry.secret } : {}),
     ...(entry.tools ? { tools: true } : {}),
   }]];
   if (entry.env && project) settings.push([`secrets.values.${secret}`, { provider: "env", key: entry.env }]);
