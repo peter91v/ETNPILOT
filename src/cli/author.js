@@ -1,7 +1,7 @@
 // @ts-check
 import { join, resolve } from "node:path";
 import { loadConfig } from "../config/load.js";
-import { AUTHOR_KINDS, IMPROVE_KINDS, applyDraft, draftImprovement, draftNew, renderDiff } from "../forge/author.js";
+import { AUTHOR_KINDS, IMPROVE_KINDS, applyDraft, draftImprovement, draftNew, listItems, renderDiff } from "../forge/author.js";
 import { terminalPrompter } from "./wizard.js";
 
 // 'etnpilot author': drafting an agent, skill, instruction or an improved
@@ -9,7 +9,7 @@ import { terminalPrompter } from "./wizard.js";
 // a yes; a script says --yes, or --dry-run to see the draft and stop.
 
 export const AUTHOR_USAGE = `  etnpilot author                                  asks what you need (agent, skill, instruction, or improving one) and drafts it with a model
-  etnpilot author <agent|skill|instruction> "<what you need>" [--yes] [--dry-run]
+  etnpilot author <agent|skill|instruction|prompt> "<what you need>" [--yes] [--dry-run]
   etnpilot author improve <prompt|skill|instruction> <name> "<what to change>" [--yes] [--dry-run]
                                                   uses forge.provider and forge.model; nothing is written until you accept`;
 
@@ -39,17 +39,22 @@ export async function runAuthorCommand(subcommand, rest, values, { prompter, std
 
 async function menu(ask, say, options, values) {
   say("What do you need?");
-  const choices = ["A new agent", "A new skill", "A new instruction", "Improve a prompt", "Improve a skill", "Improve an instruction"];
+  const choices = ["A new agent", "A new skill", "A new instruction", "A new prompt", "Improve a prompt", "Improve a skill", "Improve an instruction"];
   choices.forEach((choice, index) => say(`  ${index + 1}) ${choice}`));
   let index = -1;
   while (index < 0 || index >= choices.length) index = Number.parseInt(await ask.ask("Number", "1"), 10) - 1;
-  if (index < 3) {
+  if (index < AUTHOR_KINDS.length) {
     const kind = AUTHOR_KINDS[index];
     const wish = await ask.ask(`Describe the ${kind} in a sentence`);
     return await finish(await draftNew(kind, wish, options), ask, say, values, options.root);
   }
-  const kind = IMPROVE_KINDS[index - 3];
-  const name = await ask.ask(`Name of the ${kind}${kind === "instruction" ? " (path under .etnpilot/instructions)" : kind === "prompt" ? " (the agent's name)" : ""}`);
+  const kind = IMPROVE_KINDS[index - AUTHOR_KINDS.length];
+  const names = await listItems(kind, join(options.root, ".etnpilot"));
+  if (names.length === 0) { say(`There is no ${kind} to improve yet.`); return 0; }
+  names.forEach((entry, position) => say(`  ${position + 1}) ${entry}`));
+  let chosen = -1;
+  while (chosen < 0 || chosen >= names.length) chosen = Number.parseInt(await ask.ask(`Which ${kind}`, "1"), 10) - 1;
+  const name = names[chosen];
   const wish = await ask.ask("What should change");
   return await finish(await draftImprovement(kind, name, wish, options), ask, say, values, options.root);
 }
@@ -61,7 +66,7 @@ async function finish(draft, ask, say, values, root) {
   if (draft.mode === "new") {
     for (const line of draft.preview) say(line);
     for (const note of draft.notes ?? []) say(`Note: ${note}`);
-    const item = draft.plan.agents[0] ?? draft.plan.skills[0] ?? draft.plan.instructions[0];
+    const item = draft.plan.agents[0] ?? draft.plan.skills[0] ?? draft.plan.instructions[0] ?? draft.plan.prompts[0];
     say();
     say(item.prompt ?? item.body);
   } else {
@@ -76,7 +81,7 @@ async function finish(draft, ask, say, values, root) {
     return ask ? 0 : 1;
   }
   const result = await applyDraft(draft, { root });
-  const written = result.written ?? [...result.agents, ...result.skills, ...result.instructions].map((entry) => entry.to);
+  const written = result.written ?? [...result.agents, ...result.skills, ...result.instructions, ...(result.prompts ?? [])].map((entry) => entry.to);
   for (const skipped of result.skipped ?? []) say(`Skipped ${skipped.name}: ${skipped.reason}.`);
   for (const path of written) say(`Wrote ${path}`);
   if (written.length > 0) say("It is not reviewed yet: read it, then 'etnpilot content lock' and commit it for your team.");

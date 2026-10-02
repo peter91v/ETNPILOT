@@ -157,6 +157,13 @@ test("an agent can be drafted with a model, read, and then written", async (t) =
     await ui.page.getByText("Write the docs.").first().waitFor();
     await ui.page.getByRole("button", { name: "Write this" }).click();
     await ui.page.getByText("It is not reviewed yet").first().waitFor();
+    // Improving picks from what exists, and a new prompt is a kind of its own.
+    await ui.page.locator("#author-mode").selectOption("improve");
+    await ui.page.locator("#author-kind").selectOption("prompt");
+    await ui.page.locator("#author-name").waitFor();
+    assert.ok((await ui.page.locator("#author-name option").allTextContents()).includes("doc-writer"));
+    await ui.page.locator("#author-mode").selectOption("new");
+    assert.ok((await ui.page.locator("#author-kind option").allTextContents()).includes("prompt"));
     assert.deepEqual(ui.problems, []);
   } finally {
     await ui.close();

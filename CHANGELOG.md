@@ -8,6 +8,10 @@ pre-1.0, so breaking changes may appear in any release.
 
 ### Checks and hygiene (follow-up to the review)
 
+- **"Draft with AI": improving picks from a list, and a prompt can be new.** Improving a prompt, skill or instruction no
+  longer asks for a typed name: the page (and the terminal menu) lists what exists. "Something new" now also offers
+  `prompt` (written as `.etnpilot/prompts/<name>.md`, never over an existing one; an agent points at it with `promptRef`).
+  `etnpilot author prompt "<what>"` does the same in the terminal.
 - **The review page drafts agents, skills, instructions and better prompts too.** Under Agents, "Draft with AI": describe
   what is needed (or what to change in an existing prompt, skill or instruction), read the draft or the diff, and press
   "Write this". The server keeps the draft and writes it by id, so the page never sends text or a path to be written.

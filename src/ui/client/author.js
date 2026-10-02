@@ -3,7 +3,7 @@
 // server to write that draft by its id, so the page never sends text to be
 // written. Nothing is written without the click.
 
-const authorState = { open: false, mode: "new", kind: "agent", name: "", request: "", busy: false, draft: undefined, error: undefined };
+const authorState = { open: false, mode: "new", kind: "agent", name: "", names: undefined, request: "", busy: false, draft: undefined, error: undefined };
 
 function authorPanel() {
   const s = authorState;
@@ -13,12 +13,13 @@ function authorPanel() {
       body: [el("p", { class: "muted", text: "Describe an agent, skill or instruction, or what to change in an existing prompt, and a model drafts it. You read it before anything is written." })],
     });
   }
-  const kinds = s.mode === "new" ? ["agent", "skill", "instruction"] : ["prompt", "skill", "instruction"];
+  const kinds = s.mode === "new" ? ["agent", "skill", "instruction", "prompt"] : ["prompt", "skill", "instruction"];
   if (!kinds.includes(s.kind)) s.kind = kinds[0];
+  if (s.mode === "improve" && s.names === undefined) loadAuthorNames();
   const body = [
-    selectField("author-mode", "What do you want", s.mode, [["new", "Something new"], ["improve", "Improve an existing one"]], (value) => { s.mode = value; s.draft = undefined; render(); }),
-    selectField("author-kind", "Kind", s.kind, kinds.map((kind) => [kind, kind]), (value) => { s.kind = value; s.draft = undefined; render(); }),
-    ...(s.mode === "improve" ? [field("author-name", s.kind === "prompt" ? "Agent name" : s.kind === "skill" ? "Skill name" : "Instruction path", s.name, (value) => { s.name = value; }, "")] : []),
+    selectField("author-mode", "What do you want", s.mode, [["new", "Something new"], ["improve", "Improve an existing one"]], (value) => { s.mode = value; s.draft = undefined; s.names = undefined; s.name = ""; render(); }),
+    selectField("author-kind", "Kind", s.kind, kinds.map((kind) => [kind, kind]), (value) => { s.kind = value; s.draft = undefined; s.names = undefined; s.name = ""; render(); }),
+    ...(s.mode === "improve" ? [existingPicker()] : []),
     field("author-request", s.mode === "new" ? "What should it do" : "What should change", s.request, (value) => { s.request = value; }, ""),
     el("div", { class: "card-actions" }, [
       button(s.busy ? "Drafting…" : "Draft it", { class: "btn", disabled: s.busy, onClick: requestDraft }),
@@ -28,6 +29,28 @@ function authorPanel() {
   if (s.error) body.push(el("p", { class: "notice bad", attrs: { role: "alert" }, text: s.error }));
   if (s.draft) body.push(...draftView(s.draft));
   return panel("Draft with AI", { open: true, body });
+}
+
+// Which existing one: chosen from what is there, not typed.
+function existingPicker() {
+  const s = authorState;
+  const label = s.kind === "prompt" ? "Which prompt" : s.kind === "skill" ? "Which skill" : "Which instruction";
+  if (s.names === undefined || s.names === null) return el("p", { class: "muted", text: "Reading what exists…" });
+  if (s.names.length === 0) return el("p", { class: "muted", text: "There is nothing of this kind to improve yet." });
+  if (!s.names.includes(s.name)) s.name = s.names[0];
+  return selectField("author-name", label, s.name, s.names.map((name) => [name, name]), (value) => { s.name = value; });
+}
+
+async function loadAuthorNames() {
+  const s = authorState;
+  s.names = null;
+  try {
+    s.names = (await api("/api/author/items", { method: "POST", body: JSON.stringify({ kind: s.kind }) })).names;
+  } catch (error) {
+    s.names = [];
+    s.error = error.message;
+  }
+  render();
 }
 
 function draftView(draft) {

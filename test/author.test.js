@@ -98,3 +98,17 @@ test("forge.provider and forge.model choose who drafts, and the model only goes 
 test("the line diff marks removed and added lines", () => {
   assert.deepEqual(lineDiff("a\nb", "a\nc").map((line) => line.op), [" ", "-", "+"]);
 });
+
+test("a prompt can be written on its own, never over one that exists, and existing ones are listed to pick from", async () => {
+  const root = await project();
+  const { listItems } = await import("../src/forge/author.js");
+  const draft = await draftNew("prompt", "a strict code reviewer prompt", { root, config: {}, runModel: reply({ name: "Strict Reviewer", body: "Review the diff. Be strict." }) });
+  assert.equal(draft.plan.prompts[0].name, "strict-reviewer");
+  const result = await applyDraft(draft, { root });
+  assert.equal(result.prompts.length, 1);
+  assert.equal(await readFile(join(root, ".etnpilot", "prompts", "strict-reviewer.md"), "utf8"), "Review the diff. Be strict.\n");
+  assert.equal((await applyDraft(draft, { root })).skipped.length, 1);
+  assert.deepEqual(await listItems("prompt", join(root, ".etnpilot")), ["orchestrator", "strict-reviewer"]);
+  assert.deepEqual(await listItems("skill", join(root, ".etnpilot")), []);
+  await assert.rejects(draftNew("prompt", "x", { root, config: {}, runModel: reply({ name: "", body: "" }) }), /no usable prompt/);
+});
