@@ -59,7 +59,7 @@ function verification(service, value, { host, baseUrl }) {
 }
 
 // A key or a token someone typed. Checked first; a refused one is not stored.
-export async function saveKey(serviceId, value, { env, fetchImpl, verify = true, host: given, baseUrl } = /** @type {any} */ ({})) {
+export async function saveKey(serviceId, value, { env, fetchImpl, verify = true, host: given, baseUrl, account: named } = /** @type {any} */ ({})) {
   const service = serviceFor(serviceId);
   const host = given ? normalizeAuthHost(given) : undefined;
   const key = String(value ?? "").trim();
@@ -78,12 +78,12 @@ export async function saveKey(serviceId, value, { env, fetchImpl, verify = true,
     value: key,
     kind: "key",
     service: service.id,
-    ...(result.account ? { account: result.account } : {}),
+    ...(result.account || named ? { account: result.account ?? String(named).trim() } : {}),
     ...(service.id === "gitlab" ? { host: (host ?? service.host).replace(/\/$/, "") } : {}),
     // Kept even when the check could not run, but marked, so it is not shown as proven.
     ...(result.ok ? {} : { verified: false }),
   });
-  return { service: service.id, account: result.account, verified: result.ok, note: result.ok ? undefined : result.message };
+  return { service: service.id, account: result.account ?? (named ? String(named).trim() : undefined), verified: result.ok, note: result.ok ? undefined : result.message };
 }
 
 // Starts the browser sign-in. The client id is remembered, so it is typed once.

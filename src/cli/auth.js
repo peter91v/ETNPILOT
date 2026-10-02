@@ -5,6 +5,7 @@ import { SERVICE_IDS, normalizeAuthHost, serviceFor } from "../auth/services.js"
 import { credentialHelperInstalled, installCredentialHelper } from "../auth/git-credential.js";
 import { loadConfig } from "../config/load.js";
 import { setSetting } from "../config/settings.js";
+import { isPlaceholderAddress } from "../runtime/guided-setup.js";
 
 // 'etnpilot login <service>', 'logout <service>' and 'auth status'. The web page
 // offers the same through the same functions.
@@ -123,12 +124,12 @@ async function rememberHost(service, host, { root, env, say }) {
     return; // not inside an ETNPilot project: nothing to set
   }
   let address = config.git?.baseUrl;
-  if (!address && host) {
+  if ((!address || isPlaceholderAddress(address)) && host) {
     address = normalizeAuthHost(host);
     await setSetting("git.baseUrl", address, { root: projectRoot, env, scope: "local" });
     say(`This project had no git.baseUrl; it is now ${address} (your own settings, not committed).`);
   }
-  if (address) await rememberForGit(projectRoot, address, say);
+  if (address && !isPlaceholderAddress(address)) await rememberForGit(projectRoot, address, say);
 }
 
 // So that a plain 'git push' in this repository uses the login too, with no
@@ -145,7 +146,8 @@ async function rememberForGit(projectRoot, address, say) {
 
 async function projectGitLabHost(root) {
   try {
-    return (await loadConfig(join(resolve(root ?? "."), ".etnpilot", "etnpilot.yaml"))).git?.baseUrl;
+    const address = (await loadConfig(join(resolve(root ?? "."), ".etnpilot", "etnpilot.yaml"))).git?.baseUrl;
+    return address && !isPlaceholderAddress(address) ? address : undefined;
   } catch {
     return undefined;
   }

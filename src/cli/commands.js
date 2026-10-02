@@ -102,6 +102,7 @@ export const CLI_OPTIONS = Object.freeze({
   template: { type: "string", short: "t" },
   "no-import": { type: "boolean" },
   "no-forge": { type: "boolean" },
+  "no-wizard": { type: "boolean" },
   global: { type: "boolean", default: false },
   changed: { type: "boolean", default: false },
   name: { type: "string" },
@@ -118,7 +119,8 @@ export const CLI_OPTIONS = Object.freeze({
 export const USAGE = `ETNPilot
 
 Usage:
-  etnpilot init [directory] [--template default|minimal|regulated] [--no-import] [--no-forge]
+  etnpilot init [directory] [--template default|minimal|regulated] [--no-import] [--no-forge] [--no-wizard]
+                                                  on a terminal, init asks: template, default provider (and its login), GitLab
   etnpilot run <task> [--agent name | --workflow name] [--root directory] [--approvals terminal|inbox]
     [--events jsonl]
     [--worktree | --no-worktree] [--cleanup-worktree] [--publish] [--dry-run]

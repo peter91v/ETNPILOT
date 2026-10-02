@@ -8,6 +8,14 @@ pre-1.0, so breaking changes may appear in any release.
 
 ### Checks and hygiene (follow-up to the review)
 
+- **`etnpilot init` on a terminal is a guided setup.** It asks, one step at a time and with an answer already offered:
+  the template; the **default provider** (a numbered list that says which ones already have a login, and for one without
+  it offers to enter the key or sign in right there); and, if wanted, **GitLab** (address, project, user name, token). The
+  GitLab answers are stored once: the token in the credentials file, the address, project and remote in the person's own
+  settings, the git remote is added if missing, and git gets the credential helper, so `git push` never asks again. At the
+  end it offers to lock the content. `--no-wizard` (or `--template`, or no terminal) keeps the plain creation. The
+  steps live in `src/runtime/guided-setup.js`, which the web setup uses too. A placeholder GitLab address
+  (`gitlab.example.com`) no longer counts as one the project already has.
 - **Signing in to GitLab inside a project also sets up plain `git push`.** `etnpilot credential` is a git credential
   helper (git calls it; it is never typed): it answers with the stored user name and token for the GitLab host the login
   was issued for, over https only, and says nothing for any other host. `etnpilot login gitlab` installs it in that

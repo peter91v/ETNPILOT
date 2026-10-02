@@ -1,4 +1,5 @@
 // @ts-check
+import { runInitWizard } from "../wizard.js";
 import { WorktreeManager } from "../../git/worktrees.js";
 import { createRunApprovalHandler, ignoreMissing, resolveKeyWindows, resolveReceiptPublicKeys } from "../shared.js";
 import { diagnose } from "../../runtime/diagnose.js";
@@ -22,6 +23,10 @@ export const projectCommands = [
   {
     match: ({ command, subcommand }) => command === "init",
     async run({ subcommand, values }) {
+      // On a terminal, setup is a conversation; in a script (or with --no-wizard)
+      // it is the plain creation below, as before.
+      const interactive = process.stdin.isTTY && process.stdout.isTTY && !values["no-wizard"] && !values.template;
+      if (interactive) return await runInitWizard(subcommand ?? ".", { onProgress: (line) => console.log(line) });
       const result = await initializeProject(resolve(subcommand ?? "."), {
         template: values.template,
         importExisting: !values["no-import"],
