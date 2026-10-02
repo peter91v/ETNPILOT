@@ -46,12 +46,7 @@ export async function runGitLabSmoke({ client, project, receiptPath, confirmWrit
     if (mr) {
       const base = `/projects/${encodeURIComponent(project)}/merge_requests/${mr.iid}`;
       try {
-        try { await client.request("PUT", base, { state_event: "close" }); } catch (first) {
-          // Some proxies in front of a GitLab drop the body of a PUT; the same
-          // change can be asked for in the address. If that fails too, the
-          // first answer is the one worth reading.
-          try { await client.request("PUT", `${base}?state_event=close`); } catch { throw first; }
-        }
+        await closeMergeRequest(client, base);
         operations.push("mr-closed");
       } catch (error) { cleanupErrors.push(`mr-close-failed${reasonOf(error)}`); }
     }
@@ -77,4 +72,15 @@ export async function runGitLabSmoke({ client, project, receiptPath, confirmWrit
 function reasonOf(error) {
   const text = String(error?.message ?? "").replaceAll(/\s+/g, " ").trim();
   return text ? ` (${text.slice(0, 220)})` : "";
+}
+
+// Some proxies in front of a GitLab drop the body of a PUT; the same change can
+// be asked for in the address. If that fails too, the first answer is the one
+// worth reading.
+async function closeMergeRequest(client, base) {
+  try {
+    await client.request("PUT", base, { state_event: "close" });
+  } catch (first) {
+    try { await client.request("PUT", `${base}?state_event=close`); } catch { throw first; }
+  }
 }
