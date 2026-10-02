@@ -170,6 +170,56 @@ test("an agent can be drafted with a model, read, and then written", async (t) =
   }
 });
 
+test("a ladder can be built in the workflow builder and is drawn as a flow", async (t) => {
+  if (skipReason) return t.skip(skipReason);
+  const ui = await open(await project());
+  try {
+    await ui.page.evaluate(() => show("agents"));
+    await ui.page.getByRole("button", { name: "New workflow" }).click();
+    await ui.page.locator("#workflow-name").fill("tiered");
+    await ui.page.locator("#step-type-0").selectOption("ladder");
+    await ui.page.locator("#tier-model-0-2").waitFor();
+    assert.equal(await ui.page.locator("#tier-model-0-0").inputValue(), "claude-haiku-4-5-20251001");
+    assert.equal(await ui.page.locator("#workflow-body .ladder-flow").count(), 1, "the plan is drawn while editing");
+    await ui.page.locator("#tier-model-0-0").fill("cheap-model");
+    await ui.page.getByRole("button", { name: "Add a check" }).click();
+    await ui.page.locator("#workflow-save").click();
+    await ui.page.locator("#view-agents .ladder-flow").first().waitFor();
+    assert.match(await ui.page.locator("#view-agents .ladder-flow").first().textContent(), /cheap-model/);
+    assert.deepEqual(ui.problems, []);
+  } finally {
+    await ui.close();
+  }
+});
+
+test("a run with a ladder shows the path it took, which tier passed and what it cost", async (t) => {
+  if (skipReason) return t.skip(skipReason);
+  const setup = await project();
+  const runs = join(setup.root, ".etnpilot", "state", "runs");
+  await mkdir(runs, { recursive: true });
+  const lines = [
+    { mode: "execute", runId: "ladder-run", type: "run-start" },
+    { type: "ladder-route", runId: "ladder-run", step: "build", difficulty: "medium", risk: "high", startTier: 1, verify: "full" },
+    { type: "ladder-attempt", runId: "ladder-run", step: "build", tier: 1, model: "cheap-model", effort: "low", status: "failed", cost: 0.012 },
+    { type: "ladder-attempt", runId: "ladder-run", step: "build", tier: 2, model: "strong-model", effort: "high", status: "passed", cost: 0.2 },
+    { mode: "execute", runId: "ladder-run", terminal: true, status: "succeeded", hash: "h".repeat(64) },
+  ];
+  await writeFile(join(runs, "ladder-run.jsonl"), lines.map((line) => JSON.stringify(line)).join("\n") + "\n");
+  const ui = await open(setup);
+  try {
+    await ui.page.evaluate(() => show("runs"));
+    await ui.page.locator("#view-runs tbody tr button").first().click();
+    await ui.page.getByText("passed on tier 2").first().waitFor();
+    const picture = ui.page.locator("#view-runs .ladder-flow").first();
+    assert.match(await picture.textContent(), /strong-model/);
+    assert.equal(await picture.locator(".lf-tier.passed").count(), 1);
+    assert.equal(await picture.locator(".lf-tier.failed").count(), 1);
+    assert.deepEqual(ui.problems, []);
+  } finally {
+    await ui.close();
+  }
+});
+
 test("the run list can be narrowed by text and by status", async (t) => {
   if (skipReason) return t.skip(skipReason);
   const setup = await project();
