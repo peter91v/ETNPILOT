@@ -10,6 +10,7 @@ import { openProjectState } from "../runtime/project-state.js";
 import { WorkflowQueueStateError } from "../workflow/queue.js";
 import { createProject, describeProject } from "../runtime/first-run.js";
 import { createAccountRoutes } from "./accounts.js";
+import { createSetupRoutes } from "./setup-routes.js";
 import { renderReviewPage } from "./page.js";
 import { renderIcon, renderManifest, renderServiceWorker } from "./app.js";
 import { renderSetupPage } from "./setup-page.js";
@@ -58,6 +59,12 @@ export async function createReviewServer({
       await state.setSetting("git.baseUrl", address, { scope: "local" });
       return address;
     },
+  });
+
+  const setup = createSetupRoutes({
+    root, env, fetchImpl,
+    // Through the running state, so the page sees the new setting at once.
+    write: async (path, value) => { await state?.setSetting(path, value, { scope: "local" }); },
   });
 
   // Which names a request may use for this server. An address that is a number
@@ -360,9 +367,12 @@ export async function createReviewServer({
         return send(response, 201, created);
       }
       if (!state) return send(response, 409, { error: "no-project-here", root });
-      if (url.pathname.startsWith("/api/auth")) {
+      /** @type {Array<[string, (method: string, pathname: string, body: any) => Promise<any>]>} */
+      const delegates = [["/api/auth", accounts], ["/api/setup", setup]];
+      const delegate = delegates.find(([prefix]) => url.pathname.startsWith(prefix));
+      if (delegate) {
         const body = request.method === "POST" ? await readJsonBody(request) : undefined;
-        const handled = await accounts(request.method, url.pathname, body);
+        const handled = await delegate[1](request.method ?? "GET", url.pathname, body);
         if (handled) return send(response, handled.status, handled.body);
       }
       const handler = routes.get(`${request.method} ${url.pathname}`);

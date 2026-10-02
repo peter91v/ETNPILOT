@@ -62,12 +62,14 @@ export async function providerChoices({ root = ".", env = process.env } = /** @t
 }
 
 // The person's own choice, kept in their own settings (never committed).
-export async function chooseDefaultProvider(id, { root = ".", env = process.env } = /** @type {any} */ ({})) {
+// 'write(path, value)' lets a running surface change the setting through its own
+// state, so it sees the new value without a restart.
+export async function chooseDefaultProvider(id, { root = ".", env = process.env, write } = /** @type {any} */ ({})) {
   const { options } = await providerChoices({ root, env });
   if (!options.some((option) => option.id === id)) {
     throw new Error(`The project has no provider '${id}'. Choose one of: ${options.map((option) => option.id).join(", ")}.`);
   }
-  await setSetting("defaultProvider", id, { root: resolve(root), env, scope: "local" });
+  await (write ?? ((path, value) => setSetting(path, value, { root: resolve(root), env, scope: "local" })))("defaultProvider", id);
   return { id };
 }
 
@@ -109,8 +111,9 @@ export async function gitlabState({ root = ".", env = process.env } = /** @type 
 // Stores the login, tells the project where it publishes, makes sure the git
 // remote exists, and lets plain 'git push' use the login. Every step is the one
 // the person would otherwise take by hand; the result lists what was done.
-export async function connectGitLab({ root = ".", env = process.env, fetchImpl, host, project, user, token, remote } = /** @type {any} */ ({})) {
+export async function connectGitLab({ root = ".", env = process.env, fetchImpl, host, project, user, token, remote, write } = /** @type {any} */ ({})) {
   const projectRoot = resolve(root);
+  const set = write ?? ((path, value) => setSetting(path, value, { root: projectRoot, env, scope: "local" }));
   const address = normalizeAuthHost(host);
   const path = parseProjectPath(project, address);
   const name = remote || "gitlab";
@@ -120,9 +123,9 @@ export async function connectGitLab({ root = ".", env = process.env, fetchImpl, 
     : undefined;
   const done = [];
   if (saved) done.push(`Stored the GitLab token${saved.account ? ` for ${saved.account}` : ""}${saved.verified ? "" : " (not verified)"}.`);
-  await setSetting("git.baseUrl", address, { root: projectRoot, env, scope: "local" });
-  await setSetting("git.project", path, { root: projectRoot, env, scope: "local" });
-  await setSetting("git.remote", name, { root: projectRoot, env, scope: "local" });
+  await set("git.baseUrl", address);
+  await set("git.project", path);
+  await set("git.remote", name);
   done.push(`Publishing goes to ${address}/${path} through the git remote '${name}' (your own settings, not committed).`);
   const inside = await git(["rev-parse", "--show-toplevel"], { cwd: projectRoot }).then(() => true, () => false);
   if (inside) {

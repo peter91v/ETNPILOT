@@ -8,6 +8,11 @@ pre-1.0, so breaking changes may appear in any release.
 
 ### Checks and hygiene (follow-up to the review)
 
+- **The review page opens with a guided setup.** Until the default provider has a login (and GitLab is connected), the
+  overview starts with a "Guided setup" panel: pick the default provider (its key can be pasted right there), then give
+  GitLab address, project, user name and token. It is the same module as the terminal's `etnpilot init`
+  (`src/runtime/guided-setup.js`, routes `GET /api/setup`, `POST /api/setup/provider`, `POST /api/setup/gitlab`), so the
+  token is stored once, the git remote and credential helper are set, and a push asks for nothing. "Hide" puts it away.
 - **`etnpilot init` on a terminal is a guided setup.** It asks, one step at a time and with an answer already offered:
   the template; the **default provider** (a numbered list that says which ones already have a login, and for one without
   it offers to enter the key or sign in right there); and, if wanted, **GitLab** (address, project, user name, token). The
