@@ -447,7 +447,10 @@ function assertManifestMatches(actual, locked) {
   const added = actual.entries.filter((entry) => !lockedByPath.has(entry.path)).map((entry) => entry.path);
   throw new ContentProvenanceError(
     "content-lock-mismatch",
-    "Project content does not match the reviewed content lock. Run 'etnpilot content lock' only after reviewing the changes.",
+    "Project content does not match the reviewed content lock."
+      + [["changed", changed], ["missing", missing], ["not in the lock", added]].filter(([, list]) => list.length > 0)
+        .map(([label, list]) => ` ${label}: ${list.slice(0, 5).join(", ")}${list.length > 5 ? ` and ${list.length - 5} more` : ""}.`).join("")
+      + " Run 'etnpilot content lock' only after reviewing the changes.",
     { changed, missing, added },
   );
 }
