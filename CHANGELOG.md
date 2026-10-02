@@ -39,6 +39,11 @@ pre-1.0, so breaking changes may appear in any release.
 - **GitLab write smoke looks at the state when closing the MR answers 5xx**: on the first self-hosted GitLab, closing
   answered `500` (request id in the message) while the merge requests showed as closed. The cleanup now reads the
   merge request after a failed close and counts it as closed (`mr-closed-after-error`) when its state says so.
+- **A content-lock mismatch names the files, and says when the cause is an uncommitted lock**: on the first real
+  `run --publish` the run stopped with `Project content does not match the reviewed content lock` and nothing else,
+  because the lock had been made after the last commit and the run's worktree starts from the commit. The message now lists the
+  changed, missing and unlocked files, and, for a run in a worktree, the `.etnpilot` files that differ from the commit, with the
+  command to commit them.
 - **Publishing pushes with the GitLab token, and checks the remote first**: `etnpilot run --publish` failed on the first
   real try with `git push failed (128): could not read Username`, because git was never given the token. It is now
   passed to git for the GitLab's own address only (an `Authorization` header in the environment, not in the arguments),

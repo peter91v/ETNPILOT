@@ -96,3 +96,24 @@ test("a run that succeeds seals once, keeps its worktree by default and reports 
   assert.ok(result.workspace.managed);
   assert.equal(result.cleanup.removed ?? false, false);
 });
+
+test("a lock made after the last commit is explained: the worktree has the old one, and the files are named", async () => {
+  const root = await project();
+  const config = join(root, ".etnpilot", "etnpilot.yaml");
+  await writeFile(config, (await readFile(config, "utf8")).replace("mode: off", "mode: enforce"));
+  const { writeContentLock } = await import("../src/content/provenance.js");
+  await writeContentLock(root, { content: { provenance: { mode: "enforce" } } });
+  // An agent edited after the lock, and committed with the old lock.
+  await writeFile(join(root, ".etnpilot", "agents", "worker.yaml"), "name: worker\nprovider: fake\nprompt: Do it differently.\n");
+  await git(["add", "-A"], { cwd: root });
+  await git(["commit", "-m", "edited after the lock"], { cwd: root });
+  // Reviewed and locked again afterwards, but not committed.
+  await writeContentLock(root, { content: { provenance: { mode: "enforce" } } });
+
+  const error = await runProject({ root, input: "x", providerFactories: fake() }).then(() => undefined, (failure) => failure);
+  assert.equal(error.code, "content-lock-mismatch");
+  assert.match(error.message, /changed: .*worker/);
+  assert.match(error.message, /starts from the last commit/);
+  assert.match(error.message, /content-lock\.json/);
+  assert.match(error.message, /git add \.etnpilot && git commit/);
+});

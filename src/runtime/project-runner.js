@@ -181,7 +181,7 @@ async function setUpRun({
       fetchImpl,
       bootstrapPluginsLoaded: true,
       layerRoot: repositoryRoot,
-    }).catch((error) => { throw describeProjectLoadError(error, useWorktree); }));
+    }).catch(async (error) => { throw await describeProjectLoadError(error, useWorktree, repositoryRoot); }));
     harness.hooks = config.hooks ?? {};
     codegraph = createCodegraph(workspace.path, config, { importer: codegraphImporter });
     if (codegraph) {
@@ -695,7 +695,8 @@ function assertWorkflowAgents(harness, workflow) {
   ].join(" "));
 }
 
-function describeProjectLoadError(error, useWorktree) {
+async function describeProjectLoadError(error, useWorktree, repositoryRoot) {
+  if (error?.code === "content-lock-mismatch" && useWorktree) return await explainUncommittedContent(error, repositoryRoot);
   if (error?.code !== "ENOENT" || !useWorktree) return error;
   const detailed = new Error(
     "The run worktree has no '.etnpilot/etnpilot.yaml'. A worktree is created from the committed"
@@ -704,6 +705,24 @@ function describeProjectLoadError(error, useWorktree) {
   detailed.code = "etnpilot_content_not_committed";
   detailed.cause = error;
   return detailed;
+}
+
+// A worktree starts from the last commit. Content that was changed, or locked,
+// after it is in the checkout and not in the worktree, so the lock the worktree
+// holds is the old one and the check fails for a reason the message did not
+// give. Said here, with the files.
+async function explainUncommittedContent(error, repositoryRoot) {
+  const status = await git(["status", "--porcelain", "--", ".etnpilot"], { cwd: repositoryRoot }).then((result) => result.stdout, () => "");
+  const files = status.split("\n").filter(Boolean).map((line) => line.slice(3).trim());
+  if (files.length === 0) return error;
+  const explained = new Error(
+    `${error.message} The run's worktree starts from the last commit, and in your checkout these differ from it: ${files.slice(0, 6).join(", ")}${files.length > 6 ? ` and ${files.length - 6} more` : ""}.`
+    + " If you reviewed and locked them, commit them (git add .etnpilot && git commit) and run again.",
+  );
+  explained.code = error.code;
+  explained.details = error.details;
+  explained.cause = error;
+  return explained;
 }
 
 async function discardWorkspace(workspace, manager, branch) {
