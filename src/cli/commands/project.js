@@ -1,6 +1,6 @@
 // @ts-check
 import { WorktreeManager } from "../../git/worktrees.js";
-import { createRunApprovalHandler, ignoreMissing, resolveReceiptPublicKeys } from "../shared.js";
+import { createRunApprovalHandler, ignoreMissing, resolveKeyWindows, resolveReceiptPublicKeys } from "../shared.js";
 import { diagnose } from "../../runtime/diagnose.js";
 import { initializeProject } from "../../config/init.js";
 import { join, resolve } from "node:path";
@@ -97,7 +97,7 @@ export const projectCommands = [
       const publicKeyPaths = await resolveReceiptPublicKeys(root, values["public-key"] ?? []);
       const report = await replayRun(resolve(subcommand), {
         root,
-        verifiers: await loadReceiptVerifiers(publicKeyPaths),
+        verifiers: await loadReceiptVerifiers(publicKeyPaths, { windows: await resolveKeyWindows(root) }),
         requireSignatures: values["require-signatures"] || publicKeyPaths.length > 0,
         inspectOnly: values["inspect-only"],
       });

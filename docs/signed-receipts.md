@@ -119,6 +119,28 @@ signed it. Keep old public keys available for historical verification and pass m
 `--public-key` options when a receipt spans a rotation. Removing an old private key does not affect
 verification.
 
+### When a key may be relied on
+
+Every signed entry records when it was signed (`proof.signedAt`, inside what is hashed and signed, so it cannot be
+changed afterwards). A key can be limited to a window:
+
+```yaml
+receipts:
+  signing:
+    publicKeyFile: .etnpilot/receipt-signing-public.pem
+    keyWindows:
+      "sha256:AbC...":                  # the key id, as `receipt verify` prints it
+        notBefore: 2026-01-01
+        notAfter: 2026-12-31           # rotated out: older receipts stay valid, newer ones signed with it do not
+        revokedAt: 2026-10-02T09:00:00Z  # lost or leaked: entries signed from then on are refused
+```
+
+Verification then fails with `key-not-yet-valid`, `key-expired` or `key-revoked` at the first entry outside the
+window. Entries written before entries carried a time cannot be placed: they are accepted and reported as
+`undatedEntries`, and `etnpilot receipt verify --require-dated` refuses them. The time is the signing machine's
+clock, so this ends honest rotation and revocation; it does not stop someone who holds the key from setting the clock
+back. Only a time stamp from outside would do that.
+
 Signatures prove that the holder of the trusted private key produced the receipt and that its signed
 contents have not changed. They do not prove that an agent's decision was correct, and they do not
 replace operating-system access controls for receipt files or signing keys.
@@ -134,6 +156,5 @@ replace operating-system access controls for receipt files or signing keys.
 - **The signing key lives next to the receipts by default** (`.etnpilot/keys/`). Whoever can write the receipts can
   sign with it. For receipts that must stand against the machine's own user, keep the key elsewhere
   (`receipts.signing.privateKeySecret` with the Vault plugin).
-- **No rotation or revocation.** A key is trusted for every receipt it signed, whenever. A start and end date per
-  key (checked against the entry's own time, which the local clock supplies) is a sensible next step, but a time
-  from the same machine proves little; an external time stamp would be the real answer.
+- **Key windows rest on the signing machine's clock** (see above). A key without a window is trusted for every receipt
+  it signed, whenever. An external time stamp would be the stronger answer.

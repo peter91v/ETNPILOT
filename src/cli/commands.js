@@ -89,6 +89,7 @@ export const CLI_OPTIONS = Object.freeze({
   "require-signatures": { type: "boolean", default: false },
   "allow-unsigned": { type: "boolean", default: false },
   "require-terminal": { type: "boolean", default: false },
+  "require-dated": { type: "boolean", default: false },
   "allow-incomplete": { type: "boolean", default: false },
   kind: { type: "string" },
   path: { type: "string" },
@@ -154,7 +155,7 @@ Usage:
   etnpilot receipt keygen [--private-key path] [--public-key path]
   etnpilot receipt show [file] [--root directory] [--raw]
   etnpilot receipt verify <file> [--public-key path]
-    [--require-signatures | --allow-unsigned] [--require-terminal | --allow-incomplete]
+    [--require-signatures | --allow-unsigned] [--require-terminal | --allow-incomplete] [--require-dated]
   etnpilot secret check <name> [--root directory]
 ${AUTH_USAGE}
 ${TRUST_USAGE}

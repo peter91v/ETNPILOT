@@ -3,7 +3,7 @@ import { agentRawResponses, openProjectState } from "../../runtime/project-state
 import { basename, resolve } from "node:path";
 import { buildRunAttestation } from "../../supply/attestation.js";
 import { generateReceiptKeyPair, loadReceiptVerifiers } from "../../core/receipt-signing.js";
-import { resolveReceiptPublicKeys, writeOrPrint } from "../shared.js";
+import { resolveKeyWindows, resolveReceiptPublicKeys, writeOrPrint } from "../shared.js";
 import { verifyReceiptFile } from "../../core/receipt-store.js";
 
 // The commands of one area. Each entry says which command line it answers
@@ -90,7 +90,7 @@ export const receiptsCommands = [
         throw new Error("Choose either --require-terminal or --allow-incomplete, not both.");
       }
       const publicKeyPaths = await resolveReceiptPublicKeys(resolve(values.root), values["public-key"] ?? []);
-      const verifiers = await loadReceiptVerifiers(publicKeyPaths);
+      const verifiers = await loadReceiptVerifiers(publicKeyPaths, { windows: await resolveKeyWindows(resolve(values.root)) });
       const requireSignatures = values["require-signatures"]
         || (publicKeyPaths.length > 0 && !values["allow-unsigned"]);
       const requireTerminal = values["require-terminal"]
@@ -99,6 +99,7 @@ export const receiptsCommands = [
         verifiers,
         requireSignatures,
         requireTerminal,
+        requireDated: values["require-dated"],
       });
       // Which question was asked, stated on the answer: without a public key the
       // chain's own integrity is checked and nothing more.
@@ -117,7 +118,7 @@ export const receiptsCommands = [
       const publicKeyPaths = await resolveReceiptPublicKeys(root, values["public-key"] ?? []);
       const statement = await buildRunAttestation(resolve(subcommand), {
         root,
-        verifiers: await loadReceiptVerifiers(publicKeyPaths),
+        verifiers: await loadReceiptVerifiers(publicKeyPaths, { windows: await resolveKeyWindows(root) }),
       });
       await writeOrPrint(values.out ? resolve(root, values.out) : undefined, statement);
     },

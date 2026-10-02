@@ -82,14 +82,40 @@ export async function loadReceiptSigner({ root, config = {}, env = process.env, 
   }
 }
 
-export async function loadReceiptVerifiers(paths) {
+export async function loadReceiptVerifiers(paths, { windows } = /** @type {any} */ ({})) {
   const verifiers = new Map();
   for (const path of paths) {
     const verifier = createReceiptVerifier(await readFile(resolve(path), "utf8"));
     if (verifiers.has(verifier.keyId)) throw new Error(`Duplicate receipt verification key '${verifier.keyId}'.`);
     verifiers.set(verifier.keyId, verifier);
   }
-  return verifiers;
+  return windows ? withKeyWindows(verifiers, windows) : verifiers;
+}
+
+// When a key may be relied on. 'receipts.signing.keyWindows' maps a key id to
+// any of notBefore, notAfter and revokedAt (ISO dates). An entry records when
+// it was signed (proof.signedAt, inside what is hashed and signed), and a key
+// is only trusted for entries signed inside its window. That date comes from
+// the signing machine's clock: it ends honest rotation and revocation, and
+// does not stop someone who holds the key from setting the clock back.
+export function withKeyWindows(verifiers, windows) {
+  if (windows === undefined || windows === null) return verifiers;
+  if (typeof windows !== "object" || Array.isArray(windows)) throw new TypeError("receipts.signing.keyWindows must map key ids to dates.");
+  const next = new Map(verifiers);
+  for (const [keyId, raw] of Object.entries(windows)) {
+    const verifier = verifiers.get(keyId);
+    const window = {};
+    for (const field of ["notBefore", "notAfter", "revokedAt"]) {
+      if (raw?.[field] === undefined) continue;
+      const time = Date.parse(String(raw[field]));
+      if (Number.isNaN(time)) throw new TypeError(`receipts.signing.keyWindows['${keyId}'].${field} is not a date.`);
+      window[field] = time;
+    }
+    if (raw && typeof raw === "object") for (const field of Object.keys(raw)) if (!["notBefore", "notAfter", "revokedAt"].includes(field)) throw new TypeError(`receipts.signing.keyWindows['${keyId}'] has an unknown field '${field}'.`);
+    // A window for a key that is not trusted anyway changes nothing.
+    if (verifier) next.set(keyId, Object.freeze({ ...verifier, window: Object.freeze(window) }));
+  }
+  return next;
 }
 
 export async function generateReceiptKeyPair({ privateKeyPath, publicKeyPath } = /** @type {any} */ ({})) {
@@ -134,9 +160,17 @@ export function verifyReceiptSignature(entry, verifiers) {
   }
   const verifier = verifiers.get(proof.keyId);
   if (!verifier) return { valid: false, reason: "untrusted-key", keyId: proof.keyId };
-  return verifier.verify(entry.hash, entry.signature)
-    ? { valid: true, keyId: proof.keyId }
-    : { valid: false, reason: "invalid-signature", keyId: proof.keyId };
+  if (!verifier.verify(entry.hash, entry.signature)) return { valid: false, reason: "invalid-signature", keyId: proof.keyId };
+  const window = verifier.window;
+  if (!window || Object.keys(window).length === 0) return { valid: true, keyId: proof.keyId };
+  const signedAt = typeof proof.signedAt === "string" ? Date.parse(proof.signedAt) : Number.NaN;
+  // An entry from before entries carried a time cannot be placed in the window.
+  // It is accepted and counted, so a reader can ask for dated entries only.
+  if (Number.isNaN(signedAt)) return { valid: true, keyId: proof.keyId, undated: true };
+  if (window.notBefore !== undefined && signedAt < window.notBefore) return { valid: false, reason: "key-not-yet-valid", keyId: proof.keyId };
+  if (window.notAfter !== undefined && signedAt > window.notAfter) return { valid: false, reason: "key-expired", keyId: proof.keyId };
+  if (window.revokedAt !== undefined && signedAt >= window.revokedAt) return { valid: false, reason: "key-revoked", keyId: proof.keyId };
+  return { valid: true, keyId: proof.keyId };
 }
 
 async function assertPrivateKeyPermissions(path) {
