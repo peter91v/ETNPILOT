@@ -158,3 +158,25 @@ test("--gitlab reads who the token is and that the project can be seen, and writ
   const plain = await runSmoke(root, { config, env: withToken, skip: ["key", "reply", "tools", "stream", "toolstream", "forge"], fetchImpl: gitlabApi });
   assert.equal(plain.steps.some((entry) => entry.id === "gitlab"), false);
 });
+
+// A cost nobody can find is the worst kind. Every request the check makes goes
+// into the usage record, and the totals there are the totals the report shows.
+test("the requests of a smoke check are in the usage record, token for token", async () => {
+  const { summarizeTelemetryFile } = await import("../src/observability/telemetry.js");
+  const { root, config, env } = await project();
+  const withUsage = { ...config, observability: { enabled: true, file: ".etnpilot/state/telemetry.jsonl" } };
+  const report = await runSmoke(root, { config: withUsage, env, skip: ["forge"], fetchImpl: goodApi() });
+  assert.equal(report.usageRecorded, true);
+  const recorded = await summarizeTelemetryFile(join(root, ".etnpilot", "state", "telemetry.jsonl"), { root, config: withUsage });
+  assert.equal(recorded.inputTokens, report.tokens.input);
+  assert.equal(recorded.outputTokens, report.tokens.output);
+  assert.ok(recorded.invocations >= 4, "reply, tools, stream and toolstream each recorded");
+  assert.match(formatSmoke(report).join("\n"), /Recorded in the usage report/);
+});
+
+test("with observability off the check says its cost is not recorded", async () => {
+  const { root, config, env } = await project();
+  const report = await runSmoke(root, { config: { ...config, observability: { enabled: false } }, env, skip: ["forge"], fetchImpl: goodApi() });
+  assert.equal(report.usageRecorded, false);
+  assert.match(formatSmoke(report).join("\n"), /Not recorded: observability is off/);
+});

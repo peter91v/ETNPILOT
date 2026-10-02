@@ -6,6 +6,7 @@ import { Harness } from "../core/harness.js";
 import { registerConfiguredProviders, resolveConfiguredApiKey } from "../providers/register.js";
 import { createSecretResolver } from "../secrets/resolver.js";
 import { surveyRepository } from "./survey.js";
+import { createTelemetry } from "../observability/telemetry.js";
 
 // AgentsForge: reads a repository and writes the agents, skills, instructions
 // and prompts that fit it. One request to a model the project already has a
@@ -113,6 +114,7 @@ export async function forgeProject(root, {
   }
   report.usage = answer.usage;
   report.finish = answer.finish;
+  if (answer.usageNote) report.notes.push(answer.usageNote);
 
   let plan;
   try {
@@ -202,10 +204,19 @@ async function askProvider({ chosen, root, env, input, fetchImpl, factories, sig
     },
   }, { workingDirectory: root, env, secretResolver, ...(factories ? { factories } : {}) });
   harness.registerAgent({ name: "agents-forge", provider: "forge", prompt: FORGE_PROMPT, tools: [], requires: ["chat"] });
-  const outcome = await harness.run(/** @type {any} */ ({ agent: "agents-forge", input, signal }));
+  // What this request costs goes into the usage record like any run's, so it is
+  // not a cost that only the provider's dashboard shows. If it cannot be
+  // recorded the answer is still wanted, and the report says so.
+  let usageNote;
+  try {
+    harness.telemetry = await createTelemetry({ root, config: config ?? {}, secretResolver, ...(fetchImpl ? { fetchImpl } : {}) });
+  } catch (error) {
+    usageNote = `Usage could not be recorded: ${error.message}`;
+  }
+  const outcome = await harness.run(/** @type {any} */ ({ agent: "agents-forge", input, signal, metadata: { workflowRunId: `forge-${Date.now().toString(36)}` } }));
   const result = outcome?.result ?? outcome ?? {};
   const raw = result.raw ?? {};
-  return { text: result.text ?? "", usage: result.usage, finish: raw.choices?.[0]?.finish_reason ?? raw.stop_reason };
+  return { text: result.text ?? "", usage: result.usage, finish: raw.choices?.[0]?.finish_reason ?? raw.stop_reason, usageNote };
 }
 
 // ---------------------------------------------------------------------- the answer

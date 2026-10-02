@@ -64,6 +64,9 @@ async function diagnoseWarnings(root) {
     warnings.push("Approved commands run directly on this machine; sandbox.enabled is false.");
   }
   warnings.push(...keysSentElsewhere(config));
+  if (config.observability?.enabled === false) {
+    warnings.push("Usage and cost are not recorded (observability.enabled is false), so what the provider charges will not show in 'etnpilot usage'.");
+  }
   const problem = await openCredentialStore({ env: process.env })?.permissionsProblem();
   if (problem) warnings.push(problem);
   const trust = await trustState(root, { env: process.env }).catch(() => undefined);
