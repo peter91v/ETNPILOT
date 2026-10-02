@@ -104,6 +104,7 @@ function describeRunChoice() {
   const agent = (agents?.agents ?? []).find((candidate) => candidate.name === chosen);
   const steps = agents?.steps ?? [];
   const hint = $("run-hint");
+  const answers = describeChoice(effectiveChoice({ agent: chosen }));
   if (!chosen) {
     hint.textContent = (steps.length > 0
       ? "The project's own workflow runs: " + steps.join(" → ")
@@ -111,13 +112,14 @@ function describeRunChoice() {
         ? "The project's default agent is '" + agents.defaultAgent + "'"
         : "The project runs its default agent")
       + (($("run-inplace-box").checked ? ". The run works directly in this directory" : ". The run works in its own worktree")
-        + " and asks this page for anything it needs approved.");
+        + " and asks this page for anything it needs approved.")
+      + (answers ? " · the default agent answers with " + answers : "");
     return;
   }
   hint.textContent = "Runs '" + chosen + "' instead of the configured steps"
-    + (agent?.provider
-      ? " · provider " + agent.provider + (agent.inheritedProvider ? " (the project's default)" : "")
-      : "")
+    + (answers
+      ? " · answers with " + answers + (agent?.inheritedProvider ? " (the project's default provider)" : "")
+      : agent?.provider ? " · provider " + agent.provider + (agent.inheritedProvider ? " (the project's default)" : "") : "")
     + (agent?.requires?.length ? " · needs " + agent.requires.join(", ") : "")
     + (agent?.description ? " · " + agent.description : "") + ".";
 }

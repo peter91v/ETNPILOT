@@ -108,3 +108,18 @@ test("the page drafts with a model, shows it, and writes only the draft it kept"
     await review.close();
   }
 });
+
+test("the agents route names the default provider and what each provider answers with", async () => {
+  const { root, env } = await workdir();
+  const review = await createReviewServer({ root, env });
+  try {
+    const address = await review.listen({ port: 0 });
+    const answer = await (await fetch(`http://127.0.0.1:${address.port}/api/agents`, { headers: { "x-etnpilot-token": review.token } })).json();
+    assert.equal(typeof answer.defaultProvider, "string");
+    assert.ok(answer.providers.includes(answer.defaultProvider));
+    assert.equal(typeof answer.providerInfo.anthropic.model, "string");
+    assert.equal(answer.providerInfo.anthropic.type, "anthropic");
+  } finally {
+    await review.close();
+  }
+});

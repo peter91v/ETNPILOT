@@ -8,6 +8,12 @@ pre-1.0, so breaking changes may appear in any release.
 
 ### Checks and hygiene (follow-up to the review)
 
+- **The model shown follows the provider.** In the chat composer the model field and its summary line name what the
+  conversation will answer with: the model typed there, else the chosen agent's own, else what the chosen provider (or the
+  project's default provider) is configured with; changing the agent or provider updates it, and the list of models offered
+  follows the provider without pressing "Models". The "Start a run" dialog says the same for the agent it will run
+  (or the default agent). An agent's own model is only claimed while its own provider answers. `/api/agents` now also
+  returns `defaultProvider` and `providerInfo`.
 - **Ladders can be built and read on the review page.** The workflow builder has a "Ladder" step type: the agent, the tiers
   (model, provider, effort), the checks (a command or a reviewer agent), and an optional triage router with a lighter check
   for low risk. A **flow picture** draws the ladder: on a workflow card it shows the plan; in a run's detail it shows the path

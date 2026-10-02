@@ -220,6 +220,36 @@ test("a run with a ladder shows the path it took, which tier passed and what it 
   }
 });
 
+test("the model shown follows the default provider, the agent and the provider chosen in the chat and the run dialog", async (t) => {
+  if (skipReason) return t.skip(skipReason);
+  const setup = await project();
+  await writeFile(join(setup.root, ".etnpilot", "etnpilot.yaml"), [
+    "version: 1", "defaultProvider: alpha", "providers:",
+    "  alpha: { type: openai-compatible, baseUrl: 'http://127.0.0.1:9/v1', model: alpha-model }",
+    "  beta: { type: openai-compatible, baseUrl: 'http://127.0.0.1:9/v1', model: beta-model }",
+    "content:", "  provenance:", "    mode: enforce", "codegraph:", "  enabled: false", "observability:", "  enabled: false", "",
+  ].join("\n"));
+  const ui = await open(setup);
+  try {
+    await ui.page.evaluate(() => show("chat"));
+    await ui.page.locator("#chat-provider option[value=beta]").waitFor({ state: "attached" });
+    assert.equal(await ui.page.locator("#chat-model").getAttribute("placeholder"), "model: alpha-model");
+    assert.match(await ui.page.locator("#chat-summary").textContent(), /alpha · alpha-model/);
+    await ui.page.locator("#chat-summary").click();
+    await ui.page.locator("#chat-provider").selectOption("beta");
+    assert.equal(await ui.page.locator("#chat-model").getAttribute("placeholder"), "model: beta-model");
+    assert.match(await ui.page.locator("#chat-summary").textContent(), /beta · beta-model/);
+    await ui.page.locator("#chat-model").fill("typed-model");
+    assert.match(await ui.page.locator("#chat-summary").textContent(), /beta · typed-model/);
+
+    await ui.page.evaluate("startRunWith({})");
+    await ui.page.getByText("the default agent answers with alpha · alpha-model").waitFor();
+    assert.deepEqual(ui.problems.filter((problem) => !/Failed to load resource|ERR_/.test(problem)), []);
+  } finally {
+    await ui.close();
+  }
+});
+
 test("the run list can be narrowed by text and by status", async (t) => {
   if (skipReason) return t.skip(skipReason);
   const setup = await project();

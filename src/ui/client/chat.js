@@ -88,7 +88,7 @@ function buildChat() {
   // Behind a disclosure: four controls open all the time would take the
   // conversation's place on a phone, and most messages change none of them.
   const controls = el("details", { class: "composer-options" }, [
-    el("summary", { text: "Agent, model and effort" }),
+    el("summary", { text: "Agent, model and effort", attrs: { id: "chat-summary" } }),
     el("div", { class: "composer-controls" }, [agent, provider, model, fetchModels, models, effort]),
   ]);
   const actions = el("div", { class: "composer-controls" }, [attach, el("span", { class: "grow" }), stopButton, sendButton]);
@@ -99,6 +99,10 @@ function buildChat() {
   host.append(el("div", { class: "chat" }, [panel("Conversation", { meta: head, body: [thread] }), approvals, composer]));
   void loadChatChoices();
   void loadChatSessions();
+  for (const control of [agent, provider, model]) {
+    control.addEventListener("change", () => describeChatChoice({ reload: control !== model }));
+    control.addEventListener("input", () => describeChatChoice());
+  }
   // While a turn runs the answer may be forming: read it once a second rather
   // than on the page's slower beat.
   setInterval(() => { if (!document.hidden && view === "chat" && chatSession && (chatRunning || chatPending)) void syncChat(); }, 1000);
@@ -122,6 +126,26 @@ async function loadChatChoices() {
   agent.value = keep;
   provider.replaceChildren(el("option", { text: "provider: the agent's own", attrs: { value: "" } }));
   for (const name of agents.providers ?? []) provider.append(el("option", { text: "provider: " + name, attrs: { value: name } }));
+  describeChatChoice({ reload: true });
+}
+
+// What the composer will answer with, from the choices above it, so "the
+// agent's own" is never a blank. The list of models follows the provider.
+let chatModelsFor;
+function describeChatChoice({ reload = false } = {}) {
+  const choice = effectiveChoice({
+    agent: chatControl("chat-agent")?.value,
+    provider: chatControl("chat-provider")?.value,
+    model: chatControl("chat-model")?.value.trim(),
+  });
+  const model = chatControl("chat-model");
+  if (model) model.placeholder = choice?.model ? "model: " + choice.model : "model (the agent's own)";
+  const summary = chatControl("chat-summary");
+  if (summary) summary.textContent = choice ? "Agent, model and effort · " + describeChoice(choice) : "Agent, model and effort";
+  if (reload && choice && chatModelsFor !== choice.provider) {
+    chatModelsFor = choice.provider;
+    void loadChatModels({ quiet: true });
+  }
 }
 
 async function loadChatSessions() {
@@ -140,19 +164,19 @@ async function loadChatSessions() {
   history.value = chatSession && chatSessions.some((entry) => entry.id === chatSession) ? chatSession : "";
 }
 
-async function loadChatModels() {
-  const provider = chatControl("chat-provider").value
-    || (agents.agents ?? []).find((entry) => entry.name === (chatControl("chat-agent").value || agents.defaultAgent))?.provider;
-  if (!provider) return toast("Choose a provider first.", "bad");
+async function loadChatModels({ quiet = false } = {}) {
+  const provider = effectiveChoice({ agent: chatControl("chat-agent").value, provider: chatControl("chat-provider").value })?.provider;
+  if (!provider) return quiet ? undefined : toast("Choose a provider first.", "bad");
   try {
     const result = await api("/api/providers/" + encodeURIComponent(provider) + "/models");
     const list = chatControl("chat-models");
     list.replaceChildren();
-    if (!result.available) return toast(result.reason ?? "That provider offers no list.", "bad");
+    if (!result.available) return quiet ? undefined : toast(result.reason ?? "That provider offers no list.", "bad");
     for (const entry of result.models) list.append(el("option", { attrs: { value: entry.id } }));
-    toast(result.models.length + " models from " + provider + ".");
+    if (!quiet) toast(result.models.length + " models from " + provider + ".");
   } catch (error) {
-    toast(error.message, "bad");
+    // Offering the list is a courtesy; a missing key is said when it is asked for.
+    if (!quiet) toast(error.message, "bad");
   }
 }
 
