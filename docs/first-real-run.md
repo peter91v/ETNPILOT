@@ -249,6 +249,15 @@ which 72,445 were read from the provider's cache. What it showed:
 
 ### Opt-in GitLab protocol smoke
 
+The short way, with the project's own GitLab login (`etnpilot login gitlab`) and `git.baseUrl` / `git.project`:
+
+```bash
+etnpilot smoke --gitlab-write --confirm-writes --skip key,reply,tools,stream,toolstream,forge
+```
+
+Same checks as below, same guard (the project's name must contain `etnpilot-smoke`), no separate environment variables.
+The script that follows keeps working for CI and for a token that is not the one you signed in with.
+
 For an isolated, unarchived test project named `etnpilot-smoke`, set
 `ETNPILOT_SMOKE_GITLAB_URL`, `ETNPILOT_SMOKE_GITLAB_PROJECT`, and
 `ETNPILOT_GITLAB_TOKEN`, then run `npm run smoke:gitlab -- --confirm-writes`.

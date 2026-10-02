@@ -19,9 +19,10 @@ export const agentsCommands = [
       const skip = String(values.skip ?? "").split(",").map((name) => name.trim()).filter(Boolean);
       const unknown = skip.filter((name) => !SMOKE_STEPS.includes(name));
       if (unknown.length > 0) throw new Error(`Unknown step${unknown.length === 1 ? "" : "s"}: ${unknown.join(", ")}. Steps: ${SMOKE_STEPS.join(", ")}.`);
+      if (values["gitlab-write"] && !values["confirm-writes"]) throw new Error("--gitlab-write creates and removes a branch, a commit and a Draft merge request in the project's git.project. Add --confirm-writes, and use a project named etnpilot-smoke.");
       console.log("etnpilot smoke: a few tiny real requests (a few cents at most). Its usage is recorded like any other (etnpilot usage); nothing else is written to the project.");
       const report = await runSmoke(root, {
-        config, provider: values.provider, model: values.model, skip, gitlab: values.gitlab,
+        config, provider: values.provider, model: values.model, skip, gitlab: values.gitlab, gitlabWrite: values["gitlab-write"],
         onStep: (id) => { if (!values.json && process.stdout.isTTY) process.stdout.write(`  … ${id}\r`); },
       });
       if (values.json) console.log(JSON.stringify(report, null, 2));

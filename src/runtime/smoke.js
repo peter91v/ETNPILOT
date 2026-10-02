@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { authStatus } from "../auth/login.js";
 import { Harness } from "../core/harness.js";
 import { GitLabClient } from "../gitlab/client.js";
+import { runGitLabSmoke } from "../gitlab/smoke.js";
 import { copilotSdkAdvice } from "../providers/copilot.js";
 import { chooseProvider, forgeProject } from "../forge/forge.js";
 import { registerConfiguredProviders, resolveConfiguredApiKey } from "../providers/register.js";
@@ -20,11 +21,11 @@ import { randomUUID } from "node:crypto";
 // what it used, into the usage record, because a check that costs money and
 // leaves no trace is a cost nobody can find.
 
-export const SMOKE_STEPS = Object.freeze(["key", "reply", "tools", "stream", "toolstream", "forge", "gitlab"]);
+export const SMOKE_STEPS = Object.freeze(["key", "reply", "tools", "stream", "toolstream", "forge", "gitlab", "gitlab-write"]);
 const NOT_FOR_COPILOT = new Set(["tools", "stream", "toolstream"]);
 const MARKER = "etnpilot-smoke-7421";
 
-export async function runSmoke(root, { config, env = process.env, provider: wanted, model, skip = [], gitlab = false, fetchImpl, factories, sdkImporter, onStep = () => {} } = /** @type {any} */ ({})) {
+export async function runSmoke(root, { config, env = process.env, provider: wanted, model, skip = [], gitlab = false, gitlabWrite = false, gitlabPipelineMs, fetchImpl, factories, sdkImporter, onStep = () => {} } = /** @type {any} */ ({})) {
   /** @type {{ provider: string | undefined, model: string | undefined, steps: any[], tokens: { input: number, output: number }, usageRecorded?: boolean, usageNote?: string }} */
   const report = { provider: undefined, model, steps: [], tokens: { input: 0, output: 0 } };
   const smokeId = randomUUID().slice(0, 8);
@@ -115,6 +116,16 @@ export async function runSmoke(root, { config, env = process.env, provider: want
     return `provider '${chosen.name}' (github-copilot), SDK installed, signed in through ${login}`;
   };
 
+  const gitlabClient = async () => {
+    const git = config?.git;
+    if (!git?.baseUrl || !git?.project) throw new Error("'git.baseUrl' and 'git.project' are not set in this project");
+    const token = await resolver.get("gitlab.apiToken", { fallback: { provider: "env", key: "ETNPILOT_GITLAB_TOKEN" }, baseUrl: git.baseUrl });
+    if (!token) {
+      throw Object.assign(new Error(resolver.refusals.get("gitlab.apiToken") ?? "no GitLab token resolves"), { code: "missing_gitlab_token" });
+    }
+    return { git, client: new GitLabClient({ baseUrl: git.baseUrl, token, fetchImpl }) };
+  };
+
   const steps = {
     key: async () => {
       if (chosen.config.type === "github-copilot") return copilotKey();
@@ -157,16 +168,22 @@ export async function runSmoke(root, { config, env = process.env, provider: want
     // Reads only: who the token is, and that the project can be seen. Writing to
     // a project is what scripts/gitlab-smoke.mjs does, on a project made for it.
     gitlab: async () => {
-      const git = config?.git;
-      if (!git?.baseUrl || !git?.project) throw new Error("'git.baseUrl' and 'git.project' are not set in this project");
-      const token = await resolver.get("gitlab.apiToken", { fallback: { provider: "env", key: "ETNPILOT_GITLAB_TOKEN" }, baseUrl: git.baseUrl });
-      if (!token) {
-        throw Object.assign(new Error(resolver.refusals.get("gitlab.apiToken") ?? "no GitLab token resolves"), { code: "missing_gitlab_token" });
-      }
-      const client = new GitLabClient({ baseUrl: git.baseUrl, token, fetchImpl });
+      const { git, client } = await gitlabClient();
       const me = await client.request("GET", "/user");
       const project = await client.project(git.project);
       return `signed in as ${me.username}, project ${project.path_with_namespace ?? git.project} is visible (default branch ${project.default_branch ?? "?"})`;
+    },
+    // Writes, so only on request and only into a project named for it (the check
+    // is in runGitLabSmoke): a branch, a commit and a Draft merge request, all
+    // removed again. It uses the same login and project as everything else.
+    "gitlab-write": async () => {
+      const { git, client } = await gitlabClient();
+      const result = await runGitLabSmoke({
+        client, project: git.project, confirmWrites: true, ...(gitlabPipelineMs !== undefined ? { pipelineTimeoutMs: gitlabPipelineMs } : {}),
+        receiptPath: join(scratch, `gitlab-smoke-${smokeId}.jsonl`),
+      });
+      const pipeline = result.pipelineVerified ? "a pipeline succeeded" : `no successful pipeline seen (${result.pipelineStatuses.join(", ") || "none"})`;
+      return `branch, commit and Draft MR !${result.mrIid} created and removed again; approvals read; ${pipeline}; receipt verified`;
     },
     forge: async () => {
       const dry = await forgeProject(root, /** @type {any} */ ({ config, env, dryRun: true }));
@@ -177,6 +194,7 @@ export async function runSmoke(root, { config, env = process.env, provider: want
 
   for (const id of SMOKE_STEPS) {
     if (id === "gitlab" && !gitlab) continue;
+    if (id === "gitlab-write" && !gitlabWrite) continue;
     if (skip.includes(id) || (chosen.config.type === "github-copilot" && NOT_FOR_COPILOT.has(id))) { report.steps.push({ id, status: "skip" }); continue; }
     const started = Date.now();
     onStep(id);
