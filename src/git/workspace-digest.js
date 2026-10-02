@@ -16,6 +16,12 @@ import { git } from "./command.js";
 export async function workspaceDigest(cwd) {
   let scratch;
   try {
+    // A missing directory would otherwise surface as "spawn git ENOENT", which
+    // reads like a missing git.
+    await stat(cwd).catch((error) => {
+      if (error.code === "ENOENT") throw new Error("the directory does not exist");
+      throw error;
+    });
     const head = (await git(["rev-parse", "HEAD"], { cwd })).stdout;
     const indexPath = (await git(["rev-parse", "--path-format=absolute", "--git-path", "index"], { cwd })).stdout;
     scratch = await mkdtemp(join(tmpdir(), "etnpilot-digest-"));
