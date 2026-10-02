@@ -8,6 +8,9 @@ pre-1.0, so breaking changes may appear in any release.
 
 ### Checks and hygiene (follow-up to the review)
 
+- **`etnpilot auth vault [system|file]`**: the secrets of stored logins can live in the macOS keychain, the Linux
+  Secret Service or Windows data protection instead of the credentials file (no new dependency; Termux keeps the
+  file). The move is all or nothing. Tested with stand-ins only; see docs/login.md.
 - **`etnpilot smoke --provider github-copilot`**: checks the Copilot SDK is installed and one request is answered
   (tools and streaming are skipped, they do not apply); docs/providers.md has the setup for Linux, macOS and
   Windows, and which login the SDK uses.
