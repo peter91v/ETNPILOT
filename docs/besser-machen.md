@@ -252,4 +252,4 @@ Die Grenze von 60 steht jetzt ohne Ausnahmen.
 
 Weiter offen: Lauf fortsetzen nach Abbruch (Entwurf: `docs/entwurf-lauf-fortsetzen.md`, mit sechs Fragen an den Betreiber), Übersetzung der Oberfläche, optionaler Schlüsselbund, Gültigkeitszeitraum für Signaturschlüssel,
 aufgezeichnete Live-Fixtures, `openProjectState`/`createTuiApp` weiter zerlegen,
-Komplexitäts-Baseline in ESLint, SHA-gepinnte Actions, Ursache der unsteten PTY-Tests.
+Komplexitäts-Baseline in ESLint, SHA-gepinnte Actions, Ursache der unsteten TUI-Tests (nicht reproduziert: sechs parallele Läufe blieben grün; ein Timeout meldet jetzt Bildschirm, laufende Läufe und Fehler — `test/helpers/wait.js`).

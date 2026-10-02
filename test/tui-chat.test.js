@@ -3,6 +3,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { describeTui, waitFor as waitForCondition } from "./helpers/wait.js";
 import test from "node:test";
 import { openProjectState } from "../src/runtime/project-state.js";
 import { prepareEvalWorkspace } from "../src/runtime/evals.js";
@@ -22,12 +23,12 @@ async function type(app, text) {
   for (const key of [...text]) await app.handle(key);
 }
 
-async function waitFor(condition, what) {
-  for (let attempt = 0; attempt < 300; attempt += 1) {
-    if (await condition()) return;
-    await delay(25);
-  }
-  assert.fail(`Timed out waiting for ${what}.`);
+let watched;
+
+function waitFor(condition, what) {
+  return waitForCondition(condition, what, {
+    diagnose: () => (watched ? describeTui(watched.app, watched.state, screen) : "(no window)"),
+  });
 }
 
 async function open({ behaviour = {}, columns, rows } = {}) {
@@ -64,6 +65,7 @@ async function open({ behaviour = {}, columns, rows } = {}) {
     },
   });
   const app = createTuiApp({ state, output: fakeOutput(columns, rows), pollIntervalMs: 50 });
+  watched = { app, state };
   await app.refresh();
   return { app, state, seen, close: () => state.close() };
 }
