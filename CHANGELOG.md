@@ -8,6 +8,10 @@ pre-1.0, so breaking changes may appear in any release.
 
 ### Checks and hygiene (follow-up to the review)
 
+- **Signing in to GitLab inside a project also sets up plain `git push`.** `etnpilot credential` is a git credential
+  helper (git calls it; it is never typed): it answers with the stored user name and token for the GitLab host the login
+  was issued for, over https only, and says nothing for any other host. `etnpilot login gitlab` installs it in that
+  repository's own git config, ahead of a global credential manager, so there is no prompt and nothing to configure.
 - **`etnpilot login gitlab --host <url>` remembers the address**, and so does the Accounts page when an address is
   typed next to a GitLab token or sign-in: when the project has no `git.baseUrl`, it is set in
   the person's own settings (never the committed file) and said. An address the project already has is left alone.

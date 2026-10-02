@@ -12,6 +12,7 @@ import { loadConfig } from "../../config/load.js";
 import { loadPlugins } from "../../plugins/load-plugin.js";
 import { readProjectPackages } from "../../supply/ecosystems.js";
 import { runAuthCommand } from ".././auth.js";
+import { runCredentialCommand } from "../../auth/git-credential.js";
 import { scanForSecrets } from "../../supply/secret-scan.js";
 
 // The commands of one area. Each entry says which command line it answers
@@ -22,6 +23,13 @@ export const securityCommands = [
     match: ({ command, subcommand }) => command === "login" || command === "logout" || command === "auth",
     async run({ command, subcommand, rest, values }) {
       return await runAuthCommand(command, subcommand, values, { rest });
+    },
+  },
+  {
+    // Called by git itself, never typed: 'git push' asks for the stored GitLab login.
+    match: ({ command }) => command === "credential",
+    async run({ subcommand }) {
+      return await runCredentialCommand(subcommand);
     },
   },
   {

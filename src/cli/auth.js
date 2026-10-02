@@ -2,6 +2,7 @@
 import { join, resolve } from "node:path";
 import { allowHost, authStatus, loginWithDevice, logout, saveKey, storeFor } from "../auth/login.js";
 import { SERVICE_IDS, normalizeAuthHost, serviceFor } from "../auth/services.js";
+import { credentialHelperInstalled, installCredentialHelper } from "../auth/git-credential.js";
 import { loadConfig } from "../config/load.js";
 import { setSetting } from "../config/settings.js";
 
@@ -12,6 +13,8 @@ export const AUTH_USAGE = `  etnpilot login <anthropic|openai|github|gitlab> [--
   etnpilot login <service> --allow-host name      let the stored login be sent to one more host (a proxy)
   etnpilot logout <anthropic|openai|github|gitlab>
   etnpilot auth status
+  etnpilot credential get                         git's credential helper for the stored GitLab login (git calls it)
+  (signing in to GitLab inside a project also lets plain 'git push' use the login: no prompt, nothing to configure)
   etnpilot auth vault [system|file]               where the secrets of stored logins are kept`;
 
 export async function runAuthCommand(command, subcommand, values, { stdin = process.stdin, stdout = process.stdout, env = process.env, fetchImpl, sleep, rest = [] } = /** @type {any} */ ({})) {
@@ -111,7 +114,7 @@ export function describeStatus(entry) {
 // it is set now, in this person's own settings (never the committed file), and
 // said. A project that already has an address is left alone.
 async function rememberHost(service, host, { root, env, say }) {
-  if (service.id !== "gitlab" || !host) return;
+  if (service.id !== "gitlab") return;
   const projectRoot = resolve(root ?? ".");
   let config;
   try {
@@ -119,10 +122,25 @@ async function rememberHost(service, host, { root, env, say }) {
   } catch {
     return; // not inside an ETNPilot project: nothing to set
   }
-  if (config.git?.baseUrl) return;
-  const address = normalizeAuthHost(host);
-  await setSetting("git.baseUrl", address, { root: projectRoot, env, scope: "local" });
-  say(`This project had no git.baseUrl; it is now ${address} (your own settings, not committed).`);
+  let address = config.git?.baseUrl;
+  if (!address && host) {
+    address = normalizeAuthHost(host);
+    await setSetting("git.baseUrl", address, { root: projectRoot, env, scope: "local" });
+    say(`This project had no git.baseUrl; it is now ${address} (your own settings, not committed).`);
+  }
+  if (address) await rememberForGit(projectRoot, address, say);
+}
+
+// So that a plain 'git push' in this repository uses the login too, with no
+// prompt and nothing to configure. Only this repository's own git config.
+async function rememberForGit(projectRoot, address, say) {
+  try {
+    if (await credentialHelperInstalled(projectRoot, address)) return;
+    await installCredentialHelper(projectRoot, address);
+    say(`git in this repository now uses the stored GitLab login for ${new URL(address).host}; 'git push' asks for nothing.`);
+  } catch {
+    // not a git repository (yet), or no git: the login still works for ETNPilot's own push
+  }
 }
 
 async function projectGitLabHost(root) {
