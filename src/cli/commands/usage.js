@@ -14,6 +14,9 @@ export const usageCommands = [
       const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"));
       const file = resolve(root, config.observability?.file ?? ".etnpilot/state/telemetry.jsonl");
       const summary = /** @type {any} */ (await summarizeTelemetryFile(file, { root, config }));
+      if (config.observability?.enabled === false) {
+        console.error("Observability is off (observability.enabled: false): nothing is being recorded, so what the provider charges does not show up here. Turn it on to see every request's cost.");
+      }
       if (values.json) {
         console.log(JSON.stringify(summary, null, 2));
         return 0;
@@ -32,7 +35,7 @@ export const usageCommands = [
       if (summary.unpricedModels) console.log(`No rate for: ${summary.unpricedModels.map((entry) => entry.model).join(", ")} (set observability.pricing.models, or wait for the price refresh)`);
       console.log("Compare with the dashboard of the provider; tokens should match exactly, cost only if the rates match.");
       // The dashboard counts every request the key made. This report counts what runs, chats and the page recorded.
-      console.log("Not counted here: 'etnpilot smoke' and 'etnpilot forge' (they send requests but record no usage), calls made before observability was on, and other tools using the same key. The dashboard shows more for that reason.");
+      console.log("Counted here: runs, chats, the page, 'etnpilot smoke' and 'etnpilot forge'. Not counted: calls made before they were recorded or while observability was off, and other tools using the same key; the dashboard shows those too.");
       return 0;
     },
   },

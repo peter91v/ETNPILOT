@@ -8,18 +8,24 @@ import { GitLabClient } from "../gitlab/client.js";
 import { chooseProvider, forgeProject } from "../forge/forge.js";
 import { registerConfiguredProviders, resolveConfiguredApiKey } from "../providers/register.js";
 import { createSecretResolver } from "../secrets/resolver.js";
+import { createTelemetry } from "../observability/telemetry.js";
+import { meteredInvoke } from "../observability/metered-call.js";
+import { randomUUID } from "node:crypto";
 
 // What the test suite cannot say: whether this phone, this key and this model
 // do what ETNPilot expects. A handful of tiny real requests, each reporting
 // pass or fail with the reason, ending in a block that can be pasted back as it
-// is. It spends a few cents at most and never writes to the project.
+// is. It spends a few cents at most. It writes nothing to the project except
+// what it used, into the usage record, because a check that costs money and
+// leaves no trace is a cost nobody can find.
 
 export const SMOKE_STEPS = Object.freeze(["key", "reply", "tools", "stream", "toolstream", "forge", "gitlab"]);
 const MARKER = "etnpilot-smoke-7421";
 
 export async function runSmoke(root, { config, env = process.env, provider: wanted, model, skip = [], gitlab = false, fetchImpl, factories, onStep = () => {} } = /** @type {any} */ ({})) {
-  /** @type {{ provider: string | undefined, model: string | undefined, steps: any[], tokens: { input: number, output: number } }} */
+  /** @type {{ provider: string | undefined, model: string | undefined, steps: any[], tokens: { input: number, output: number }, usageRecorded?: boolean, usageNote?: string }} */
   const report = { provider: undefined, model, steps: [], tokens: { input: 0, output: 0 } };
+  const smokeId = randomUUID().slice(0, 8);
   const chosen = wanted
     ? (config?.providers?.[wanted] ? { name: wanted, config: config.providers[wanted] } : undefined)
     : await chooseProvider(config, root, env);
@@ -59,16 +65,30 @@ export async function runSmoke(root, { config, env = process.env, provider: want
     }, { workingDirectory: scratch, env, secretResolver: resolver, ...(factories ? { factories } : {}) });
     return harness.providers.get("smoke");
   };
-  const ask = async (provider, input, { tools, emitDelta } = /** @type {any} */ ({})) => provider.invoke({
-    runId: "smoke",
-    agent: { name: "smoke", prompt: "You are a terse test responder.", ...(model ? { model } : {}), tools: tools ?? [] },
-    input,
-    instructions: [],
-    skills: [],
-    emitDelta,
-    // Only the two read tools are offered, so this never has to say no.
-    approve: async () => ({ kind: "approve-once" }),
-    signal: AbortSignal.timeout(90_000),
+  // Every request the check makes is metered into the usage record (when
+  // observability is on), so what `etnpilot usage` shows and what the
+  // provider's dashboard shows can be set against each other.
+  const telemetry = await createTelemetry({ root, config, secretResolver: resolver, ...(fetchImpl ? { fetchImpl } : {}) }).catch((error) => {
+    report.usageNote = `Usage could not be recorded: ${error.message}`;
+    return undefined;
+  });
+  report.usageRecorded = Boolean(telemetry);
+  const ask = async (provider, input, { tools, emitDelta } = /** @type {any} */ ({})) => meteredInvoke({
+    telemetry,
+    provider,
+    providerName: chosen.name,
+    attributes: { "etnpilot.workflow.run_id": `smoke-${smokeId}` },
+    context: {
+      runId: "smoke",
+      agent: { name: "smoke", prompt: "You are a terse test responder.", ...(model ? { model } : {}), tools: tools ?? [] },
+      input,
+      instructions: [],
+      skills: [],
+      emitDelta,
+      // Only the two read tools are offered, so this never has to say no.
+      approve: async () => ({ kind: "approve-once" }),
+      signal: AbortSignal.timeout(90_000),
+    },
   });
   const account = (result) => {
     report.tokens.input += result.usage?.inputTokens ?? 0;
@@ -191,5 +211,9 @@ export function formatSmoke(report) {
   const ran = report.steps.filter((step) => step.status !== "skip");
   const passed = ran.filter((step) => step.status === "pass").length;
   lines.push(`${passed}/${ran.length} passed${report.provider ? ` against '${report.provider}'` : ""}; ${report.tokens.input.toLocaleString("en")} tokens in, ${report.tokens.output.toLocaleString("en")} out.`);
+  if (report.usageNote) lines.push(report.usageNote);
+  else if (report.provider && report.tokens.input + report.tokens.output > 0) {
+    lines.push(report.usageRecorded ? "Recorded in the usage report (etnpilot usage)." : "Not recorded: observability is off, so this cost appears only on the provider's dashboard.");
+  }
   return lines;
 }

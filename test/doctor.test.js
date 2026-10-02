@@ -136,3 +136,11 @@ test("doctor warns when an environment key would go to a host that is not the ve
   assert.match(text, /Provider 'proxy' sends the key 'openai.apiKey' to llm.internal.example/);
   assert.doesNotMatch(text, /Provider 'openai' sends/);
 });
+
+test("doctor says when usage is not being recorded", async () => {
+  const root = await project("observability:\n  enabled: false\n");
+  const report = await diagnose(root);
+  assert.match((report.warnings ?? []).join("\n"), /Usage and cost are not recorded/);
+  const on = await diagnose(await project());
+  assert.doesNotMatch((on.warnings ?? []).join("\n"), /Usage and cost are not recorded/);
+});

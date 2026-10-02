@@ -256,3 +256,18 @@ test("with a preview nothing is written until the proposal is accepted", async (
   assert.ok(accepted.agents.length > 0);
   assert.match(await readFile(join(root, ".etnpilot/agents/cart-builder.yaml"), "utf8"), /name: cart-builder/);
 });
+
+test("what a forge proposal costs is in the usage record", async () => {
+  const { summarizeTelemetryFile } = await import("../src/observability/telemetry.js");
+  const root = await repository();
+  await initializeProject(root, { forge: false, importExisting: false });
+  const config = await loadConfig(join(root, ".etnpilot/etnpilot.yaml"), { OPENAI_API_KEY: "test-key" });
+  config.defaultProvider = "openai";
+  config.observability = { enabled: true, file: ".etnpilot/state/telemetry.jsonl" };
+  const fetchImpl = async () => ({ ok: true, status: 200, json: async () => ({ model: "gpt-x", choices: [{ message: { content: JSON.stringify(PLAN) } }], usage: { prompt_tokens: 1234, completion_tokens: 56 } }) });
+  await forgeProject(root, { config, env: { OPENAI_API_KEY: "test-key" }, fetchImpl });
+  const recorded = await summarizeTelemetryFile(join(root, ".etnpilot", "state", "telemetry.jsonl"), { root, config });
+  assert.equal(recorded.inputTokens, 1234);
+  assert.equal(recorded.outputTokens, 56);
+  assert.equal(recorded.invocations, 1);
+});

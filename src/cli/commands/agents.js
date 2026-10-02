@@ -19,7 +19,7 @@ export const agentsCommands = [
       const skip = String(values.skip ?? "").split(",").map((name) => name.trim()).filter(Boolean);
       const unknown = skip.filter((name) => !SMOKE_STEPS.includes(name));
       if (unknown.length > 0) throw new Error(`Unknown step${unknown.length === 1 ? "" : "s"}: ${unknown.join(", ")}. Steps: ${SMOKE_STEPS.join(", ")}.`);
-      console.log("etnpilot smoke: a few tiny real requests (a few cents at most). Nothing is written to the project.");
+      console.log("etnpilot smoke: a few tiny real requests (a few cents at most). Its usage is recorded like any other (etnpilot usage); nothing else is written to the project.");
       const report = await runSmoke(root, {
         config, provider: values.provider, model: values.model, skip, gitlab: values.gitlab,
         onStep: (id) => { if (!values.json && process.stdout.isTTY) process.stdout.write(`  … ${id}\r`); },
