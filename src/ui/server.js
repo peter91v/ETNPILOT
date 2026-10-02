@@ -11,6 +11,7 @@ import { WorkflowQueueStateError } from "../workflow/queue.js";
 import { createProject, describeProject } from "../runtime/first-run.js";
 import { createAccountRoutes } from "./accounts.js";
 import { createSetupRoutes } from "./setup-routes.js";
+import { createAuthorRoutes } from "./author-routes.js";
 import { installCredentialHelper } from "../auth/git-credential.js";
 import { isPlaceholderAddress } from "../runtime/guided-setup.js";
 import { renderReviewPage } from "./page.js";
@@ -37,6 +38,8 @@ export async function createReviewServer({
   getNetworkInterfaces = networkInterfaces,
   fetchImpl,
   allowedHosts = [],
+  // A stand-in for the model that drafts agents and prompts; the tests use it.
+  authorModel,
 } = /** @type {any} */ ({})) {
   // Kept between starts, because an installed app holds a link: a token minted
   // per start locks that icon out at the next restart. A caller may still pass
@@ -80,6 +83,8 @@ export async function createReviewServer({
     // Through the running state, so the page sees the new setting at once.
     write: async (path, value) => { await state?.setSetting(path, value, { scope: "local" }); },
   });
+
+  const author = createAuthorRoutes({ root, env, fetchImpl, getConfig: () => state?.config, runModel: authorModel });
 
   // Which names a request may use for this server. An address that is a number
   // cannot be rebound to another machine, so any IP literal and 'localhost' are
@@ -382,8 +387,8 @@ export async function createReviewServer({
       }
       if (!state) return send(response, 409, { error: "no-project-here", root });
       /** @type {Array<[string, (method: string, pathname: string, body: any) => Promise<any>]>} */
-      const delegates = [["/api/auth", accounts], ["/api/setup", setup]];
-      const delegate = delegates.find(([prefix]) => url.pathname.startsWith(prefix));
+      const delegates = [["/api/auth", accounts], ["/api/setup", setup], ["/api/author", author]];
+      const delegate = delegates.find(([prefix]) => url.pathname === prefix || url.pathname.startsWith(`${prefix}/`));
       if (delegate) {
         const body = request.method === "POST" ? await readJsonBody(request) : undefined;
         const handled = await delegate[1](request.method ?? "GET", url.pathname, body);

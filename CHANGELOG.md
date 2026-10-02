@@ -8,6 +8,10 @@ pre-1.0, so breaking changes may appear in any release.
 
 ### Checks and hygiene (follow-up to the review)
 
+- **The review page drafts agents, skills, instructions and better prompts too.** Under Agents, "Draft with AI": describe
+  what is needed (or what to change in an existing prompt, skill or instruction), read the draft or the diff, and press
+  "Write this". The server keeps the draft and writes it by id, so the page never sends text or a path to be written.
+  Routes `POST /api/author/draft|apply|discard`. Fixes the route lookup so `/api/author` is not taken for `/api/auth`.
 - **`etnpilot author`: agents, prompts, skills and instructions drafted with a model's help** (`docs/authoring.md`).
   Without arguments it asks what is needed; `author agent|skill|instruction "<what>"` drafts one new thing,
   `author improve prompt|skill|instruction <name> "<change>"` shows a diff of a better version. It shows the draft and

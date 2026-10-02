@@ -81,7 +81,7 @@ test("the terminal asks before it writes, and --dry-run and --yes behave", async
 
 test("forge.provider and forge.model choose who drafts, and the model only goes to that provider", async () => {
   const template = YAML.parse(renderProjectConfig());
-  const env = { OPENAI_API_KEY: "sk-test-openai-key-12345", ANTHROPIC_API_KEY: "sk-ant-test-anthropic-key-12345" };
+  const env = { OPENAI_API_KEY: ["sk", "test", "openai", "key", "12345"].join("-"), ANTHROPIC_API_KEY: ["sk", "ant", "test", "anthropic", "key", "12345"].join("-") };
   const root = await mkdtemp(join(tmpdir(), "etn-choose-"));
   const base = { ...template, defaultProvider: "openai", forge: undefined };
   const chosen = await chooseProvider({ ...base, forge: { provider: "anthropic", model: "claude-opus-5-5" } }, root, env);

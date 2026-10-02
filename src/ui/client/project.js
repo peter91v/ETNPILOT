@@ -125,6 +125,7 @@ function renderAgents() {
     return;
   }
   const agents = agentData.agents ?? [];
+  host.append(authorPanel());
   host.append(panel("Agents", {
     meta: button("New agent", { class: "btn tonal", onClick: () => openAgentBuilder() }),
     body: agents.length === 0

@@ -19,6 +19,9 @@ etnpilot author improve prompt orchestrator "shorter, and always list the files 
 - What is written is unreviewed: read it, run `etnpilot content lock`, commit `.etnpilot/`, and your team gets the same
   agents through the merge request.
 
+On the review page the same thing is under **Agents → Draft with AI**: you see the draft (or the diff) first and press
+"Write this". The page can only accept a draft the server kept, by its id.
+
 ## Which model drafts
 
 AgentsForge (`etnpilot forge`, also run by `init`) and `etnpilot author` use the same two settings:

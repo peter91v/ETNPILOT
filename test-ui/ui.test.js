@@ -36,9 +36,9 @@ async function project({ lock = false } = {}) {
   return { root, lock };
 }
 
-async function open(setup, { width = 412, fetchImpl, locale } = {}) {
+async function open(setup, { width = 412, fetchImpl, locale, authorModel } = {}) {
   const home = await mkdtemp(join(tmpdir(), "etnpilot-ui-home-"));
-  const server = await createReviewServer({ root: setup.root, env: { ...process.env, ETNPILOT_HOME: home }, fetchImpl });
+  const server = await createReviewServer({ root: setup.root, env: { ...process.env, ETNPILOT_HOME: home }, fetchImpl, authorModel });
   const address = await server.listen({ port: 0 });
   const context = await browser.newContext({ viewport: { width, height: 900 }, isMobile: width < 600, hasTouch: width < 600, colorScheme: "dark", locale });
   const page = await context.newPage();
@@ -138,6 +138,25 @@ test("the guided setup connects GitLab from the overview and never shows the tok
     await ui.page.getByRole("button", { name: "Connect GitLab" }).click();
     await ui.page.getByText("Stored the GitLab token for peter").first().waitFor();
     assert.equal((await ui.page.content()).includes(token), false);
+    assert.deepEqual(ui.problems, []);
+  } finally {
+    await ui.close();
+  }
+});
+
+test("an agent can be drafted with a model, read, and then written", async (t) => {
+  if (skipReason) return t.skip(skipReason);
+  const answer = { agents: [{ name: "doc-writer", description: "writes docs", tools: ["read_file"], skills: [], prompt: "Write the docs." }], skills: [], instructions: [] };
+  const setup = await project();
+  const ui = await open(setup, { authorModel: async () => ({ text: JSON.stringify(answer), usage: {} }) });
+  try {
+    await ui.page.evaluate(() => show("agents"));
+    await ui.page.locator("#view-agents").getByRole("button", { name: "Open", exact: true }).first().click();
+    await ui.page.locator("#author-request").fill("an agent for docs");
+    await ui.page.getByRole("button", { name: "Draft it" }).click();
+    await ui.page.getByText("Write the docs.").first().waitFor();
+    await ui.page.getByRole("button", { name: "Write this" }).click();
+    await ui.page.getByText("It is not reviewed yet").first().waitFor();
     assert.deepEqual(ui.problems, []);
   } finally {
     await ui.close();
