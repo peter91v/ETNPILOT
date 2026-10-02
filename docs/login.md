@@ -39,6 +39,11 @@ remembers it.
 Without a client id, `login` says so and offers a pasted token instead
 (`--key-stdin` reads one from a pipe).
 
+Inside a git repository, signing in to GitLab also installs `etnpilot credential` as that repository's git credential
+helper for the GitLab address, so a plain `git push` uses the stored user name and token without asking. The helper only
+answers for the host the login was issued for, and only over https; it never writes anything (`store` and `erase` do
+nothing). Remove it with `git config --local --unset-all credential.<address>.helper`.
+
 A self-hosted GitLab is named once with `--host`; if the project has no `git.baseUrl` yet, the login sets it in your
 own settings (not the committed file) and says so, because the project needs the same address to use the login.
 
