@@ -18,6 +18,7 @@ pre-1.0, so breaking changes may appear in any release.
 - `etnpilot content diff`: what changed, was added or removed since the reviewed lock, before you lock it.
 - The Overview of a project with no runs shows a "Getting started" list (provider key, commit, first run), read live and gone after the first run.
 - `openProjectState` lost its conversation half and its run-start logic to `project-chat.js` and `project-run-start.js` (behaviour unchanged).
+- **`etnpilot resume <run> --dry-run`** (E2 of docs/entwurf-lauf-fortsetzen.md): reads an earlier run's receipt, verifies it, and prints which steps would be reused and which run again, or why the run cannot be resumed (receipt does not verify, workspace or configuration changed, no run-start). It changes and runs nothing; resuming itself is not built. `run-start` now also records the step plan and the workspace.
 - Receipts gain a `run-start` entry (configuration digest, workspace digest) and one `step` entry per finished step (effect label, workspace digest): evidence for readers and groundwork for resuming runs (E1 of docs/entwurf-lauf-fortsetzen.md). Old receipts stay valid.
 - Test waits that time out now say how long they waited and what the window was doing (screen, active runs, run errors), so a flaky TUI test explains itself the next time (`test/helpers/wait.js`). Six concurrent runs of the TUI tests did not reproduce a failure.
 - The TUI's conversation (the line being typed, `@` file suggestions, sending, syncing) moved to `chat-controller.js`.

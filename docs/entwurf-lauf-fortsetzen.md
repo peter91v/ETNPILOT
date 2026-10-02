@@ -1,7 +1,8 @@
 # Entwurf: einen abgebrochenen Lauf fortsetzen
 
-Status: **Vorschlag. Gebaut ist nur Etappe E1** (`run-start`- und `step`-Einträge mit Digests, siehe
-`docs/signed-receipts.md`, „What a run writes“); der Rest ist offen. Geschrieben, um vor dem Bauen zu entscheiden, was
+Status: **Vorschlag. Gebaut sind die Etappen E1 und E2** (E2: `etnpilot resume <lauf> --dry-run`, nur Plan, es
+wird nichts ausgeführt) (`run-start`- und `step`-Einträge mit Digests, siehe
+`docs/signed-receipts.md`, „What a run writes“); E3 bis E5 sind offen. Geschrieben, um vor dem Bauen zu entscheiden, was
 „fortsetzen“ hier überhaupt heißen darf. Die offenen Fragen stehen am Ende (Abschnitt 9).
 
 ## 1. Das Problem
