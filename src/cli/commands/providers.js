@@ -40,7 +40,7 @@ export const providersCommands = [
         console.log(`Secret '${secret}' is read from ${entry.env} only; no login is stored for it.`);
         console.log("The committed file changed, so run 'etnpilot trust' to look at it again.");
       } else if (entry.secret) {
-        console.log(`Its key is the stored login for '${entry.secret}': sign in with 'etnpilot login github' (the token needs the "models" permission), then: etnpilot smoke --provider ${id}`);
+        console.log(`Its key is the stored login for '${entry.secret}': store a fine-grained token with Models: Read (Accounts page, or pipe it into 'etnpilot login github --key-stdin'; the browser sign-in cannot carry that permission), then: etnpilot smoke --provider ${id}`);
       } else {
         console.log(`Start the server, then: etnpilot models --provider ${id}   (the model '${settings[0][1].model}' is a guess)`);
       }
