@@ -66,3 +66,19 @@ test("the page has an Accounts view and parses", () => {
   const script = page.slice(page.lastIndexOf("<script>") + 8, page.lastIndexOf("</script>"));
   assert.doesNotThrow(() => new Function(script));
 });
+
+test("a GitLab token entered with an address on the page also sets the project's address, when it has none", async () => {
+  const env = { ETNPILOT_HOME: await mkdtemp(join(tmpdir(), "etn-acc-")) };
+  const remembered = [];
+  const handle = createAccountRoutes({
+    env, fetchImpl: async () => reply({ username: "peter" }), gitlabHost: () => undefined,
+    rememberGitLabHost: async (host) => { remembered.push(host); return "https://git.example.test"; },
+  });
+  const saved = await handle("POST", "/api/auth/key", { service: "gitlab", value: "glpat-token-value-123", host: "https://git.example.test" });
+  assert.equal(saved.body.baseUrlSet, "https://git.example.test");
+  // No address typed, or another service: nothing to remember.
+  const plain = await handle("POST", "/api/auth/key", { service: "gitlab", value: "glpat-token-value-123" });
+  assert.equal(plain.body.baseUrlSet, undefined);
+  await handle("POST", "/api/auth/key", { service: "github", value: "ghp_value_123456789" });
+  assert.deepEqual(remembered, ["https://git.example.test"]);
+});

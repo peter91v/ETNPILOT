@@ -4,6 +4,7 @@ import { timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { networkInterfaces } from "node:os";
 import { ApprovalStateError } from "../core/approval-inbox.js";
+import { normalizeAuthHost } from "../auth/services.js";
 import { parseSettingValue, SettingsRefused } from "../config/settings.js";
 import { openProjectState } from "../runtime/project-state.js";
 import { WorkflowQueueStateError } from "../workflow/queue.js";
@@ -46,7 +47,18 @@ export async function createReviewServer({
   const resolvedToken = token
     ?? (await readOrCreateToken(root, { rotate: rotateToken, persist: project.exists })).token;
 
-  const accounts = createAccountRoutes({ env, fetchImpl, gitlabHost: () => state?.config?.git?.baseUrl });
+  const accounts = createAccountRoutes({
+    env, fetchImpl,
+    gitlabHost: () => state?.config?.git?.baseUrl,
+    // The address typed next to a GitLab sign-in is what the project needs as
+    // git.baseUrl too. Set when it has none, in the person's own settings.
+    rememberGitLabHost: async (host) => {
+      if (!state || state.config?.git?.baseUrl) return undefined;
+      const address = normalizeAuthHost(host);
+      await state.setSetting("git.baseUrl", address, { scope: "local" });
+      return address;
+    },
+  });
 
   // Which names a request may use for this server. An address that is a number
   // cannot be rebound to another machine, so any IP literal and 'localhost' are
