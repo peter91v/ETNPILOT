@@ -107,6 +107,7 @@ export const CLI_OPTIONS = Object.freeze({
   name: { type: "string" },
   "older-than": { type: "string" },
   "allow-drift": { type: "boolean", default: false },
+  "reset-partial": { type: "boolean", default: false },
   keep: { type: "string" },
   apply: { type: "boolean", default: false },
   "record-fixtures": { type: "string" },

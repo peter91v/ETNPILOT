@@ -307,6 +307,9 @@ export const DE = {
   "Show only changed settings": "Nur geänderte Einstellungen zeigen",
   "No command matches.": "Kein Befehl passt.",
   "Language": "Sprache",
+  "Discard them and resume": "Verwerfen und fortsetzen",
+  "Discard what the stopped step left?": "Verwerfen, was der gestoppte Schritt hinterlassen hat?",
+  "Discard and resume": "Verwerfen und fortsetzen",
   "ETNPilot — no project here yet": "ETNPilot — hier gibt es noch kein Projekt",
   "No project here yet": "Hier gibt es noch kein Projekt",
   "This directory has no": "In diesem Verzeichnis gibt es kein",
@@ -470,6 +473,8 @@ export const DE = {
 // they are.
 /** @type {Array<[RegExp, (...groups: any[]) => string]>} */
 export const DE_PATTERNS = [
+  [/^(\d+) files were left by the step that stopped\.$/, (_, n) => `${n} Dateien hat der gestoppte Schritt hinterlassen.`],
+  [/^These (\d+) files in the run's worktree go back to how the last finished step left them: (.+)\. This cannot be undone\.$/, (_, n, list) => `Diese ${n} Dateien im Worktree des Laufs gehen zurück auf den Stand, den der letzte fertige Schritt hinterlassen hat: ${list}. Das lässt sich nicht rückgängig machen.`],
   [/^Created (.+)\.$/, (_, file) => `${file} angelegt.`],
   [/^Created (.+)\. Opening the review page…$/, (_, file) => `${file} angelegt. Öffnet die Prüfseite…`],
   [/^Creating, and asking (.+) about this repository — this can take a minute…$/, (_, name) => `Legt an und fragt ${name} zu diesem Repository — das kann eine Minute dauern…`],

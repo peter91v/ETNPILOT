@@ -207,7 +207,7 @@ export async function openProjectState({ root = process.cwd(), env = process.env
     resumePlan: async (file, options = {}) => {
       const configured = current.receipts?.signing?.publicKeyFile;
       const verifiers = configured ? await loadReceiptVerifiers([resolve(projectRoot, configured)], { windows: current.receipts?.signing?.keyWindows }).catch(() => undefined) : undefined;
-      return planResume({ root: projectRoot, receipt: file, env, allowDrift: options.allowDrift === true, ...(verifiers ? { verifiers, requireSignatures: true } : {}) });
+      return planResume({ root: projectRoot, receipt: file, env, allowDrift: options.allowDrift === true, resetPartial: options.resetPartial === true, ...(verifiers ? { verifiers, requireSignatures: true } : {}) });
     },
     // Resumes an earlier run: a new run that carries over what it finished and
     // continues in its worktree. It is planned again first, so a page that

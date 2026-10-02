@@ -311,6 +311,7 @@
   .ok { color: var(--md-primary); } .warn { color: var(--md-warning); } .bad { color: var(--md-error); }
   .empty { color: var(--md-on-surface-variant); font: var(--md-body-medium); letter-spacing: .25px; }
   .notice {
+    overflow-wrap: anywhere;
     margin: 0; padding: 12px 16px; border-radius: var(--md-shape-sm);
     background: var(--md-warning-container); color: var(--md-on-warning-container);
     font: var(--md-body-medium); letter-spacing: .25px;

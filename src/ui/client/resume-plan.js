@@ -18,9 +18,9 @@ async function loadResumePlan(file) {
 
 // Starts the resumption the plan describes. The server plans again first, so a
 // plan that has gone stale is refused with its reasons, not started.
-async function startResume(file) {
+async function startResume(file, { resetPartial = false } = {}) {
   try {
-    const started = await api("/api/runs/resume", { method: "POST", body: JSON.stringify({ file }) });
+    const started = await api("/api/runs/resume", { method: "POST", body: JSON.stringify({ file, ...(resetPartial ? { resetPartial: true } : {}) }) });
     clearError();
     toast("Resuming " + started.resumedFrom + ": it appears under working now.");
     resumePlan = undefined;
@@ -32,6 +32,20 @@ async function startResume(file) {
     resumePlan = undefined;
   }
   render();
+}
+
+// The worktree holds what the step that stopped had written. Going on from how
+// the last finished step left it means discarding that, which is the one
+// irreversible thing resuming can do, so it is listed and asked.
+async function discardAndResume(file, offer) {
+  const shown = offer.files.slice(0, 12).map((entry) => entry.status + " " + entry.path);
+  const more = offer.files.length > shown.length ? " … and " + (offer.files.length - shown.length) + " more" : "";
+  const yes = await askConfirm({
+    title: "Discard what the stopped step left?",
+    text: "These " + offer.files.length + " files in the run's worktree go back to how the last finished step left them: " + shown.join("; ") + more + ". This cannot be undone.",
+    yes: "Discard and resume",
+  });
+  if (yes) await startResume(file, { resetPartial: true });
 }
 
 function resumePlanRows(receipt, run) {
@@ -66,6 +80,12 @@ function resumePlanRows(receipt, run) {
   }
   for (const refusal of resumePlan.refusals ?? []) {
     rows.push(el("p", { class: "notice bad", text: refusal.message }));
+  }
+  if (resumePlan.resetOffer) {
+    rows.push(el("div", { class: "row" }, [
+      el("span", { class: "muted", text: resumePlan.resetOffer.files.length + " files were left by the step that stopped." }),
+      button("Discard them and resume", { class: "btn tonal", onClick: () => discardAndResume(receipt.file, resumePlan.resetOffer) }),
+    ]));
   }
   return rows;
 }
