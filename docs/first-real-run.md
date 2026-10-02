@@ -19,10 +19,10 @@ it has not, it says that too. Filling this in is the point of the document.
 | A real OpenAI call reaches a real model | a run failed at `plan` with the server's own 400 about `reasoning_effort`, which only a real endpoint produces | Termux, 2026-09-24 |
 | The review page works on a phone | driven in Chromium at 412px, every control | this repository |
 | A real GitLab instance can be read: the token, the address and the project resolve, merge requests are listed | merge requests listed on the page (reported by the owner; the exact output was not sent) | self-hosted GitLab, Termux, 2026-10-02 |
-| A real GitLab instance accepts what a run publishes | **nothing yet**: the write smoke (`smoke --gitlab-write`) has not been reported | — |
+| A real GitLab instance accepts what a run publishes | **nothing** | — |
 | A run completes end to end against a real provider | `plan → build → test → review` succeeded; 101,595 tokens, clean merge rehearsal | Termux, OpenAI, 2026-09-30 |
 
-The real GitLab *write* row remains open: publishing a reviewed run to an isolated test
+The real GitLab *write* row remains open (the write smoke, `smoke --gitlab-write`, has not been reported yet): publishing a reviewed run to an isolated test
 project, checking its pipeline and approvals, and cleaning up the Draft MR and branch
 (`etnpilot smoke --gitlab-write --confirm-writes`, then a published run).
 
