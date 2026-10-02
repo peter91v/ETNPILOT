@@ -8,6 +8,8 @@ pre-1.0, so breaking changes may appear in any release.
 
 ### Checks and hygiene (follow-up to the review)
 
+- **GitHub sign-in asks for `read:user models:read`** (was `read:user`), the likely reason GitHub Models answered `OK`
+  instead of a completion. Not verified against GitHub; sign in again to get the new scope.
 - **A provider that answers 200 with something that is not the API** (a proxy page, a health answer "OK") is
   reported with the address, status, content type and the first words of the body, instead of "Unexpected token
   'O'" or "stream ended before it finished".
