@@ -17,8 +17,20 @@ const TRANSLATED_ATTRIBUTES = ["title", "aria-label", "placeholder"];
 
 function translateText(text) {
   const trimmed = text.trim();
-  const known = trimmed && Object.hasOwn(DE, trimmed) ? DE[trimmed] : undefined;
-  return known === undefined ? text : text.replace(trimmed, known);
+  if (!trimmed) return text;
+  if (Object.hasOwn(DE, trimmed)) return text.replace(trimmed, DE[trimmed]);
+  for (const [pattern, build] of DE_PATTERNS) {
+    const match = pattern.exec(trimmed);
+    if (match) return text.replace(trimmed, build(...match));
+  }
+  // Parts drawn as one line: "title — explanation", "a · b · c".
+  for (const separator of [" — ", " · "]) {
+    if (!trimmed.includes(separator)) continue;
+    const parts = trimmed.split(separator);
+    const translated = parts.map((part) => translateText(part));
+    if (translated.some((part, index) => part !== parts[index])) return text.replace(trimmed, translated.join(separator));
+  }
+  return text;
 }
 
 function translateTree(root) {
