@@ -159,6 +159,10 @@ test("an agent can be drafted with a model, read, and then written", async (t) =
     await ui.page.getByText("It is not reviewed yet").first().waitFor();
     // Improving picks from what exists, and a new prompt is a kind of its own.
     await ui.page.locator("#author-mode").selectOption("improve");
+    assert.ok((await ui.page.locator("#author-kind option").allTextContents()).includes("agent"), "an agent can be improved too");
+    await ui.page.locator("#author-kind").selectOption("agent");
+    await ui.page.locator("#author-name").waitFor();
+    assert.ok((await ui.page.locator("#author-name option").allTextContents()).includes("doc-writer"));
     await ui.page.locator("#author-kind").selectOption("prompt");
     await ui.page.locator("#author-name").waitFor();
     assert.ok((await ui.page.locator("#author-name option").allTextContents()).includes("doc-writer"));
@@ -245,6 +249,37 @@ test("the model shown follows the default provider, the agent and the provider c
     await ui.page.evaluate("startRunWith({})");
     await ui.page.getByText("the default agent answers with alpha · alpha-model").waitFor();
     assert.deepEqual(ui.problems.filter((problem) => !/Failed to load resource|ERR_/.test(problem)), []);
+  } finally {
+    await ui.close();
+  }
+});
+
+test("a combobox offers its list from the chevron, filters while typing, and keeps any typed value", async (t) => {
+  if (skipReason) return t.skip(skipReason);
+  const ui = await open(await project());
+  try {
+    await ui.page.evaluate(`(() => {
+      const host = document.createElement("div");
+      host.id = "combo-host";
+      host.append(combobox({ id: "combo-t", label: "Model", options: ["alpha-1", "alpha-2", "beta-1"], onInput: (value) => { window.comboValue = value; } }));
+      document.body.prepend(host);
+    })()`);
+    const options = () => ui.page.locator("#combo-t-list .combo-option").allTextContents();
+    await ui.page.locator("#combo-t").focus();
+    assert.deepEqual(await options(), ["alpha-1", "alpha-2", "beta-1"]);
+    await ui.page.locator("#combo-t").fill("beta");
+    assert.deepEqual(await options(), ["beta-1"]);
+    await ui.page.locator("#combo-t-list .combo-option").first().dispatchEvent("mousedown");
+    assert.equal(await ui.page.locator("#combo-t").inputValue(), "beta-1");
+    assert.equal(await ui.page.evaluate("window.comboValue"), "beta-1");
+    // The chevron shows everything, whatever is typed.
+    await ui.page.locator("#combo-host .combo-toggle").dispatchEvent("mousedown");
+    assert.equal((await options()).length, 3);
+    // A value the list does not have is kept.
+    await ui.page.locator("#combo-t").fill("brand-new-model");
+    assert.deepEqual(await options(), []);
+    assert.equal(await ui.page.evaluate("window.comboValue"), "brand-new-model");
+    assert.deepEqual(ui.problems, []);
   } finally {
     await ui.close();
   }

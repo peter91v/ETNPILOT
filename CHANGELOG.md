@@ -8,6 +8,11 @@ pre-1.0, so breaking changes may appear in any release.
 
 ### Checks and hygiene (follow-up to the review)
 
+- **Models are chosen in a combobox, and an agent can be improved.** The model field in the chat and the model of a ladder
+  tier are comboboxes: the chevron opens the provider's list (fetched once per provider), typing filters it, and any
+  value the list does not have is kept. "Draft with AI → Improve an existing one" now offers **agent**: it improves
+  what the agent is told (its prompt file, or the inline prompt) and, if the model finds it wrong, the one-line
+  description; tools, skills and providers are never touched. Both files of an agent change together or not at all.
 - **The model shown follows the provider.** In the chat composer the model field and its summary line name what the
   conversation will answer with: the model typed there, else the chosen agent's own, else what the chosen provider (or the
   project's default provider) is configured with; changing the agent or provider updates it, and the list of models offered

@@ -46,11 +46,10 @@ function buildChat() {
 
   const agent = el("select", { class: "inline", attrs: { id: "chat-agent", "aria-label": "Agent" } });
   const provider = el("select", { class: "inline", attrs: { id: "chat-provider", "aria-label": "Provider" } });
-  const model = el("input", {
-    class: "inline",
-    attrs: { id: "chat-model", "aria-label": "Model", placeholder: "model (the agent's own)", list: "chat-models", autocomplete: "off" },
+  const model = combobox({
+    id: "chat-model", label: "Model", inline: true, placeholder: "model (the agent's own)",
+    load: () => modelIdsFor(effectiveChoice({ agent: chatControl("chat-agent")?.value, provider: chatControl("chat-provider")?.value })?.provider),
   });
-  const models = el("datalist", { attrs: { id: "chat-models" } });
   const fetchModels = button("Models", {
     class: "btn small",
     title: "Ask the provider which models it offers",
@@ -89,7 +88,7 @@ function buildChat() {
   // conversation's place on a phone, and most messages change none of them.
   const controls = el("details", { class: "composer-options" }, [
     el("summary", { text: "Agent, model and effort", attrs: { id: "chat-summary" } }),
-    el("div", { class: "composer-controls" }, [agent, provider, model, fetchModels, models, effort]),
+    el("div", { class: "composer-controls" }, [agent, provider, model, fetchModels, effort]),
   ]);
   const actions = el("div", { class: "composer-controls" }, [attach, el("span", { class: "grow" }), stopButton, sendButton]);
   const mentions = el("div", { class: "mention-list", attrs: { id: "chat-mentions", role: "listbox", "aria-label": "Files" } });
@@ -169,10 +168,9 @@ async function loadChatModels({ quiet = false } = {}) {
   if (!provider) return quiet ? undefined : toast("Choose a provider first.", "bad");
   try {
     const result = await api("/api/providers/" + encodeURIComponent(provider) + "/models");
-    const list = chatControl("chat-models");
-    list.replaceChildren();
     if (!result.available) return quiet ? undefined : toast(result.reason ?? "That provider offers no list.", "bad");
-    for (const entry of result.models) list.append(el("option", { attrs: { value: entry.id } }));
+    providerModelIds.set(provider, result.models.map((entry) => entry.id));
+    chatControl("chat-model").closest(".combo").setOptions(providerModelIds.get(provider));
     if (!quiet) toast(result.models.length + " models from " + provider + ".");
   } catch (error) {
     // Offering the list is a courtesy; a missing key is said when it is asked for.

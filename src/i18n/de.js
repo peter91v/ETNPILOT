@@ -205,6 +205,7 @@ export const DE = {
   "What do you want": "Was möchtest du",
   "Something new": "Etwas Neues",
   "Improve an existing one": "Etwas Bestehendes verbessern",
+  "Which agent": "Welcher Agent",
   "Which prompt": "Welcher Prompt",
   "Which skill": "Welcher Skill",
   "Which instruction": "Welche Instruction",

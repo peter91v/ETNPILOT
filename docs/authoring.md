@@ -12,7 +12,7 @@ etnpilot author improve prompt orchestrator "shorter, and always list the files 
 
 - A **new agent** comes with its prompt (`.etnpilot/agents/<name>.yaml` and `.etnpilot/prompts/<name>.md`).
   Tools are limited to the ones an agent may have; a tool the model invents is dropped.
-- **improve** shows a diff (`-` removed, `+` added) of a prompt, skill or instruction that exists, and replaces exactly
+- **improve** works on an **agent** (its prompt, and its description if wrong; never tools, skills or providers), a prompt, a skill or an instruction. It shows a diff (`-` removed, `+` added) of a prompt, skill or instruction that exists, and replaces exactly
   that file if you accept and it has not changed in the meantime. A skill keeps its front matter.
 - Nothing existing is overwritten by a *new* draft. `--dry-run` shows the draft and stops; `--yes` accepts without asking
   (for scripts).

@@ -98,7 +98,7 @@ test("the page drafts with a model, shows it, and writes only the draft it kept"
     assert.equal(drafted.text, "Write the docs.");
     await assert.rejects(readFile(join(root, ".etnpilot", "agents", "doc-writer.yaml"), "utf8"), /ENOENT/, "nothing is written by drafting");
     assert.deepEqual((await (await call("/api/author/items", { kind: "prompt" })).json()).names, ["orchestrator"]);
-    assert.equal((await call("/api/author/items", { kind: "agent" })).status, 400);
+    assert.equal((await call("/api/author/items", { kind: "nonsense" })).status, 400);
     assert.equal((await call("/api/author/apply", { id: "made-up" })).status, 404);
     const applied = await (await call("/api/author/apply", { id: drafted.id })).json();
     assert.deepEqual(applied.written, [".etnpilot/agents/doc-writer.yaml"]);

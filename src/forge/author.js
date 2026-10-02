@@ -1,6 +1,7 @@
 // @ts-check
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import YAML from "yaml";
 import { join, relative } from "node:path";
 import { askProvider, chooseProvider, describePlan, parseJson, validatePlan, writePlan } from "./forge.js";
 import { surveyRepository } from "./survey.js";
@@ -13,7 +14,7 @@ import { surveyRepository } from "./survey.js";
 // with a preview and decides. The model's text is data; it is never executed.
 
 export const AUTHOR_KINDS = Object.freeze(["agent", "skill", "instruction", "prompt"]);
-export const IMPROVE_KINDS = Object.freeze(["prompt", "skill", "instruction"]);
+export const IMPROVE_KINDS = Object.freeze(["agent", "prompt", "skill", "instruction"]);
 
 const SHAPES = {
   agent: '{"agents": [{"name": "kebab-case", "description": "one line", "tools": ["..."], "skills": [], "prompt": "what the agent is told"}], "skills": [], "instructions": []}',
@@ -42,13 +43,16 @@ ${SHAPES[kind]}`;
 }
 
 export function improvePrompt(kind) {
+  const shape = kind === "agent"
+    ? `{"text": "the complete improved prompt of the agent", "description": "optional: a better one-line description, only if the old one is wrong or vague", "summary": "one or two sentences: what changed and why"}`
+    : `{"text": "the complete improved ${kind === "skill" ? "skill body (Markdown, without the front matter)" : "text"}", "summary": "one or two sentences: what changed and why"}`;
   return `You improve one existing ${kind} of a software repository, as the person asks.
 
 ${COMMON}
 
 Change only what the request calls for; keep everything else as it is, including
-its structure and wording where it is fine. Answer with one JSON object and
-nothing else: {"text": "the complete improved ${kind === "skill" ? "skill body (Markdown, without the front matter)" : "text"}", "summary": "one or two sentences: what changed and why"}`;
+its structure and wording where it is fine.${kind === "agent" ? " You improve what the agent is told (its prompt) and, if needed, its one-line description. You do not change its tools, skills or providers." : ""} Answer with one JSON object and
+nothing else: ${shape}`;
 }
 
 function limit(value, max) {
@@ -103,6 +107,10 @@ function promptDraft(parsed, answer) {
 // The names that can be improved, so a person picks instead of typing.
 export async function listItems(kind, configDir) {
   if (!IMPROVE_KINDS.includes(kind)) throw new TypeError(`Cannot list '${kind}'. Choose one of: ${IMPROVE_KINDS.join(", ")}.`);
+  if (kind === "agent") {
+    const files = await readdir(join(configDir, "agents")).catch(() => []);
+    return files.filter((file) => /\.ya?ml$/.test(file)).map((file) => file.replace(/\.ya?ml$/, "")).sort();
+  }
   if (kind === "prompt") {
     const files = await readdir(join(configDir, "prompts")).catch(() => []);
     return files.filter((file) => file.endsWith(".md")).map((file) => file.slice(0, -3)).sort();
@@ -141,6 +149,7 @@ export async function draftImprovement(kind, name, request, options = /** @type 
   if (wish === "") throw new TypeError("Say what should change, in a sentence.");
   const { root } = options;
   const configDir = options.configDir ?? join(root, ".etnpilot");
+  if (kind === "agent") return draftAgentImprovement(name, wish, options, configDir);
   const { path, text } = await currentText(kind, name, configDir);
   const split = kind === "skill" ? splitSkill(text) : { head: "", body: text };
   const survey = await surveyRepository(root);
@@ -158,7 +167,67 @@ export async function draftImprovement(kind, name, request, options = /** @type 
   const full = `${split.head}${after}\n`;
   return {
     mode: "improve", kind, name, path: relative(root, path), before: text, after: full, summary,
+    edits: [{ path: relative(root, path), before: text, after: full }],
     diff: lineDiff(text, full), provider: answer.provider, usage: answer.usage,
+  };
+}
+
+// An agent is a manifest and, usually, a prompt file it points to. Improving it
+// changes what it is told, and its description when that is wrong; never its
+// tools, skills or providers, which decide what it may do.
+async function draftAgentImprovement(name, wish, options, configDir) {
+  const { root } = options;
+  if (!/^[A-Za-z0-9._-]+$/.test(name)) throw new TypeError(`'${name}' is not the name of an agent.`);
+  let manifestPath;
+  let manifestText;
+  for (const extension of ["yaml", "yml"]) {
+    manifestPath = join(configDir, "agents", `${name}.${extension}`);
+    manifestText = await readFile(manifestPath, "utf8").catch(() => undefined);
+    if (manifestText !== undefined) break;
+  }
+  if (manifestText === undefined) throw Object.assign(new Error(`There is no agent '${name}'.`), { code: "missing" });
+  const document = YAML.parseDocument(manifestText);
+  const manifest = document.toJS() ?? {};
+  let promptPath;
+  let promptText;
+  if (manifest.promptRef) {
+    promptPath = join(configDir, "prompts", `${String(manifest.promptRef).toLowerCase().replace(/[^a-z0-9_-]+/g, "-")}.md`);
+    promptText = await readFile(promptPath, "utf8").catch(() => undefined);
+    if (promptText === undefined) throw Object.assign(new Error(`The agent '${name}' points to a prompt that is not there (${relative(root, promptPath)}).`), { code: "missing" });
+  } else if (typeof manifest.prompt === "string") {
+    promptText = manifest.prompt;
+  } else {
+    throw Object.assign(new Error(`The agent '${name}' has no prompt to improve.`), { code: "missing" });
+  }
+  const survey = await surveyRepository(root);
+  const input = `${survey.text}\n\n### The existing agent '${name}'\ndescription: ${manifest.description ?? "(none)"}\ntools: ${(manifest.tools ?? []).join(", ") || "(the default set)"}\n\nprompt:\n${promptText}\n\n### What the person asks for\n${wish}`;
+  const answer = await ask({ ...options, system: improvePrompt("agent"), input });
+  let parsed;
+  try {
+    parsed = parseJson(answer.text);
+  } catch (error) {
+    throw Object.assign(new Error(`The answer could not be used (${error.message}). Nothing was written.`), { code: "bad_answer" });
+  }
+  const text = limit(parsed?.text, 6000);
+  if (text === "") throw Object.assign(new Error("The model returned no prompt."), { code: "empty" });
+  const description = limit(parsed?.description, 240);
+  const edits = [];
+  if (promptPath) {
+    edits.push({ path: relative(root, promptPath), before: promptText, after: `${text}\n` });
+  } else {
+    document.set("prompt", text);
+  }
+  const describe = description !== "" && description !== manifest.description;
+  if (describe) document.set("description", description);
+  if (!promptPath || describe) {
+    const after = document.toString();
+    if (after !== manifestText) edits.unshift({ path: relative(root, manifestPath), before: manifestText, after });
+  }
+  if (edits.length === 0) throw Object.assign(new Error("The model changed nothing."), { code: "empty" });
+  const diff = edits.flatMap((edit) => [{ op: " ", text: `── ${edit.path}` }, ...lineDiff(edit.before, edit.after)]);
+  return {
+    mode: "improve", kind: "agent", name, path: edits.map((edit) => edit.path).join(", "), before: edits[0].before, after: edits[0].after,
+    summary: limit(parsed?.summary, 400), edits, diff, provider: answer.provider, usage: answer.usage,
   };
 }
 
@@ -224,11 +293,14 @@ export async function applyDraft(draft, { root, configDir = join(root, ".etnpilo
     }
     return report;
   }
-  const target = join(root, draft.path);
-  const now = await readFile(target, "utf8").catch(() => undefined);
-  if (now !== draft.before) {
-    throw Object.assign(new Error(`${draft.path} changed while the draft was being made. Nothing was written; ask again.`), { code: "changed" });
+  const edits = draft.edits ?? [{ path: draft.path, before: draft.before, after: draft.after }];
+  // Every file must still be what the draft was made from, before any is written.
+  for (const edit of edits) {
+    const now = await readFile(join(root, edit.path), "utf8").catch(() => undefined);
+    if (now !== edit.before) {
+      throw Object.assign(new Error(`${edit.path} changed while the draft was being made. Nothing was written; ask again.`), { code: "changed" });
+    }
   }
-  await writeFile(target, draft.after, "utf8");
-  return { written: [draft.path] };
+  for (const edit of edits) await writeFile(join(root, edit.path), edit.after, "utf8");
+  return { written: edits.map((edit) => edit.path) };
 }

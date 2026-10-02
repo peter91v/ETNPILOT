@@ -112,3 +112,41 @@ test("a prompt can be written on its own, never over one that exists, and existi
   assert.deepEqual(await listItems("skill", join(root, ".etnpilot")), []);
   await assert.rejects(draftNew("prompt", "x", { root, config: {}, runModel: reply({ name: "", body: "" }) }), /no usable prompt/);
 });
+
+test("an agent can be improved: its prompt file, and its description only when the model asks, never its tools", async () => {
+  const root = await project();
+  const dir = join(root, ".etnpilot", "agents");
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, "ref-agent.yaml"), "# kept comment\nname: ref-agent\ndescription: old\npromptRef: ref-agent\ntools: [read_file]\n");
+  await mkdir(join(root, ".etnpilot", "prompts"), { recursive: true });
+  await writeFile(join(root, ".etnpilot", "prompts", "ref-agent.md"), "Read things.\n");
+  await writeFile(join(dir, "inline-agent.yaml"), "# note\nname: inline-agent\ntools: [read_file, write_file]\nprompt: Do the thing.\n");
+  const { listItems } = await import("../src/forge/author.js");
+  assert.deepEqual(await listItems("agent", join(root, ".etnpilot")), ["inline-agent", "orchestrator", "ref-agent"]);
+
+  const byRef = await draftImprovement("agent", "ref-agent", "stricter", { root, config: {}, runModel: reply({ text: "Read things, carefully.", description: "reads carefully", summary: "Stricter.", tools: ["run_command"] }) });
+  assert.equal(byRef.edits.length, 2, "the prompt file and the manifest (description)");
+  await applyDraft(byRef, { root });
+  assert.equal(await readFile(join(root, ".etnpilot", "prompts", "ref-agent.md"), "utf8"), "Read things, carefully.\n");
+  const manifest = await readFile(join(dir, "ref-agent.yaml"), "utf8");
+  assert.match(manifest, /# kept comment/);
+  assert.match(manifest, /description: reads carefully/);
+  assert.match(manifest, /tools: \[ read_file \]|tools:\s*\n?\s*- read_file|tools: \[read_file\]/, "tools are untouched");
+  assert.doesNotMatch(manifest, /run_command/);
+
+  const inline = await draftImprovement("agent", "inline-agent", "more precise", { root, config: {}, runModel: reply({ text: "Do the thing, precisely.", summary: "Precise." }) });
+  assert.equal(inline.edits.length, 1);
+  await applyDraft(inline, { root });
+  const after = await readFile(join(dir, "inline-agent.yaml"), "utf8");
+  assert.match(after, /# note/);
+  assert.match(after, /Do the thing, precisely\./);
+  assert.match(after, /write_file/);
+
+  // Two files, one decision: if either changed meanwhile, neither is written.
+  const again = await draftImprovement("agent", "ref-agent", "again", { root, config: {}, runModel: reply({ text: "Third.", description: "third", summary: "x" }) });
+  await writeFile(join(root, ".etnpilot", "prompts", "ref-agent.md"), "Someone else.\n");
+  await assert.rejects(applyDraft(again, { root }), /changed while the draft was being made/);
+  assert.match(await readFile(join(dir, "ref-agent.yaml"), "utf8"), /description: reads carefully/);
+  await assert.rejects(draftImprovement("agent", "../x", "y", { root, config: {}, runModel: reply({}) }), /not the name of an agent/);
+  await assert.rejects(draftImprovement("agent", "ghost", "y", { root, config: {}, runModel: reply({}) }), /There is no agent/);
+});
