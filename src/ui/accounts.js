@@ -11,7 +11,10 @@ import { serviceFor } from "../auth/services.js";
 
 const MAX_FLOWS = 6;
 
-export function createAccountRoutes({ env = process.env, fetchImpl, gitlabHost = () => undefined } = /** @type {any} */ ({})) {
+// 'rememberGitLabHost(address)' sets the project's own git.baseUrl when it has none
+// and returns the address it set; it is the page's side of what 'etnpilot login
+// gitlab --host' does in the terminal.
+export function createAccountRoutes({ env = process.env, fetchImpl, gitlabHost = () => undefined, rememberGitLabHost = async () => undefined } = /** @type {any} */ ({})) {
   const flows = new Map();
 
   function prune() {
@@ -31,7 +34,8 @@ export function createAccountRoutes({ env = process.env, fetchImpl, gitlabHost =
           env, fetchImpl, verify: body?.verify !== false,
           host: service.id === "gitlab" ? (typeof body?.host === "string" && body.host ? body.host : gitlabHost()) : undefined,
         });
-        return { status: 200, body: result };
+        const baseUrlSet = service.id === "gitlab" && typeof body?.host === "string" && body.host ? await rememberGitLabHost(body.host) : undefined;
+        return { status: 200, body: baseUrlSet ? { ...result, baseUrlSet } : result };
       }
       if (method === "POST" && pathname === "/api/auth/device/start") {
         const service = serviceFor(body?.service);
@@ -42,7 +46,7 @@ export function createAccountRoutes({ env = process.env, fetchImpl, gitlabHost =
           host: typeof body?.host === "string" && body.host ? body.host : (service.id === "gitlab" ? gitlabHost() : undefined),
         });
         const id = randomBytes(12).toString("hex");
-        flows.set(id, { flow });
+        flows.set(id, { flow, host: service.id === "gitlab" && typeof body?.host === "string" && body.host ? body.host : undefined });
         return {
           status: 200,
           body: {
@@ -67,7 +71,8 @@ export function createAccountRoutes({ env = process.env, fetchImpl, gitlabHost =
         flows.delete(body.flowId);
         if (result.status !== "done") return { status: 200, body: { status: result.status } };
         const done = await finishDeviceLogin(entry.flow, result.token, { env, fetchImpl });
-        return { status: 200, body: { status: "done", account: done.account } };
+        const baseUrlSet = entry.host ? await rememberGitLabHost(entry.host) : undefined;
+        return { status: 200, body: { status: "done", account: done.account, ...(baseUrlSet ? { baseUrlSet } : {}) } };
       }
       const named = /^\/api\/auth\/([a-z]+)$/.exec(pathname);
       if (method === "DELETE" && named) {

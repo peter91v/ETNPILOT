@@ -129,6 +129,7 @@ async function saveAccountKey(service) {
     const result = await api("/api/auth/key", { method: "POST", body: JSON.stringify({ service: service.id, value: draft.value, host: draft.host || undefined }) });
     draft.value = "";
     toast(result.verified ? "Saved. It works" + (result.account ? " as " + result.account : "") + "." : "Saved, but not verified: " + (result.note || "the check did not run."), result.verified ? "ok" : "warn");
+    if (result.baseUrlSet) toast("This project's GitLab address is now " + result.baseUrlSet + " (your own settings).");
     await loadAccounts();
   } catch (error) {
     toast(error.message, "bad");
@@ -181,7 +182,7 @@ async function pollDeviceSignIn() {
       return schedulePoll(flow.interval + (result.slowDown ? 5 : 0));
     }
     deviceSignIn = undefined;
-    if (result.status === "done") toast("Signed in" + (result.account ? " as " + result.account : "") + ".");
+    if (result.status === "done") toast("Signed in" + (result.account ? " as " + result.account : "") + (result.baseUrlSet ? ". This project's GitLab address is now " + result.baseUrlSet + " (your own settings)" : "") + ".");
     else toast(result.status === "denied" ? "The sign-in was declined." : "The code ran out. Start again.", "warn");
     await loadAccounts();
   } catch (error) {

@@ -8,7 +8,8 @@ pre-1.0, so breaking changes may appear in any release.
 
 ### Checks and hygiene (follow-up to the review)
 
-- **`etnpilot login gitlab --host <url>` remembers the address**: when the project has no `git.baseUrl`, it is set in
+- **`etnpilot login gitlab --host <url>` remembers the address**, and so does the Accounts page when an address is
+  typed next to a GitLab token or sign-in: when the project has no `git.baseUrl`, it is set in
   the person's own settings (never the committed file) and said. An address the project already has is left alone.
 - **`etnpilot smoke --gitlab-write --confirm-writes`**: the GitLab protocol smoke (branch, commit, Draft MR, approvals,
   pipelines, cleanup) now runs with the project's own GitLab login and `git.project`, instead of only through
