@@ -31,6 +31,8 @@ export const usageCommands = [
       if (summary.pricing) console.log(`Rates: ${summary.pricing.source}${summary.pricing.asOf ? `, as of ${summary.pricing.asOf}` : ""}${summary.pricing.stale ? " (stale)" : ""}`);
       if (summary.unpricedModels) console.log(`No rate for: ${summary.unpricedModels.map((entry) => entry.model).join(", ")} (set observability.pricing.models, or wait for the price refresh)`);
       console.log("Compare with the dashboard of the provider; tokens should match exactly, cost only if the rates match.");
+      // The dashboard counts every request the key made. This report counts what runs, chats and the page recorded.
+      console.log("Not counted here: 'etnpilot smoke' and 'etnpilot forge' (they send requests but record no usage), calls made before observability was on, and other tools using the same key. The dashboard shows more for that reason.");
       return 0;
     },
   },
