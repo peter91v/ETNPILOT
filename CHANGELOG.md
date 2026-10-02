@@ -30,6 +30,9 @@ pre-1.0, so breaking changes may appear in any release.
 - **A provider that answers 200 with something that is not the API** (a proxy page, a health answer "OK") is
   reported with the address, status, content type and the first words of the body, instead of "Unexpected token
   'O'" or "stream ended before it finished".
+- **GitLab write smoke says why a cleanup failed**: the first real run (self-hosted GitLab) created the branch, commit and
+  Draft MR and then reported only `mr-close-failed`. A failed cleanup now carries GitLab's status and short message, and
+  closing the MR is retried once through the address (`?state_event=close`) in case a proxy drops the body of a PUT.
 - **Complexity limit 60 → 50** (ESLint): `updateAgent`, `validateWorkflowDefinition`, `describeOutcome`, `planResume`,
   `setUpRun` and `renderRunDetail` split into named parts, behaviour unchanged.
 - **Resume can discard what the stopped step left** (`etnpilot resume <run> --reset-partial`, and a button on the
