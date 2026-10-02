@@ -46,8 +46,7 @@ export async function runGitLabSmoke({ client, project, receiptPath, confirmWrit
     if (mr) {
       const base = `/projects/${encodeURIComponent(project)}/merge_requests/${mr.iid}`;
       try {
-        await closeMergeRequest(client, base);
-        operations.push("mr-closed");
+        operations.push(await closeMergeRequest(client, base));
       } catch (error) { cleanupErrors.push(`mr-close-failed${reasonOf(error)}`); }
     }
     if (created) {
@@ -66,21 +65,27 @@ export async function runGitLabSmoke({ client, project, receiptPath, confirmWrit
   return { ...report, receiptVerified: true, cleaned: true, receiptPath };
 }
 
+// Some proxies in front of a GitLab drop the body of a PUT; the same change can
+// be asked for in the address. If that fails too, the first answer is the one
+// worth reading, after one more look: a GitLab that answers 500 may still have
+// closed the merge request (the error can come from what follows the change, a
+// notification or a hook), and the state is what the cleanup is about.
+async function closeMergeRequest(client, base) {
+  try {
+    await client.request("PUT", base, { state_event: "close" });
+    return "mr-closed";
+  } catch (first) {
+    try { await client.request("PUT", `${base}?state_event=close`); return "mr-closed"; } catch { /* look at the state */ }
+    const now = await client.request("GET", base).catch(() => undefined);
+    if (now?.state === "closed") return "mr-closed-after-error";
+    throw first;
+  }
+}
+
 // What GitLab said, as far as the client keeps it: the status and a short,
 // control-free line of its own message. Without it a failed cleanup says that
 // something is left behind and not why.
 function reasonOf(error) {
   const text = String(error?.message ?? "").replaceAll(/\s+/g, " ").trim();
   return text ? ` (${text.slice(0, 220)})` : "";
-}
-
-// Some proxies in front of a GitLab drop the body of a PUT; the same change can
-// be asked for in the address. If that fails too, the first answer is the one
-// worth reading.
-async function closeMergeRequest(client, base) {
-  try {
-    await client.request("PUT", base, { state_event: "close" });
-  } catch (first) {
-    try { await client.request("PUT", `${base}?state_event=close`); } catch { throw first; }
-  }
 }

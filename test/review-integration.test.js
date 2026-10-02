@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -148,5 +148,27 @@ test("GitLab smoke closes the MR through the address when the body of the PUT is
   await assert.rejects(
     runGitLabSmoke({ client: refuses, project: 1, receiptPath: join(root, "refused.jsonl"), confirmWrites: true }),
     /cleanup failed: mr-close-failed \(GitLab API failed \(403\): 403 Forbidden\)/,
+  );
+});
+
+test("GitLab smoke counts a merge request as closed when GitLab answered 500 but the state says closed", async () => {
+  const root = await temporary();
+  const base = smokeClient();
+  const crashesAfterClosing = { ...base, request: async (method, path, body) => {
+    if (method === "PUT") throw new Error("GitLab API failed (500): 500 Internal Server Error [request id X1]");
+    if (method === "GET") return { state: "closed" };
+    return base.request(method, path, body);
+  } };
+  const path = join(root, "after-error.jsonl");
+  const report = await runGitLabSmoke({ client: crashesAfterClosing, project: 1, receiptPath: path, confirmWrites: true });
+  assert.equal(report.cleaned, true);
+  const last = JSON.parse((await readFile(path, "utf8")).trim().split("\n").at(-1));
+  assert.ok(last.operations.includes("mr-closed-after-error"));
+  assert.deepEqual(last.cleanupErrors, []);
+
+  const stillOpen = { ...crashesAfterClosing, request: async (method, path2, body) => (method === "GET" ? { state: "opened" } : crashesAfterClosing.request(method, path2, body)) };
+  await assert.rejects(
+    runGitLabSmoke({ client: stillOpen, project: 1, receiptPath: join(root, "still-open.jsonl"), confirmWrites: true }),
+    /cleanup failed: mr-close-failed \(GitLab API failed \(500\).*request id X1/,
   );
 });
