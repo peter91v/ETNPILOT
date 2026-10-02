@@ -20,8 +20,8 @@ import { scanForSecrets } from "../../supply/secret-scan.js";
 export const securityCommands = [
   {
     match: ({ command, subcommand }) => command === "login" || command === "logout" || command === "auth",
-    async run({ command, subcommand, values }) {
-      return await runAuthCommand(command, subcommand, values);
+    async run({ command, subcommand, rest, values }) {
+      return await runAuthCommand(command, subcommand, values, { rest });
     },
   },
   {

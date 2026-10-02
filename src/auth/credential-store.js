@@ -2,6 +2,7 @@
 import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { hostAllowed, serviceForSecret } from "./services.js";
+import { detectVault, isVaultReference, vaultPayload, vaultScheme } from "./vault.js";
 
 // Where a login lives: one small file in the person's own configuration
 // directory, outside every repository, readable by its owner only. A project
@@ -22,6 +23,8 @@ const FILE_VERSION = 1;
 const REFRESH_MARGIN_MS = 60_000;
 const LOCK_STALE_MS = 30_000;
 const LOCK_WAIT_MS = 5_000;
+// The fields of an entry that are secrets. Everything else may stay in the file.
+const SECRET_FIELDS = ["value", "refreshToken"];
 
 export function credentialStorePath(env = process.env) {
   if (env.ETNPILOT_HOME) return join(env.ETNPILOT_HOME, "credentials.json");
@@ -31,7 +34,7 @@ export function credentialStorePath(env = process.env) {
 }
 
 export class CredentialStore {
-  constructor({ path, now = () => Date.now(), refresher, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = /** @type {any} */ ({})) {
+  constructor({ path, now = () => Date.now(), refresher, vault, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = /** @type {any} */ ({})) {
     if (!path) throw new TypeError("A credential store needs a file path.");
     this.path = path;
     this.now = now;
@@ -39,13 +42,22 @@ export class CredentialStore {
     // so that this file knows nothing of any provider's endpoints.
     this.refresher = refresher;
     this.sleep = sleep;
+    // The system store (see vault.js) this machine has, if any, found on first
+    // need: a backend, or a function that finds one. Whether it is used is the
+    // file's own 'vault' setting, a choice made once by the owner.
+    this.vaultSource = vault;
+  }
+
+  async system() {
+    if (this.vaultFound === undefined) this.vaultFound = typeof this.vaultSource === "function" ? await this.vaultSource() ?? null : this.vaultSource ?? null;
+    return this.vaultFound ?? undefined;
   }
 
   async read() {
     try {
       const parsed = JSON.parse(await readFile(this.path, "utf8"));
       if (parsed && typeof parsed === "object" && parsed.credentials && typeof parsed.credentials === "object") {
-        return { version: FILE_VERSION, credentials: parsed.credentials, apps: parsed.apps ?? {} };
+        return { version: FILE_VERSION, credentials: parsed.credentials, apps: parsed.apps ?? {}, ...(parsed.vault ? { vault: parsed.vault } : {}) };
       }
     } catch (error) {
       // A missing file is an empty store. A file that is there and cannot be
@@ -105,7 +117,49 @@ export class CredentialStore {
       entry = await this.renew(name, entry);
       if (!entry) return undefined;
     }
-    return { value: entry.value };
+    try {
+      return { value: (await this.reveal(entry)).value };
+    } catch (error) {
+      return { refused: error.message };
+    }
+  }
+
+  // The entry with its secrets in the clear. A secret that was moved to the
+  // system store is read from there; on a machine that does not have that
+  // store (the file was copied) it cannot be, and that is said, not guessed.
+  async reveal(entry) {
+    const open = { ...entry };
+    for (const field of SECRET_FIELDS) {
+      if (!isVaultReference(entry[field])) continue;
+      const vault = await this.system();
+      if (!vault || vault.id !== vaultScheme(entry[field])) {
+        throw new Error("This login is kept in another machine's system store and cannot be read here. Sign in again.");
+      }
+      open[field] = await vault.open(vaultPayload(entry[field]));
+    }
+    return open;
+  }
+
+  // The entry as it goes into the file: secrets handed to the system store
+  // when the owner chose that, and the store's earlier items for the same
+  // fields removed, so replacing a login does not leave the old one behind.
+  async conceal(entry, previous, { system }) {
+    const next = { ...entry };
+    for (const field of SECRET_FIELDS) {
+      if (typeof entry[field] !== "string" || entry[field] === "" || isVaultReference(entry[field])) continue;
+      const vault = system ? await this.system() : undefined;
+      if (vault) next[field] = await vault.seal(entry[field]);
+    }
+    await this.forgetReplaced(previous, next);
+    return next;
+  }
+
+  async forgetReplaced(previous, next) {
+    for (const field of SECRET_FIELDS) {
+      const old = previous?.[field];
+      const vault = isVaultReference(old) && old !== next?.[field] ? await this.system() : undefined;
+      if (vault && vault.id === vaultScheme(old)) await vault.forget(vaultPayload(old));
+    }
   }
 
   async get(name, options) {
@@ -125,7 +179,7 @@ export class CredentialStore {
       if (!current.expiresAt || current.expiresAt - this.now() >= REFRESH_MARGIN_MS) return current;
       let renewed;
       try {
-        renewed = await this.refresher(current);
+        renewed = await this.refresher(await this.reveal(current));
       } catch (error) {
         if (error?.code === "invalid_grant") {
           // The service no longer accepts the refresh token: say that, instead
@@ -137,7 +191,7 @@ export class CredentialStore {
         renewed = undefined;
       }
       if (!renewed?.value) return current.expiresAt > this.now() ? current : undefined;
-      data.credentials[name] = { ...renewed, needsSignIn: undefined };
+      data.credentials[name] = await this.conceal({ ...renewed, needsSignIn: undefined }, current, { system: data.vault === "system" });
       await this.write(data);
       return data.credentials[name];
     });
@@ -146,7 +200,7 @@ export class CredentialStore {
   async save(name, entry) {
     return this.locked(async () => {
       const data = await this.read();
-      data.credentials[name] = { ...entry, savedAt: new Date(this.now()).toISOString() };
+      data.credentials[name] = await this.conceal({ ...entry, savedAt: new Date(this.now()).toISOString() }, data.credentials[name], { system: data.vault === "system" });
       await this.write(data);
     });
   }
@@ -155,9 +209,10 @@ export class CredentialStore {
     return this.locked(async () => {
       const data = await this.read();
       const had = name in data.credentials;
+      await this.forgetReplaced(data.credentials[name], undefined);
       delete data.credentials[name];
       if (had) {
-        if (Object.keys(data.credentials).length === 0 && Object.keys(data.apps).length === 0) await rm(this.path, { force: true });
+        if (Object.keys(data.credentials).length === 0 && Object.keys(data.apps).length === 0 && !data.vault) await rm(this.path, { force: true });
         else await this.write(data);
       }
       return had;
@@ -190,7 +245,46 @@ export class CredentialStore {
       verified: entry.verified !== false,
       needsSignIn: entry.needsSignIn === true,
       allowHosts: entry.allowHosts ?? [],
+      inSystemStore: SECRET_FIELDS.some((field) => isVaultReference(entry[field])),
     };
+  }
+
+  // Which place the secrets of stored logins live in: 'file' (the default) or
+  // 'system'. Changing it moves every stored login, under the lock, and fails
+  // as a whole rather than leaving half of them in each place.
+  async vaultMode() {
+    const vault = await this.system();
+    return { mode: (await this.read()).vault === "system" ? "system" : "file", store: vault ? { id: vault.id, label: vault.label } : undefined };
+  }
+
+  async useVault(mode) {
+    if (mode !== "system" && mode !== "file") throw new TypeError("The store is 'system' or 'file'.");
+    const vault = await this.system();
+    if (mode === "system" && !vault) throw new Error("This machine has no system store ETNPilot can use (macOS keychain, Linux Secret Service, Windows data protection), so the logins stay in the file.");
+    return this.locked(async () => {
+      const data = await this.read();
+      const moved = {};
+      const created = [];
+      try {
+        for (const [name, entry] of Object.entries(data.credentials)) {
+          const open = await this.reveal(entry);
+          const next = mode === "system" ? await this.conceal({ ...open }, undefined, { system: true }) : open;
+          for (const field of SECRET_FIELDS) if (mode === "system" && next[field] !== open[field]) created.push(next[field]);
+          moved[name] = next;
+        }
+      } catch (error) {
+        for (const reference of created) await vault?.forget(vaultPayload(reference)).catch(() => {});
+        throw error;
+      }
+      const before = data.credentials;
+      data.credentials = moved;
+      if (mode === "system") data.vault = "system";
+      else delete data.vault;
+      await this.write(data);
+      // Only once the file says where the secrets are, the old copies go.
+      for (const [name, entry] of Object.entries(before)) await this.forgetReplaced(entry, moved[name]);
+      return Object.keys(moved).length;
+    });
   }
 
   // Whether the file is readable by anyone but its owner, which would make
@@ -219,7 +313,7 @@ export class CredentialStore {
   }
 }
 
-export function openCredentialStore({ env = process.env, refresher, now } = /** @type {any} */ ({})) {
+export function openCredentialStore({ env = process.env, refresher, now, vault = () => detectVault({ env }) } = /** @type {any} */ ({})) {
   const path = credentialStorePath(env);
-  return path ? new CredentialStore({ path, refresher, now }) : undefined;
+  return path ? new CredentialStore({ path, refresher, now, vault }) : undefined;
 }

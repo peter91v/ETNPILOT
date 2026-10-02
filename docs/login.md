@@ -77,12 +77,34 @@ reason `etnpilot trust` asks before acting on a project you did not make.
 ## What is stored, and what is not safe about it
 
 The file is plain JSON with mode 0600, in `~/.config/etnpilot/` (or `$XDG_CONFIG_HOME/etnpilot/`,
-`$ETNPILOT_HOME/`). There is no keychain integration: Termux has none, and a dependency for it would be
-the first runtime package beyond YAML and CodeGraph. Anyone who can read your home directory can read it, and
+`$ETNPILOT_HOME/`). By default the secrets are in that file; on a desktop machine they can be kept in the system's
+own store instead (next section). Anyone who can read your home directory can read it, and
 an approved shell command without a sandbox can too — a run's command that *names* the file is refused
 before it is shown, but a determined command line could still reach it. `etnpilot auth status` warns when the
 file's permissions are too wide. On a shared machine, prefer environment variables from a secret manager.
 
 Plugins never receive stored logins. `GitHub Models` (`github-models` provider) uses the stored GitHub token;
-it needs the `models` permission, which a personal access token can have and a browser sign-in's scope may not
-(not verified against the live service).
+it needs the `models` permission, which a fine-grained personal access token can have and a browser sign-in
+cannot (GitHub rejects `models:read` as an OAuth-app scope).
+
+## Keeping the secrets in the system's store
+
+```bash
+etnpilot auth vault            # where they are now, and what this machine offers
+etnpilot auth vault system     # move every stored login's secret there
+etnpilot auth vault file       # and back
+```
+
+| System | Store | How the secret is handed over |
+| --- | --- | --- |
+| macOS | login keychain, through `security` | as an argument of that command, so other processes of the same user can see it for the moment it runs; it is not written anywhere else |
+| Linux with a desktop session | Secret Service (GNOME Keyring, KWallet), through `secret-tool` | on standard input |
+| Windows | data protection (DPAPI) for the current user, through PowerShell | on standard input; the file holds ciphertext only this Windows account can open |
+| Termux, Linux without a session | none | the file is used |
+
+The file keeps what is not secret (who, which host, when it expires) and a reference where the secret was. The move is
+all or nothing, and the old copies are removed only after the file says where the new ones are. A credentials file copied
+to another machine cannot be read there, and says so. Signing out removes the secret from the store as well. No package
+is added: the system's own command-line tool does the work. **Not yet tried on a real macOS, Linux or Windows machine**;
+the tests use a stand-in store and a recording stand-in for the tools, so the first real `etnpilot auth vault system`
+is also the test of the commands. If it fails, nothing has moved.

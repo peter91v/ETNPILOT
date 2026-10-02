@@ -1,6 +1,6 @@
 // @ts-check
 import { join, resolve } from "node:path";
-import { allowHost, authStatus, loginWithDevice, logout, saveKey } from "../auth/login.js";
+import { allowHost, authStatus, loginWithDevice, logout, saveKey, storeFor } from "../auth/login.js";
 import { SERVICE_IDS, serviceFor } from "../auth/services.js";
 import { loadConfig } from "../config/load.js";
 
@@ -10,13 +10,16 @@ import { loadConfig } from "../config/load.js";
 export const AUTH_USAGE = `  etnpilot login <anthropic|openai|github|gitlab> [--key-stdin] [--client-id id] [--host url] [--no-verify]
   etnpilot login <service> --allow-host name      let the stored login be sent to one more host (a proxy)
   etnpilot logout <anthropic|openai|github|gitlab>
-  etnpilot auth status`;
+  etnpilot auth status
+  etnpilot auth vault [system|file]               where the secrets of stored logins are kept`;
 
-export async function runAuthCommand(command, subcommand, values, { stdin = process.stdin, stdout = process.stdout, env = process.env, fetchImpl, sleep } = /** @type {any} */ ({})) {
+export async function runAuthCommand(command, subcommand, values, { stdin = process.stdin, stdout = process.stdout, env = process.env, fetchImpl, sleep, rest = [] } = /** @type {any} */ ({})) {
   const say = (line = "") => stdout.write(`${line}\n`);
 
+  if (command === "auth" && subcommand === "vault") return await runVaultCommand(rest[0], { say, env });
+
   if (command === "auth" || (command === "login" && !subcommand)) {
-    if (command === "auth" && subcommand !== "status" && subcommand !== undefined) throw new Error("Use 'etnpilot auth status'.");
+    if (command === "auth" && subcommand !== "status" && subcommand !== undefined) throw new Error("Use 'etnpilot auth status' or 'etnpilot auth vault'.");
     const entries = await authStatus({ env });
     for (const entry of entries) say(describeStatus(entry));
     const problem = entries.find((entry) => entry.storeProblem)?.storeProblem;
@@ -96,7 +99,7 @@ export function describeStatus(entry) {
   const who = stored.account ? ` as ${stored.account}` : "";
   const how = stored.kind === "oauth" ? "signed in" : "key stored";
   const warn = stored.verified ? "" : "  (not verified)";
-  return `${name} connected      ${how}${who}${warn}`;
+  return `${name} connected      ${how}${who}${warn}${stored.inSystemStore ? "  (system store)" : ""}`;
 }
 
 async function projectGitLabHost(root) {
@@ -137,4 +140,19 @@ export async function readSecret(prompt, { stdin = process.stdin, stdout = proce
     stdin.resume();
     stdin.on("data", onData);
   });
+}
+
+// Where the secrets of stored logins live. With no argument: where they are now
+// and what this machine offers. With 'system' or 'file': move them, all or none.
+async function runVaultCommand(choice, { say, env }) {
+  const store = storeFor({ env });
+  if (choice === undefined) {
+    const { mode, store: found } = await store.vaultMode();
+    say(mode === "system" ? `Secrets of stored logins are kept in ${found?.label ?? "the system store (not available here)"}.` : "Secrets of stored logins are kept in the credentials file (owner-only).");
+    say(found ? `This machine offers ${found.label}: 'etnpilot auth vault system' moves them there.` : "This machine offers no system store; the file is used.");
+    return 0;
+  }
+  const moved = await store.useVault(choice);
+  say(`${moved} stored login(s) now ${choice === "system" ? "keep their secrets in the system store" : "keep their secrets in the credentials file"}.`);
+  return 0;
 }
