@@ -250,6 +250,6 @@ bekannte Ausreißer: der Request-Handler der Prüfseite — inzwischen eine Rout
 und `renderRunDetail` der Terminal-Oberfläche — inzwischen eine Liste von Abschnitts-Funktionen, 71 → 13).
 Die Grenze von 60 steht jetzt ohne Ausnahmen.
 
-Weiter offen: Lauf fortsetzen nach Abbruch, Übersetzung der Oberfläche, optionaler Schlüsselbund, Gültigkeitszeitraum für Signaturschlüssel,
+Weiter offen: Lauf fortsetzen nach Abbruch (Entwurf: `docs/entwurf-lauf-fortsetzen.md`, mit sechs Fragen an den Betreiber), Übersetzung der Oberfläche, optionaler Schlüsselbund, Gültigkeitszeitraum für Signaturschlüssel,
 aufgezeichnete Live-Fixtures, `openProjectState`/`createTuiApp` weiter zerlegen,
 Komplexitäts-Baseline in ESLint, SHA-gepinnte Actions, Ursache der unsteten PTY-Tests.

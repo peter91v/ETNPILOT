@@ -16,6 +16,7 @@
 | clear out old receipts | [maintenance.md](maintenance.md) |
 | cut a release | [releasing.md](releasing.md) |
 | why it is built this way | [adr/README.md](adr/README.md) |
+| resuming an interrupted run (design, not built) | [entwurf-lauf-fortsetzen.md](entwurf-lauf-fortsetzen.md) |
 | add another provider (Gemini, Mistral, OpenRouter, Groq, Ollama) | [providers.md](providers.md) |
 | see what it cost | [observability.md](observability.md) (`etnpilot usage`) |
 | use the page or the terminal screen | [review-ui.md](review-ui.md), [tui.md](tui.md), [settings.md](settings.md) |
