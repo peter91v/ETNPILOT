@@ -1,8 +1,9 @@
 // @ts-check
 import { join, resolve } from "node:path";
 import { allowHost, authStatus, loginWithDevice, logout, saveKey, storeFor } from "../auth/login.js";
-import { SERVICE_IDS, serviceFor } from "../auth/services.js";
+import { SERVICE_IDS, normalizeAuthHost, serviceFor } from "../auth/services.js";
 import { loadConfig } from "../config/load.js";
+import { setSetting } from "../config/settings.js";
 
 // 'etnpilot login <service>', 'logout <service>' and 'auth status'. The web page
 // offers the same through the same functions.
@@ -65,6 +66,7 @@ export async function runAuthCommand(command, subcommand, values, { stdin = proc
           },
         });
         say(`Signed in to ${service.label}${result.account ? ` as ${result.account}` : ""}.`);
+        await rememberHost(service, values.host, { root: values.root, env, say });
         return 0;
       } catch (error) {
         if (error.code !== "client_id_required") throw error;
@@ -77,7 +79,9 @@ export async function runAuthCommand(command, subcommand, values, { stdin = proc
       }
     }
     const token = await readSecret(`${service.label} token: `, { stdin, stdout });
-    return report(service, await saveKey(service.id, token, { ...options, host }), say);
+    const saved = report(service, await saveKey(service.id, token, { ...options, host }), say);
+    await rememberHost(service, values.host, { root: values.root, env, say });
+    return saved;
   }
 
   const key = await readSecret(`${service.label} API key: `, { stdin, stdout, hint: service.keyHelp });
@@ -100,6 +104,25 @@ export function describeStatus(entry) {
   const how = stored.kind === "oauth" ? "signed in" : "key stored";
   const warn = stored.verified ? "" : "  (not verified)";
   return `${name} connected      ${how}${who}${warn}${stored.inSystemStore ? "  (system store)" : ""}`;
+}
+
+// A self-hosted GitLab was named on the command line ('--host'). The project
+// needs the same address as 'git.baseUrl' to use the login, so when it has none
+// it is set now, in this person's own settings (never the committed file), and
+// said. A project that already has an address is left alone.
+async function rememberHost(service, host, { root, env, say }) {
+  if (service.id !== "gitlab" || !host) return;
+  const projectRoot = resolve(root ?? ".");
+  let config;
+  try {
+    config = await loadConfig(join(projectRoot, ".etnpilot", "etnpilot.yaml"));
+  } catch {
+    return; // not inside an ETNPilot project: nothing to set
+  }
+  if (config.git?.baseUrl) return;
+  const address = normalizeAuthHost(host);
+  await setSetting("git.baseUrl", address, { root: projectRoot, env, scope: "local" });
+  say(`This project had no git.baseUrl; it is now ${address} (your own settings, not committed).`);
 }
 
 async function projectGitLabHost(root) {

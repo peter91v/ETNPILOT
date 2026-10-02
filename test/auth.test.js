@@ -375,3 +375,33 @@ test("a run's command may not name the stored logins", async () => {
   assert.equal(result.refused, "policy");
   assert.equal(asked, false);
 });
+
+test("signing in to a self-hosted GitLab with --host sets the project's git.baseUrl in the person's own settings, once", async () => {
+  const { env } = await home();
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-host-"));
+  const { mkdir } = await import("node:fs/promises");
+  await mkdir(join(root, ".etnpilot"), { recursive: true });
+  await writeFile(join(root, ".etnpilot", "etnpilot.yaml"), "version: 1\n");
+  const login = async (host) => {
+    const stdin = new PassThrough();
+    stdin.end("glpat-piped-token-12345\n");
+    let out = "";
+    await runAuthCommand("login", "gitlab", { "key-stdin": true, "no-verify": true, root, host }, { stdin, stdout: { write: (text) => { out += text; } }, env });
+    return out;
+  };
+  const first = await login("https://git.example.test/");
+  assert.match(first, /no git\.baseUrl; it is now https:\/\/git\.example\.test /);
+  const { loadConfig } = await import("../src/config/load.js");
+  assert.equal((await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"), env)).git?.baseUrl, "https://git.example.test");
+  // The committed file is untouched.
+  assert.equal(await readFile(join(root, ".etnpilot", "etnpilot.yaml"), "utf8"), "version: 1\n");
+  // An address the project already has is left alone.
+  assert.doesNotMatch(await login("https://other.example.test"), /git\.baseUrl/);
+  // Outside a project there is nothing to set, and nothing is said.
+  const outside = await mkdtemp(join(tmpdir(), "etnpilot-outside-"));
+  const stdin = new PassThrough();
+  stdin.end("glpat-piped-token-12345\n");
+  let out = "";
+  await runAuthCommand("login", "gitlab", { "key-stdin": true, "no-verify": true, root: outside, host: "https://git.example.test" }, { stdin, stdout: { write: (text) => { out += text; } }, env });
+  assert.doesNotMatch(out, /git\.baseUrl/);
+});

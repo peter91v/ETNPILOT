@@ -39,6 +39,9 @@ remembers it.
 Without a client id, `login` says so and offers a pasted token instead
 (`--key-stdin` reads one from a pipe).
 
+A self-hosted GitLab is named once with `--host`; if the project has no `git.baseUrl` yet, the login sets it in your
+own settings (not the committed file) and says so, because the project needs the same address to use the login.
+
 ## Where it lives
 
 `~/.config/etnpilot/credentials.json` (or `$XDG_CONFIG_HOME/etnpilot/`, or
