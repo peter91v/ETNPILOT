@@ -19,7 +19,7 @@ From a fresh checkout to a run you watched, in the order that avoids surprises.
 6. **Run something small.** `etnpilot run "Add a health check"`, or use *Start a run* in the page. Approvals
    come to the page, the terminal screen (`etnpilot tui`) or the terminal that started the run.
    → [approval-inbox.md](approval-inbox.md)
-7. **Look at what it cost.** `etnpilot usage` — tokens, requests and cost by model and by day, in the terms of the
+7. **Look at what it cost.** (It counts what runs, chats and the page recorded, not `smoke` or `forge`, so the provider's dashboard shows more.) `etnpilot usage` — tokens, requests and cost by model and by day, in the terms of the
    provider's dashboard.
 8. **Build a workflow.** *Agents* in the page: pick agents, put them in order, run it by name
    (`etnpilot run --workflow <name>`). → [named-workflows.md](named-workflows.md)
