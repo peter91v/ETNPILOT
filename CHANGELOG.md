@@ -39,6 +39,9 @@ pre-1.0, so breaking changes may appear in any release.
 - **GitLab write smoke looks at the state when closing the MR answers 5xx**: on the first self-hosted GitLab, closing
   answered `500` (request id in the message) while the merge requests showed as closed. The cleanup now reads the
   merge request after a failed close and counts it as closed (`mr-closed-after-error`) when its state says so.
+- **GitLab write smoke removes the merge request when it cannot close it**: if closing answers an error and the state
+  does not say `closed` either, the smoke's own merge request is deleted (needs the owner role); when that fails the
+  message carries the state it saw and the reason.
 - **Complexity limit 60 → 50** (ESLint): `updateAgent`, `validateWorkflowDefinition`, `describeOutcome`, `planResume`,
   `setUpRun` and `renderRunDetail` split into named parts, behaviour unchanged.
 - **Resume can discard what the stopped step left** (`etnpilot resume <run> --reset-partial`, and a button on the

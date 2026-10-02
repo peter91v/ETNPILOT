@@ -142,12 +142,12 @@ test("GitLab smoke closes the MR through the address when the body of the PUT is
   assert.deepEqual(calls.filter((call) => call.startsWith("PUT")), ["PUT 2 body", "PUT 2?state_event=close"]);
 
   const refuses = { ...base, request: async (method, path, body) => {
-    if (method === "PUT") throw new Error("GitLab API failed (403): 403 Forbidden");
+    if (method === "PUT" || (method === "DELETE" && /merge_requests/.test(path))) throw new Error("GitLab API failed (403): 403 Forbidden");
     return base.request(method, path, body);
   } };
   await assert.rejects(
     runGitLabSmoke({ client: refuses, project: 1, receiptPath: join(root, "refused.jsonl"), confirmWrites: true }),
-    /cleanup failed: mr-close-failed \(GitLab API failed \(403\): 403 Forbidden\)/,
+    /cleanup failed: mr-close-failed \(GitLab API failed \(403\): 403 Forbidden; its state: unknown; removing it failed too/,
   );
 });
 
@@ -157,6 +157,7 @@ test("GitLab smoke counts a merge request as closed when GitLab answered 500 but
   const crashesAfterClosing = { ...base, request: async (method, path, body) => {
     if (method === "PUT") throw new Error("GitLab API failed (500): 500 Internal Server Error [request id X1]");
     if (method === "GET") return { state: "closed" };
+    if (method === "DELETE" && /merge_requests/.test(path)) throw new Error("GitLab API failed (403): 403 Forbidden");
     return base.request(method, path, body);
   } };
   const path = join(root, "after-error.jsonl");
@@ -167,8 +168,13 @@ test("GitLab smoke counts a merge request as closed when GitLab answered 500 but
   assert.deepEqual(last.cleanupErrors, []);
 
   const stillOpen = { ...crashesAfterClosing, request: async (method, path2, body) => (method === "GET" ? { state: "opened" } : crashesAfterClosing.request(method, path2, body)) };
+  const deletable = await runGitLabSmoke({ client: { ...stillOpen, request: async (method, path2, body) => (method === "DELETE" && /merge_requests/.test(path2) ? undefined : stillOpen.request(method, path2, body)) }, project: 1, receiptPath: join(root, "deleted.jsonl"), confirmWrites: true });
+  assert.equal(deletable.cleaned, true);
+  const lastDeleted = JSON.parse((await readFile(join(root, "deleted.jsonl"), "utf8")).trim().split("\n").at(-1));
+  assert.ok(lastDeleted.operations.includes("mr-deleted-after-close-error"));
+
   await assert.rejects(
     runGitLabSmoke({ client: stillOpen, project: 1, receiptPath: join(root, "still-open.jsonl"), confirmWrites: true }),
-    /cleanup failed: mr-close-failed \(GitLab API failed \(500\).*request id X1/,
+    /cleanup failed: mr-close-failed \(GitLab API failed \(500\).*request id X1.*its state: opened; removing it failed too/,
   );
 });
