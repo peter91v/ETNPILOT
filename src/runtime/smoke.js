@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { authStatus } from "../auth/login.js";
 import { Harness } from "../core/harness.js";
 import { GitLabClient } from "../gitlab/client.js";
+import { copilotSdkAdvice } from "../providers/copilot.js";
 import { chooseProvider, forgeProject } from "../forge/forge.js";
 import { registerConfiguredProviders, resolveConfiguredApiKey } from "../providers/register.js";
 import { createSecretResolver } from "../secrets/resolver.js";
@@ -20,9 +21,10 @@ import { randomUUID } from "node:crypto";
 // leaves no trace is a cost nobody can find.
 
 export const SMOKE_STEPS = Object.freeze(["key", "reply", "tools", "stream", "toolstream", "forge", "gitlab"]);
+const NOT_FOR_COPILOT = new Set(["tools", "stream", "toolstream"]);
 const MARKER = "etnpilot-smoke-7421";
 
-export async function runSmoke(root, { config, env = process.env, provider: wanted, model, skip = [], gitlab = false, fetchImpl, factories, onStep = () => {} } = /** @type {any} */ ({})) {
+export async function runSmoke(root, { config, env = process.env, provider: wanted, model, skip = [], gitlab = false, fetchImpl, factories, sdkImporter, onStep = () => {} } = /** @type {any} */ ({})) {
   /** @type {{ provider: string | undefined, model: string | undefined, steps: any[], tokens: { input: number, output: number }, usageRecorded?: boolean, usageNote?: string }} */
   const report = { provider: undefined, model, steps: [], tokens: { input: 0, output: 0 } };
   const smokeId = randomUUID().slice(0, 8);
@@ -96,8 +98,26 @@ export async function runSmoke(root, { config, env = process.env, provider: want
     return `${result.model ?? model ?? chosen.config.model ?? "?"}${result.api ? ` via ${result.api}` : ""}, ${result.usage?.inputTokens ?? "?"} in / ${result.usage?.outputTokens ?? "?"} out`;
   };
 
+  // The Copilot provider has no API key to resolve: it needs the SDK, and a
+  // GitHub login the SDK accepts. The SDK has no switch for tools or streaming
+  // that ETNPilot could flip, so those steps do not apply to it.
+  const copilotKey = async () => {
+    try {
+      // @ts-ignore -- an optional dependency: it is not installed everywhere
+      await (sdkImporter ?? (() => import("@github/copilot-sdk")))();
+    } catch (error) {
+      throw Object.assign(new Error(`the GitHub Copilot SDK is not available. ${copilotSdkAdvice()}`), { code: "sdk_unavailable", cause: error });
+    }
+    const stored = (await authStatus({ env })).find((item) => item.id === "github");
+    const login = stored?.source === "environment" || stored?.source === "stored"
+      ? `the GitHub token from ${stored.source === "stored" ? "'etnpilot login github'" : stored.environmentVariable}`
+      : "the user the Copilot CLI is signed in as";
+    return `provider '${chosen.name}' (github-copilot), SDK installed, signed in through ${login}`;
+  };
+
   const steps = {
     key: async () => {
+      if (chosen.config.type === "github-copilot") return copilotKey();
       const key = await resolveConfiguredApiKey(chosen.config.type, chosen.config, { secretResolver: resolver, env });
       if (!key) {
         const refused = resolver.refusals.get(chosen.config.apiKeySecret ?? (chosen.config.type === "anthropic" ? "anthropic.apiKey" : "provider.apiKey"));
@@ -157,7 +177,7 @@ export async function runSmoke(root, { config, env = process.env, provider: want
 
   for (const id of SMOKE_STEPS) {
     if (id === "gitlab" && !gitlab) continue;
-    if (skip.includes(id)) { report.steps.push({ id, status: "skip" }); continue; }
+    if (skip.includes(id) || (chosen.config.type === "github-copilot" && NOT_FOR_COPILOT.has(id))) { report.steps.push({ id, status: "skip" }); continue; }
     const started = Date.now();
     onStep(id);
     try {
@@ -195,6 +215,7 @@ function hint(error, chosen) {
   const service = serviceOf(chosen.config);
   if (error.code === "missing_api_key" && service) return `etnpilot login ${service}`;
   if (error.code === "http_401" || error.code === "http_403") return service ? `the key was refused; sign in again with 'etnpilot login ${service}'` : "the key was refused";
+  if (error.code === "sdk_unavailable") return "npm install @github/copilot-sdk (Linux, macOS or Windows)";
   if (error.code === "missing_gitlab_token") return "etnpilot login gitlab";
   if (error.code === "use_responses_api") return "set providers.<name>.api to responses";
   return undefined;

@@ -8,6 +8,9 @@ pre-1.0, so breaking changes may appear in any release.
 
 ### Checks and hygiene (follow-up to the review)
 
+- **`etnpilot smoke --provider github-copilot`**: checks the Copilot SDK is installed and one request is answered
+  (tools and streaming are skipped, they do not apply); docs/providers.md has the setup for Linux, macOS and
+  Windows, and which login the SDK uses.
 - **GitHub Models needs a token, not the browser sign-in**: GitHub rejects `models:read` as an OAuth-app scope
   ("The scopes requested are invalid"), so the sign-in asks for `read:user` again. Use a fine-grained token with
   Models: Read.
