@@ -250,6 +250,8 @@ bekannte Ausreißer: der Request-Handler der Prüfseite — inzwischen eine Rout
 und `renderRunDetail` der Terminal-Oberfläche — inzwischen eine Liste von Abschnitts-Funktionen, 71 → 13).
 Die Grenze von 60 steht jetzt ohne Ausnahmen.
 
-Weiter offen: Lauf fortsetzen nach Abbruch (Entwurf: `docs/entwurf-lauf-fortsetzen.md`, mit sechs Fragen an den Betreiber), Übersetzung der Oberfläche, optionaler Schlüsselbund, Gültigkeitszeitraum für Signaturschlüssel,
-aufgezeichnete Live-Fixtures, `openProjectState`/`createTuiApp` weiter zerlegen,
-Komplexitäts-Baseline in ESLint, SHA-gepinnte Actions, Ursache der unsteten TUI-Tests (nicht reproduziert: sechs parallele Läufe blieben grün; ein Timeout meldet jetzt Bildschirm, laufende Läufe und Fehler — `test/helpers/wait.js`).
+Danach gebaut: Lauf fortsetzen samt Verwerfen der Teilarbeit auf ausdrücklichen Wunsch, Übersetzung der Seiten (Prüfseite, Setup-Seite)
+und des Terminal-Interfaces ins Deutsche, optionaler Schlüsselbund (`auth vault`), Gültigkeitsfenster für Signaturschlüssel, `smoke --gitlab-write`,
+die Komplexitätsgrenze von 60 auf 50 (sechs Funktionen zerlegt: `updateAgent`, `validateWorkflowDefinition`, `describeOutcome`, `planResume`, `setUpRun`, `renderRunDetail`).
+
+Weiter offen: aufgezeichnete Live-Fixtures (brauchen echte Schlüssel), `createTuiApp` (eine Closure von rund 900 Zeilen über 17 gemeinsame Variablen, jede ihrer Funktionen unter der Komplexitätsgrenze; eine echte Zerlegung braucht ein gemeinsames Zustandsobjekt und wäre ein eigener, großer Umbau), SHA-gepinnte Actions, Ursache der unsteten TUI-Tests (nicht reproduziert: sechs parallele Läufe blieben grün; ein Timeout meldet jetzt Bildschirm, laufende Läufe und Fehler — `test/helpers/wait.js`).

@@ -20,9 +20,9 @@ export default [
       eqeqeq: ["error", "always", { null: "ignore" }],
       "no-var": "error",
       "prefer-const": ["error", { destructuring: "all" }],
-      // A ratchet, not a goal: the most complex function today is just under
+      // A ratchet, not a goal: the most complex function today is under
       // this. A function above it fails; lower it as the big ones are split.
-      complexity: ["error", 60],
+      complexity: ["error", 50],
     },
   },
   {

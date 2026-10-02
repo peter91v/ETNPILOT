@@ -171,20 +171,7 @@ async function setUpRun({
       env,
       secretResolver: secrets,
     });
-    workspace = resume
-      ? await adoptWorkspace(worktreeManager, resume.workspace)
-      : useWorktree
-      ? await worktreeManager.create({
-          name: `run-${runId}`,
-          branch,
-          startPoint: baseRef ?? bootstrapConfig.git?.baseRef ?? "HEAD",
-        })
-      : { name: "in-place", branch: await currentBranch(repositoryRoot), path: repositoryRoot, managed: false };
-    if (useWorktree) workspace.managed = true;
-    // The person asked for what the stopped step left behind to be discarded
-    // (the plan listed it): the worktree goes back to how the last finished
-    // step left it, before anything runs in it.
-    if (resume?.reset) await restoreWorkspace(workspace.path, resume.reset.digest);
+    workspace = await openWorkspace({ resume, useWorktree, worktreeManager, runId, branch, baseRef, bootstrapConfig, repositoryRoot });
     receiptStore = new JsonlReceiptStore(receiptPath, { signer: receiptSigner });
     harness.telemetry = telemetry;
     harness.receiptStore = receiptStore;
@@ -255,13 +242,7 @@ async function setUpRun({
       steps: workflow.steps.map((step) => step.id),
       // What each step will use, so a surface can name the agents of a workflow
       // before any of them has started.
-      plan: workflow.steps.map((step) => ({
-        id: step.id,
-        type: step.type ?? "agent",
-        agents: step.type === "quorum" ? (step.agents ?? []) : (step.type ?? "agent") === "agent" && step.agent ? [step.agent] : [],
-        ...(step.type === "check" ? { command: (step.command ?? []).join(" ") } : {}),
-        ...(step.needs?.length ? { needs: step.needs } : {}),
-      })),
+      plan: plannedSteps(workflow),
       ...(workflowName && !agent ? { workflow: workflowName } : {}),
     });
   } catch (error) {
@@ -605,6 +586,39 @@ async function recordStepEvidence(receiptStore, /** @type {any} */ { runId, step
 
 // The worktree of an earlier run, taken over by a run that continues it. It has
 // to be one git still knows, on the branch the earlier run recorded.
+// Where the run works: the earlier run's worktree when resuming (with what its
+// stopped step left discarded, if the person asked), a new worktree, or the
+// checkout itself.
+async function openWorkspace({ resume, useWorktree, worktreeManager, runId, branch, baseRef, bootstrapConfig, repositoryRoot }) {
+  const workspace = resume
+    ? await adoptWorkspace(worktreeManager, resume.workspace)
+    : useWorktree
+      ? await worktreeManager.create({
+        name: `run-${runId}`,
+        branch,
+        startPoint: baseRef ?? bootstrapConfig.git?.baseRef ?? "HEAD",
+      })
+      : { name: "in-place", branch: await currentBranch(repositoryRoot), path: repositoryRoot, managed: false };
+  if (useWorktree) workspace.managed = true;
+  // The person asked for what the stopped step left behind to be discarded
+  // (the plan listed it): the worktree goes back to how the last finished
+  // step left it, before anything runs in it.
+  if (resume?.reset) await restoreWorkspace(workspace.path, resume.reset.digest);
+  return workspace;
+}
+
+// What each step will use, so a surface can name the agents of a workflow
+// before any of them has started.
+function plannedSteps(workflow) {
+  return workflow.steps.map((step) => ({
+    id: step.id,
+    type: step.type ?? "agent",
+    agents: step.type === "quorum" ? (step.agents ?? []) : (step.type ?? "agent") === "agent" && step.agent ? [step.agent] : [],
+    ...(step.type === "check" ? { command: (step.command ?? []).join(" ") } : {}),
+    ...(step.needs?.length ? { needs: step.needs } : {}),
+  }));
+}
+
 async function adoptWorkspace(manager, { path, branch }) {
   const wanted = resolve(path);
   const known = (await manager.list()).find((entry) => typeof entry.worktree === "string" && resolve(entry.worktree) === wanted);

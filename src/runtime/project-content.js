@@ -297,14 +297,32 @@ export async function updateAgent({ root, config, name, input }) {
   const path = join(etn, "agents", `${name}.yaml`);
   const text = await readFile(path, "utf8").catch(() => undefined);
   if (text === undefined) throw Object.assign(new Error(`There is no agent called '${name}'.`), { statusCode: 404 });
+  const asked = await checkAgentInput({ etn, name, input });
+
+  const document = YAML.parseDocument(text);
+  const current = document.toJS() ?? {};
+  applyAgentInput(document, current, input, asked);
+  await writeFile(path, String(document), "utf8");
+  if (asked.prompt !== undefined) {
+    const ref = typeof current.promptRef === "string" ? slugName(current.promptRef) : name;
+    await mkdir(join(etn, "prompts"), { recursive: true });
+    await writeFile(join(etn, "prompts", `${ref}.md`), `${asked.prompt}\n`, "utf8");
+  }
+  return { name, path: `.etnpilot/agents/${name}.yaml`, unreviewed: true };
+}
+
+// What the form asked for, refused with the first reason when any of it is
+// wrong. Returns the values worth keeping: the prompt, the tools, the skills
+// and the agents it may hand work to.
+async function checkAgentInput({ etn, name, input }) {
   const known = WORKSPACE_TOOL_DEFINITIONS.map((definition) => definition.name);
   const errors = [];
   const prompt = typeof input?.prompt === "string" ? input.prompt.replace(/\r\n/g, "\n").trim() : undefined;
   if (prompt !== undefined && !prompt) errors.push("An agent needs a prompt.");
   if (prompt && prompt.length > 12_000) errors.push("The prompt is longer than 12,000 characters.");
-  const asked = Array.isArray(input?.tools) ? input.tools.map(String) : undefined;
-  if (asked) {
-    const unknown = asked.filter((tool) => !known.includes(tool));
+  const tools = Array.isArray(input?.tools) ? input.tools.map(String) : undefined;
+  if (tools) {
+    const unknown = tools.filter((tool) => !known.includes(tool));
     if (unknown.length > 0) errors.push(`Unknown tools: ${unknown.join(", ")}.`);
   }
   const skillNames = /** @type {import("node:fs").Dirent[]} */ (await readdir(join(etn, "skills"), { withFileTypes: true }).catch(() => [])).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
@@ -315,22 +333,28 @@ export async function updateAgent({ root, config, name, input }) {
   if (subagents?.some((agent) => !agentNames.includes(agent))) errors.push(`Agents that do not exist: ${subagents.filter((agent) => !agentNames.includes(agent)).join(", ")}.`);
   if (subagents?.includes(name)) errors.push("An agent cannot hand work to itself.");
   if (subagents && !subagents.includes(name)) {
-    // Work handed round in a circle would never end: refuse the edge that closes one.
-    const graph = new Map();
-    for (const other of agentNames) {
-      if (other === name) { graph.set(other, subagents); continue; }
-      const text = await readFile(join(etn, "agents", `${other}.yaml`), "utf8").catch(() => "");
-      graph.set(other, (YAML.parse(text)?.subagents ?? []).map(String));
-    }
-    const reaches = (from, target, seen = new Set()) => from === target || (!seen.has(from) && seen.add(from) && (graph.get(from) ?? []).some((next) => reaches(next, target, seen)));
-    const loop = subagents.find((next) => (graph.get(next) ?? []).some((after) => reaches(after, name)));
+    const loop = await handingInCircle({ etn, name, subagents, agentNames });
     if (loop) errors.push(`'${loop}' already hands work on to '${name}': that would go round in a circle.`);
   }
   if (input?.effort !== undefined && input.effort !== "" && !EFFORTS.includes(input.effort)) errors.push("Effort is low, medium or high.");
   if (errors.length > 0) throw Object.assign(new Error(errors[0]), { statusCode: 400, details: { errors } });
+  return { prompt, tools, skills, subagents };
+}
 
-  const document = YAML.parseDocument(text);
-  const current = document.toJS() ?? {};
+// Work handed round in a circle would never end: the agent that closes one, if
+// the new list would.
+async function handingInCircle({ etn, name, subagents, agentNames }) {
+  const graph = new Map();
+  for (const other of agentNames) {
+    if (other === name) { graph.set(other, subagents); continue; }
+    const text = await readFile(join(etn, "agents", `${other}.yaml`), "utf8").catch(() => "");
+    graph.set(other, (YAML.parse(text)?.subagents ?? []).map(String));
+  }
+  const reaches = (from, target, seen = new Set()) => from === target || (!seen.has(from) && seen.add(from) && (graph.get(from) ?? []).some((next) => reaches(next, target, seen)));
+  return subagents.find((next) => (graph.get(next) ?? []).some((after) => reaches(after, name)));
+}
+
+function applyAgentInput(document, current, input, { tools: asked, skills, subagents }) {
   const finalSkills = skills ?? current.skills ?? [];
   const finalSubagents = subagents ?? current.subagents ?? [];
   if (typeof input?.description === "string") {
@@ -344,21 +368,13 @@ export async function updateAgent({ root, config, name, input }) {
   // Handing work on needs the tool to do it, whichever way the list arrived; an
   // agent with no list of tools already has every one.
   const base = asked ?? (Array.isArray(current.tools) ? current.tools.map(String) : undefined);
-  if (base) {
-    const tools = [...new Set([...base, ...(finalSkills.length > 0 ? ["load_skill"] : []), ...(finalSubagents.length > 0 ? ["spawn_subagent"] : [])])];
-    if (asked || tools.length !== base.length) {
-      const node = document.createNode(tools);
-      node.flow = true;
-      document.set("tools", node);
-    }
+  if (!base) return;
+  const tools = [...new Set([...base, ...(finalSkills.length > 0 ? ["load_skill"] : []), ...(finalSubagents.length > 0 ? ["spawn_subagent"] : [])])];
+  if (asked || tools.length !== base.length) {
+    const node = document.createNode(tools);
+    node.flow = true;
+    document.set("tools", node);
   }
-  await writeFile(path, String(document), "utf8");
-  if (prompt !== undefined) {
-    const ref = typeof current.promptRef === "string" ? slugName(current.promptRef) : name;
-    await mkdir(join(etn, "prompts"), { recursive: true });
-    await writeFile(join(etn, "prompts", `${ref}.md`), `${prompt}\n`, "utf8");
-  }
-  return { name, path: `.etnpilot/agents/${name}.yaml`, unreviewed: true };
 }
 
 export async function updateWorkflow({ root, config, name, input }) {
