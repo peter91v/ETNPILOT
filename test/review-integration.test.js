@@ -127,3 +127,26 @@ test("leases reject another process and leave a crash lease for explicit recover
   const crashed = await runChild([process.execPath, "--input-type=module", "-e", `import {acquireWorkspaceLease} from ${JSON.stringify(module)};const lease=await acquireWorkspaceLease(${JSON.stringify(root)});console.log(lease.owner);process.exit(0)`]);
   assert.equal((await recoverWorkspaceLease(root, crashed.stdout.trim())).recovered, true);
 });
+
+test("GitLab smoke closes the MR through the address when the body of the PUT is dropped, and says why when it cannot", async () => {
+  const root = await temporary();
+  const base = smokeClient();
+  const calls = [];
+  const dropsBody = { ...base, request: async (method, path, body) => {
+    calls.push(`${method} ${path.replace(/^.*merge_requests\//, "")}${body ? " body" : ""}`);
+    if (method === "PUT" && body) throw Object.assign(new Error("GitLab API failed (405): Method Not Allowed"), { status: 405 });
+    return base.request(method, path, body);
+  } };
+  const report = await runGitLabSmoke({ client: dropsBody, project: 1, receiptPath: join(root, "query.jsonl"), confirmWrites: true });
+  assert.equal(report.cleaned, true);
+  assert.deepEqual(calls.filter((call) => call.startsWith("PUT")), ["PUT 2 body", "PUT 2?state_event=close"]);
+
+  const refuses = { ...base, request: async (method, path, body) => {
+    if (method === "PUT") throw new Error("GitLab API failed (403): 403 Forbidden");
+    return base.request(method, path, body);
+  } };
+  await assert.rejects(
+    runGitLabSmoke({ client: refuses, project: 1, receiptPath: join(root, "refused.jsonl"), confirmWrites: true }),
+    /cleanup failed: mr-close-failed \(GitLab API failed \(403\): 403 Forbidden\)/,
+  );
+});
