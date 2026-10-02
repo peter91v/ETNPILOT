@@ -18,6 +18,7 @@ pre-1.0, so breaking changes may appear in any release.
 - `etnpilot content diff`: what changed, was added or removed since the reviewed lock, before you lock it.
 - The Overview of a project with no runs shows a "Getting started" list (provider key, commit, first run), read live and gone after the first run.
 - `openProjectState` lost its conversation half and its run-start logic to `project-chat.js` and `project-run-start.js` (behaviour unchanged).
+- The TUI's conversation (the line being typed, `@` file suggestions, sending, syncing) moved to `chat-controller.js`.
 - The TUI's run detail is a list of section functions (complexity 71 → 13); the ESLint complexity limit of 60 has no exceptions left.
 - The review server's request handler is a route table (32 exact routes looked up by method and path; complexity 160 → 49).
 - The run list can be filtered by text and status; a running run's card shows tokens and cost so far.
