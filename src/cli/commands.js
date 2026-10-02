@@ -105,6 +105,7 @@ export const CLI_OPTIONS = Object.freeze({
   "no-forge": { type: "boolean" },
   "no-wizard": { type: "boolean" },
   yes: { type: "boolean" },
+  tasks: { type: "boolean" },
   global: { type: "boolean", default: false },
   changed: { type: "boolean", default: false },
   name: { type: "string" },
@@ -180,7 +181,8 @@ ${TRUST_USAGE}
   etnpilot resume <run-id|receipt-file> [--dry-run] [--allow-drift] [--approvals terminal|inbox] [--publish] [--public-key path] [--json] [--root directory]
   etnpilot gc [--older-than days] [--keep n] [--apply] [--json] [--root directory]
   etnpilot models [--provider name] [--json]       what the provider offers this account, with known prices
-  etnpilot usage [--json] [--root directory]       tokens, requests and cost by model and by day
+  etnpilot usage [--json] [--tasks] [--root directory]
+                                                  tokens, requests and cost by model and by day; --tasks: cost per finished task, by rung and difficulty
   etnpilot doctor [--root directory]
   etnpilot check [name...] [--root directory]
   etnpilot chat [--agent name] [--resume <id>|last | --continue] [--root directory]

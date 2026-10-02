@@ -2,6 +2,7 @@
 import { join, resolve } from "node:path";
 import { loadConfig } from "../../config/load.js";
 import { summarizeTelemetryFile } from "../../observability/telemetry.js";
+import { summarizeTaskCosts } from "../../runtime/task-costs.js";
 
 // What was used, by model and by day, in the terms a provider's dashboard uses,
 // so the two can be compared line by line.
@@ -16,6 +17,18 @@ export const usageCommands = [
       const summary = /** @type {any} */ (await summarizeTelemetryFile(file, { root, config }));
       if (config.observability?.enabled === false) {
         console.error("Observability is off (observability.enabled: false): nothing is being recorded, so what the provider charges does not show up here. Turn it on to see every request's cost.");
+      }
+      if (values.tasks) {
+        const tasks = await summarizeTaskCosts(join(root, ".etnpilot", "state", "runs"));
+        if (values.json) { console.log(JSON.stringify(tasks, null, 2)); return 0; }
+        const usd = (value) => (value === undefined ? "not priced" : `${(summary.currency ?? "USD")} ${value.toFixed(4)}`);
+        const row = (label, entry) => console.log(`  ${label.padEnd(12)} ${String(entry.runs).padStart(4)} runs  ${String(entry.completed).padStart(4)} finished  ${usd(entry.cost).padStart(16)} spent  ${usd(entry.perCompleted).padStart(16)} per finished task`);
+        console.log("Cost per finished task (from the receipts; every attempt counts, also the failed ones):");
+        row("all runs", tasks);
+        for (const [label, entry] of Object.entries(tasks.byTier)) row(`passed ${label}`, entry);
+        for (const [label, entry] of Object.entries(tasks.byDifficulty)) row(`routed ${label}`, entry);
+        if (tasks.runs === 0) console.log("  No finished runs recorded yet.");
+        return 0;
       }
       if (values.json) {
         console.log(JSON.stringify(summary, null, 2));
