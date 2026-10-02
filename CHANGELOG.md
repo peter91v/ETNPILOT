@@ -8,6 +8,9 @@ pre-1.0, so breaking changes may appear in any release.
 
 ### Checks and hygiene (follow-up to the review)
 
+- **A provider that answers 200 with something that is not the API** (a proxy page, a health answer "OK") is
+  reported with the address, status, content type and the first words of the body, instead of "Unexpected token
+  'O'" or "stream ended before it finished".
 - **The review page in German**: a German browser gets German labels, descriptions, buttons and empty states;
   a language switch at the foot of the side bar keeps the choice in this browser. Text the catalog
   (`src/ui/client/i18n-de.js`) does not know, and text built from running values, stays English. The setup

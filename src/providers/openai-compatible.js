@@ -304,7 +304,8 @@ async function request({ endpoint, apiKey, fetchImpl, context, body, name, reaso
       },
     );
   }
-  if (!stream) return response.json();
+  if (!stream) return parseJsonBody(response, endpoint);
+  await refuseNonStream(response, endpoint);
   try {
     return await collect(response, { onDelta: context.emitDelta, onUsage: context.onStreamUsage, signal: context.signal });
   } catch (error) {
@@ -312,6 +313,33 @@ async function request({ endpoint, apiKey, fetchImpl, context, body, name, reaso
     if (error instanceof ProviderError && bodyHasToolResults(body)) error.safeToRetry = false;
     throw error;
   }
+}
+
+// A success status whose body is not what the API sends (a proxy's page, a
+// health answer, a wrong address) says so with where it came from. 'Unexpected
+// token O' names nothing the person can act on.
+async function parseJsonBody(response, endpoint) {
+  if (typeof response.headers?.get !== "function") return response.json();
+  const text = await response.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw notAnApiAnswer(response, endpoint, text);
+  }
+}
+
+async function refuseNonStream(response, endpoint) {
+  const type = response.headers?.get?.("content-type");
+  if (!type || /event-stream|json/i.test(type)) return;
+  throw notAnApiAnswer(response, endpoint, await response.text());
+}
+
+function notAnApiAnswer(response, endpoint, text) {
+  const snippet = text.replace(/\s+/g, " ").trim().slice(0, 80);
+  return new ProviderError(
+    `${endpoint} answered ${response.status} with ${response.headers?.get?.("content-type") ?? "no content type"}, not the API's answer: "${snippet}". Check the provider's baseUrl and that nothing between here and it answers in its place.`,
+    { code: "not_an_api_answer", retryable: false, safeToRetry: false },
+  );
 }
 
 // A 400 that names 'reasoning_effort' next to function tools is the one

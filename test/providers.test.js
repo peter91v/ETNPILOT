@@ -572,3 +572,14 @@ test("api: responses speaks it from the first request, and a bad value is refuse
   assert.deepEqual(urls, ["https://api.openai.example/v1/responses"]);
   assert.throws(() => createOpenAICompatibleProvider({ name: "x", baseUrl: "https://a.b/v1", apiKey: "k", model: "m", api: "soap" }), /api must be/);
 });
+
+test("a success status with a body that is not the API's says where it came from", async () => {
+  const fetchImpl = async () => new Response("OK\n", { status: 200, headers: { "content-type": "text/plain" } });
+  for (const stream of [false, true]) {
+    const provider = createOpenAICompatibleProvider({ baseUrl: "https://models.example.invalid/inference", apiKey: "key", fetchImpl, stream });
+    await assert.rejects(
+      () => provider.invoke({ agent: { prompt: "System" }, input: "hello", instructions: [] }),
+      /models\.example\.invalid\/inference\/chat\/completions answered 200 with text\/plain.*"OK"/,
+    );
+  }
+});
