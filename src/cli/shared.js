@@ -85,6 +85,15 @@ export async function resolveReceiptPublicKeys(root, explicitPaths) {
   });
 }
 
+// The dates that limit when a trusted key may be relied on (see withKeyWindows).
+export async function resolveKeyWindows(root) {
+  const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml")).catch((error) => {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  });
+  return config?.receipts?.signing?.keyWindows;
+}
+
 export async function withWorkflowQueue(root, operation) {
   const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"));
   const database = resolve(root, config.queue?.database ?? ".etnpilot/state/workflows.sqlite");

@@ -8,6 +8,10 @@ pre-1.0, so breaking changes may appear in any release.
 
 ### Checks and hygiene (follow-up to the review)
 
+- **Validity window for signing keys** (`receipts.signing.keyWindows`: `notBefore`, `notAfter`, `revokedAt`): signed
+  entries now record `proof.signedAt`; verification refuses entries signed outside their key's window. Older entries
+  are reported as `undatedEntries` (`receipt verify --require-dated` refuses them). The time is the signing machine's
+  clock; see docs/signed-receipts.md.
 - **`etnpilot auth vault [system|file]`**: the secrets of stored logins can live in the macOS keychain, the Linux
   Secret Service or Windows data protection instead of the credentials file (no new dependency; Termux keeps the
   file). The move is all or nothing. Tested with stand-ins only; see docs/login.md.

@@ -335,7 +335,7 @@ export async function verifyProjectReceipt(directory, file, { root, config } = /
   assertReceiptName(file);
   const configured = config?.receipts?.signing?.publicKeyFile;
   const verifiers = configured
-    ? await loadReceiptVerifiers([resolve(root, configured)]).catch(swallow("receipt verifier keys", undefined))
+    ? await loadReceiptVerifiers([resolve(root, configured)], { windows: config?.receipts?.signing?.keyWindows }).catch(swallow("receipt verifier keys", undefined))
     : undefined;
   const report = await verifyReceiptFile(join(directory, file), { ...(verifiers ? { verifiers } : {}) });
   return {
@@ -378,6 +378,10 @@ function describeVerification(report, { signaturesChecked = false } = /** @type 
     "signature-required": `An entry${at} carries no signature, and this project requires one.`,
     "untrusted-key": `An entry${at} is signed with a key this project does not trust${report.keyId ? ` (${report.keyId})` : ""}.`,
     "invalid-signature": `A signature does not match its entry${at}: the entry or the signature was changed.`,
+    "key-not-yet-valid": `An entry${at} was signed before its key was valid.`,
+    "key-expired": `An entry${at} was signed after its key's validity ended.`,
+    "key-revoked": `An entry${at} was signed after its key was revoked.`,
+    "undated-entry": `An entry${at} carries no signing time, and dated entries were required.`,
     "unsupported-proof": `An entry${at} carries a kind of proof this version cannot check.`,
     "terminal-receipt-required": "The receipt was never sealed: the run did not record an end.",
   };

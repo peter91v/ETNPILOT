@@ -1,7 +1,7 @@
 // @ts-check
 import { resolve } from "node:path";
 import { loadReceiptVerifiers } from "../../core/receipt-signing.js";
-import { createRunApprovalHandler, resolveReceiptPublicKeys } from "../shared.js";
+import { createRunApprovalHandler, resolveKeyWindows, resolveReceiptPublicKeys } from "../shared.js";
 import { runProject } from "../../runtime/project-runner.js";
 import { planResume } from "../../runtime/resume-plan.js";
 
@@ -15,7 +15,7 @@ export const resumeCommands = [
     match: ({ command }) => command === "resume",
     async run({ subcommand: receipt, values }) {
       if (!receipt) throw new Error("Usage: etnpilot resume <run-id|receipt-file> [--dry-run] [--allow-drift] [--approvals terminal|inbox] [--publish] [--public-key path] [--json]");
-      const verifiers = await loadReceiptVerifiers(await resolveReceiptPublicKeys(resolve(values.root), values["public-key"] ?? []));
+      const verifiers = await loadReceiptVerifiers(await resolveReceiptPublicKeys(resolve(values.root), values["public-key"] ?? []), { windows: await resolveKeyWindows(resolve(values.root)) });
       const plan = await planResume({
         root: resolve(values.root),
         receipt,

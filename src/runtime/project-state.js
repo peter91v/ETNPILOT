@@ -206,7 +206,7 @@ export async function openProjectState({ root = process.cwd(), env = process.env
     // reused. Only a plan: nothing is changed or run.
     resumePlan: async (file, options = {}) => {
       const configured = current.receipts?.signing?.publicKeyFile;
-      const verifiers = configured ? await loadReceiptVerifiers([resolve(projectRoot, configured)]).catch(() => undefined) : undefined;
+      const verifiers = configured ? await loadReceiptVerifiers([resolve(projectRoot, configured)], { windows: current.receipts?.signing?.keyWindows }).catch(() => undefined) : undefined;
       return planResume({ root: projectRoot, receipt: file, env, allowDrift: options.allowDrift === true, ...(verifiers ? { verifiers, requireSignatures: true } : {}) });
     },
     // Resumes an earlier run: a new run that carries over what it finished and

@@ -6,9 +6,10 @@ import { dirname } from "node:path";
 import { verifyReceiptSignature } from "./receipt-signing.js";
 
 export class JsonlReceiptStore {
-  constructor(path, { signer } = /** @type {any} */ ({})) {
+  constructor(path, { signer, now = () => new Date() } = /** @type {any} */ ({})) {
     this.path = path;
     this.signer = signer;
+    this.now = now;
     this.pending = Promise.resolve();
     // The chain's last link, kept after the first read. A receipt file belongs
     // to one run and one writer, so reading the whole file for every entry (it
@@ -33,7 +34,7 @@ export class JsonlReceiptStore {
     const payload = {
       ...receipt,
       previousHash,
-      ...(this.signer ? { proof: this.signer.proof } : {}),
+      ...(this.signer ? { proof: { ...this.signer.proof, signedAt: this.now().toISOString() } } : {}),
     };
     const hash = receiptHash(payload);
     const signature = this.signer?.sign(hash);
@@ -59,10 +60,11 @@ export async function verifyReceiptFile(path, {
   verifiers = new Map(),
   requireSignatures = false,
   requireTerminal = false,
+  requireDated = false,
 } = /** @type {any} */ ({})) {
   // Line by line: a receipt is as long as the run was, and a limit on the whole
   // file would make a long run impossible to verify.
-  const chain = new ChainVerifier({ verifiers, requireSignatures, requireTerminal });
+  const chain = new ChainVerifier({ verifiers, requireSignatures, requireTerminal, requireDated });
   try {
     for await (const line of readLines(path)) {
       const failure = chain.push(line);
@@ -74,10 +76,10 @@ export async function verifyReceiptFile(path, {
   return chain.finish();
 }
 
-export function verifyReceiptText(content, { verifiers = new Map(), requireSignatures = false, requireTerminal = false } = /** @type {any} */ ({})) {
+export function verifyReceiptText(content, { verifiers = new Map(), requireSignatures = false, requireTerminal = false, requireDated = false } = /** @type {any} */ ({})) {
   const lines = content.split("\n");
   if (lines.at(-1) === "") lines.pop();
-  const chain = new ChainVerifier({ verifiers, requireSignatures, requireTerminal });
+  const chain = new ChainVerifier({ verifiers, requireSignatures, requireTerminal, requireDated });
   for (const line of lines) {
     const failure = chain.push(line);
     if (failure) return failure;
@@ -88,8 +90,10 @@ export function verifyReceiptText(content, { verifiers = new Map(), requireSigna
 // The checks, one line at a time, so the same code verifies a string and a file
 // of any length.
 class ChainVerifier {
-  constructor({ verifiers, requireSignatures, requireTerminal }) {
+  constructor({ verifiers, requireSignatures, requireTerminal, requireDated }) {
     this.verifiers = verifiers;
+    this.requireDated = requireDated;
+    this.undated = 0;
     this.requireSignatures = requireSignatures;
     this.requireTerminal = requireTerminal;
     this.previousHash = null;
@@ -135,6 +139,10 @@ class ChainVerifier {
       if (!proof.valid) {
         return verificationFailure(proof.reason, { line: lineNumber, keyId: proof.keyId, ...counts() });
       }
+      if (proof.undated) {
+        if (this.requireDated) return verificationFailure("undated-entry", { line: lineNumber, keyId: proof.keyId, ...counts() });
+        this.undated += 1;
+      }
       this.signed += 1;
     } else {
       if (this.requireSignatures) {
@@ -166,6 +174,7 @@ class ChainVerifier {
       ...(this.legacyEntries > 0 ? { legacyEntries: this.legacyEntries } : {}),
       signed: this.signed,
       unsigned: this.unsigned,
+      ...(this.undated > 0 ? { undatedEntries: this.undated } : {}),
       terminal: this.terminal,
       lastHash: this.previousHash,
       keyIds: [...this.keyIds],
