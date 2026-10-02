@@ -125,6 +125,25 @@ test("a key can be saved on the Accounts page, and the page never shows it back"
   }
 });
 
+test("the guided setup connects GitLab from the overview and never shows the token back", async (t) => {
+  if (skipReason) return t.skip(skipReason);
+  const token = ["glpat", "ui", "setup", "token", "123456"].join("-");
+  const ui = await open(await project(), { fetchImpl: async () => new Response(JSON.stringify({ username: "peter" }), { status: 200 }) });
+  try {
+    await ui.page.getByText("Guided setup").first().waitFor();
+    await ui.page.locator("#setup-host").fill("https://git.acme.test");
+    await ui.page.locator("#setup-project").fill("varga/etnpilot-smoke");
+    await ui.page.locator("#setup-user").fill("peter");
+    await ui.page.locator("#setup-token").fill(token);
+    await ui.page.getByRole("button", { name: "Connect GitLab" }).click();
+    await ui.page.getByText("Stored the GitLab token for peter").first().waitFor();
+    assert.equal((await ui.page.content()).includes(token), false);
+    assert.deepEqual(ui.problems, []);
+  } finally {
+    await ui.close();
+  }
+});
+
 test("the run list can be narrowed by text and by status", async (t) => {
   if (skipReason) return t.skip(skipReason);
   const setup = await project();

@@ -443,6 +443,8 @@
      notch rather than animating into it. */
   .device-box { display: grid; gap: 12px; padding: 12px; border-radius: 12px; background: var(--md-surface-container-high, var(--md-surface-variant)); }
   .device-code { font-size: 28px; letter-spacing: 0.14em; font-weight: 600; margin: 0; user-select: all; }
+  .setup-step { padding: 8px 0 12px; border-top: 1px solid var(--md-outline); }
+  .setup-step:first-child { border-top: 0; }
   .fold { margin-top: 8px; }
   .fold > summary { cursor: pointer; padding: 10px 0; }
   .field { position: relative; display: grid; gap: 0; padding-top: 8px; }
