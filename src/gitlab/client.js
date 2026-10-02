@@ -132,9 +132,12 @@ export class GitLabClient {
     }
     if (!response.ok) {
       const detail = await describeError(response);
-      throw new GitLabApiError(`GitLab API failed (${response.status})${detail ? `: ${detail}` : "."}`, {
+      // What an administrator looks a failed request up by in GitLab's own logs.
+      const requestId = String(response.headers?.get?.("x-request-id") ?? "").replaceAll(/[^\w.-]/g, "").slice(0, 64);
+      throw new GitLabApiError(`GitLab API failed (${response.status})${detail ? `: ${detail}` : "."}${requestId ? ` [request id ${requestId}]` : ""}`, {
         status: response.status,
         body: detail,
+        requestId: requestId || undefined,
       });
     }
     return response.status === 204 ? undefined : response.json();
@@ -164,10 +167,11 @@ async function describeError(response) {
 }
 
 export class GitLabApiError extends Error {
-  constructor(message, { status, body, cause } = /** @type {any} */ ({})) {
+  constructor(message, { status, body, requestId, cause } = /** @type {any} */ ({})) {
     super(message, { cause });
     this.name = "GitLabApiError";
     this.status = status;
     this.body = body;
+    this.requestId = requestId;
   }
 }

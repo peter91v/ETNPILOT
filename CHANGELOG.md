@@ -33,6 +33,9 @@ pre-1.0, so breaking changes may appear in any release.
 - **GitLab write smoke says why a cleanup failed**: the first real run (self-hosted GitLab) created the branch, commit and
   Draft MR and then reported only `mr-close-failed`. A failed cleanup now carries GitLab's status and short message, and
   closing the MR is retried once through the address (`?state_event=close`) in case a proxy drops the body of a PUT.
+- **A failed GitLab request names its request id** (`[request id …]`, from GitLab's `X-Request-Id`), so an
+  administrator can find the server-side error in GitLab's logs. First real write smoke: closing a merge request answered
+  `500 Internal Server Error` on a self-hosted GitLab, with and without a body.
 - **Complexity limit 60 → 50** (ESLint): `updateAgent`, `validateWorkflowDefinition`, `describeOutcome`, `planResume`,
   `setUpRun` and `renderRunDetail` split into named parts, behaviour unchanged.
 - **Resume can discard what the stopped step left** (`etnpilot resume <run> --reset-partial`, and a button on the
