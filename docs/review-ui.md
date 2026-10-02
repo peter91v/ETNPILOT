@@ -197,3 +197,10 @@ Chat renders a bounded Markdown subset with DOM text nodes, checked link protoco
 and no raw HTML or remote images. Run lists stop at 500 visible items and stop
 showing a nonfunctional "Show more" control at that limit. If LAN adapter discovery
 fails, listening still resolves and returns a fallback URL with a warning.
+
+## Language
+
+The page is written in English and translated where it is drawn: a browser set to German gets German text, and the
+switch at the foot of the side bar overrides that (kept in this browser only). The German texts are keyed by the exact English
+text in `src/ui/client/i18n-de.js`; whatever is not there stays English. A test fails for a German entry whose English text is
+no longer in the page.

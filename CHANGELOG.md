@@ -8,6 +8,10 @@ pre-1.0, so breaking changes may appear in any release.
 
 ### Checks and hygiene (follow-up to the review)
 
+- **The review page in German**: a German browser gets German labels, descriptions, buttons and empty states;
+  a language switch at the foot of the side bar keeps the choice in this browser. Text the catalog
+  (`src/ui/client/i18n-de.js`) does not know, and text built from running values, stays English. The setup
+  page and the terminal interface are still English.
 - **Notification when an approval is pending** (`approval.notify`, see docs/approval-inbox.md): one POST per
   request to an https address (ntfy-style or JSON). Only the kind, agent and ids are sent unless `includeDetails`
   is set; a failed delivery never holds the run.
