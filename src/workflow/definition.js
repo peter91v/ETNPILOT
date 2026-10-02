@@ -42,33 +42,7 @@ export function validateWorkflowDefinition(input, { agents = [], maxSteps = 50 }
     if (!STEP_TYPES.includes(type)) { errors.push(`'${id}' has type '${type}'; use agent, check, gate or quorum.`); continue; }
     const out = { id, type };
     if (Array.isArray(step.needs) && step.needs.length > 0) out.needs = step.needs.map(String);
-    if (type === "agent") {
-      if (typeof step.agent !== "string" || !step.agent) errors.push(`'${id}' needs an agent.`);
-      else if (known.size > 0 && !known.has(step.agent)) errors.push(`'${id}' names the agent '${step.agent}', which does not exist.`);
-      else out.agent = step.agent;
-      if (step.expect !== undefined) {
-        if (step.expect !== "tool-use") errors.push(`'${id}' expects '${step.expect}'; the only expectation is 'tool-use'.`);
-        else out.expect = "tool-use";
-      }
-    } else if (type === "quorum") {
-      const list = Array.isArray(step.agents) ? step.agents.map(String) : [];
-      if (list.length < 2) errors.push(`'${id}' needs at least two agents to compare.`);
-      const missing = list.filter((agent) => known.size > 0 && !known.has(agent));
-      if (missing.length > 0) errors.push(`'${id}' names agents that do not exist: ${missing.join(", ")}.`);
-      out.agents = list;
-      if (step.required !== undefined) {
-        if (!Number.isInteger(step.required) || step.required < 1 || step.required > list.length) errors.push(`'${id}' requires ${step.required} approvals of ${list.length} agents.`);
-        else out.required = step.required;
-      }
-    } else if (type === "check") {
-      const command = Array.isArray(step.command) ? step.command : typeof step.command === "string" ? step.command.trim().split(/\s+/) : [];
-      if (command.length === 0 || command.length > LIMITS.command || command.some((part) => typeof part !== "string" || part === "")) errors.push(`'${id}' needs a command, for example: npm test`);
-      else out.command = command;
-      if (typeof step.name === "string" && step.name.trim()) out.name = step.name.trim().slice(0, 80);
-    } else if (type === "gate") {
-      if (typeof step.prompt === "string" && step.prompt.trim()) out.prompt = step.prompt.trim().slice(0, LIMITS.text);
-      if (step.questions === false) out.questions = false;
-    }
+    STEP_CLEANERS[type](step, { id, known, errors, out });
     cleaned.push(out);
   }
   for (const step of cleaned) {
@@ -86,6 +60,41 @@ export function validateWorkflowDefinition(input, { agents = [], maxSteps = 50 }
   };
   return { ok: errors.length === 0, errors, workflow };
 }
+
+// What each kind of step keeps, and what is wrong with it. They write into
+// `out` (the cleaned step) and `errors`.
+const STEP_CLEANERS = {
+  agent(step, { id, known, errors, out }) {
+    if (typeof step.agent !== "string" || !step.agent) errors.push(`'${id}' needs an agent.`);
+    else if (known.size > 0 && !known.has(step.agent)) errors.push(`'${id}' names the agent '${step.agent}', which does not exist.`);
+    else out.agent = step.agent;
+    if (step.expect !== undefined) {
+      if (step.expect !== "tool-use") errors.push(`'${id}' expects '${step.expect}'; the only expectation is 'tool-use'.`);
+      else out.expect = "tool-use";
+    }
+  },
+  quorum(step, { id, known, errors, out }) {
+    const list = Array.isArray(step.agents) ? step.agents.map(String) : [];
+    if (list.length < 2) errors.push(`'${id}' needs at least two agents to compare.`);
+    const missing = list.filter((agent) => known.size > 0 && !known.has(agent));
+    if (missing.length > 0) errors.push(`'${id}' names agents that do not exist: ${missing.join(", ")}.`);
+    out.agents = list;
+    if (step.required !== undefined) {
+      if (!Number.isInteger(step.required) || step.required < 1 || step.required > list.length) errors.push(`'${id}' requires ${step.required} approvals of ${list.length} agents.`);
+      else out.required = step.required;
+    }
+  },
+  check(step, { id, errors, out }) {
+    const command = Array.isArray(step.command) ? step.command : typeof step.command === "string" ? step.command.trim().split(/\s+/) : [];
+    if (command.length === 0 || command.length > LIMITS.command || command.some((part) => typeof part !== "string" || part === "")) errors.push(`'${id}' needs a command, for example: npm test`);
+    else out.command = command;
+    if (typeof step.name === "string" && step.name.trim()) out.name = step.name.trim().slice(0, 80);
+  },
+  gate(step, { out }) {
+    if (typeof step.prompt === "string" && step.prompt.trim()) out.prompt = step.prompt.trim().slice(0, LIMITS.text);
+    if (step.questions === false) out.questions = false;
+  },
+};
 
 function hasCycle(steps) {
   const indegree = new Map(steps.map((step) => [step.id, (step.needs ?? []).length]));

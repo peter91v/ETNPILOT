@@ -122,48 +122,11 @@ export function describeOutcome(receipt, { running = false } = /** @type {any} *
   const blocked = steps.filter((step) => step.status === "blocked");
   const rejected = receipt?.entries?.flatMap((entry) => entry.approvals ?? [])
     .filter((approval) => approval.decision && approval.decision !== "approve-once") ?? [];
+  const toolCalls = receipt?.entries?.flatMap((entry) => entry.result?.toolCalls ?? entry.result?.steps ?? []) ?? [];
   const reasons = [];
   // The fatal error first: it is what actually stopped the run.
   if (summary.error) reasons.push({ kind: "error", text: summary.error });
-  for (const step of failed) reasons.push({ kind: "step", step: step.id, text: step.error ?? "failed", attempts: step.attempts });
-  for (const step of blocked) {
-    reasons.push({
-      kind: "blocked",
-      step: step.id,
-      text: step.reason === "dependency-failed"
-        ? "never ran: a step it needs failed"
-        : step.reason === "fail-fast"
-          ? "never ran: the workflow stops at the first failure"
-          : step.reason ?? "never ran",
-    });
-  }
-  for (const approval of rejected) {
-    reasons.push({
-      kind: "approval",
-      // What it was about and who or what said no: 'read was reject' named
-      // neither, and five of them in a row could not be told apart.
-      text: `${approval.subject || approval.operationKind || "an operation"} was ${approval.decision === "reject" ? "refused" : approval.decision}`
-        + (approval.reason ?? approval.evidence?.reason ? `: ${approval.reason ?? approval.evidence.reason}` : "")
-        + (approval.policy ? ` (policy: ${approval.policy.rule ? `rule '${approval.policy.rule}'` : "the section default"})` : ""),
-    });
-  }
-  // What the run actually did with its tools. A run can be told to write a
-  // file, have the write refused, and still end 'succeeded' because the model
-  // finished its turn — the receipt records the refusal, so it is said here
-  // rather than left for someone to notice by the file not being there.
-  // Chat providers record 'toolCalls'; the scripted provider records the same
-  // shape under 'steps', because its steps are the tools it ran.
-  const toolCalls = receipt?.entries?.flatMap((entry) => entry.result?.toolCalls ?? entry.result?.steps ?? []) ?? [];
-  // A refusal that went through an approval already appears above as that
-  // approval; saying it twice is how five refusals became ten lines. One that
-  // never reached an approval (a tool the agent may not use) appears only here.
-  const told = new Set(rejected.map((approval) => approval.reason ?? approval.evidence?.reason).filter(Boolean));
-  for (const call of toolCalls.filter((call) => call.ok === false && !(call.refused && told.has(call.error)))) {
-    reasons.push({
-      kind: "tool",
-      text: `${call.label ?? call.tool ?? "a tool"} ${call.refused ? "was refused" : "failed"}: ${call.error ?? "no reason recorded"}`,
-    });
-  }
+  reasons.push(...stepReasons(failed, blocked), ...approvalReasons(rejected), ...toolReasons(toolCalls, rejected));
   if (terminal.content?.verificationError) {
     reasons.push({ kind: "content", text: `content verification: ${terminal.content.verificationError}` });
   }
@@ -172,22 +135,7 @@ export function describeOutcome(receipt, { running = false } = /** @type {any} *
   if (publication && publication.published === false) {
     reasons.push({ kind: "publication", text: publicationReason(publication) });
   }
-  if (terminal.terminal !== true && terminal.status === undefined) {
-    // A receipt with no terminal record looks the same while it is being
-    // written and after it was abandoned. Saying 'the run stopped' about one
-    // that is still going is the surface inventing what it cannot see: a run
-    // that then seals turns that sentence into a plain falsehood.
-    reasons.push(running
-      ? { kind: "running", text: "the run is still going: its receipt is sealed when it ends" }
-      : {
-        kind: "incomplete",
-        text: "the receipt has no terminal record: the run stopped before it could finish,"
-          + " or it is still going somewhere this surface did not start it."
-          + " A run started from the page or the terminal screen stops with the app: if it was closed"
-          + " or the phone ended it in the background, start the task again. The work it did is in its"
-          + " worktree (see Worktrees), which is kept until you remove it",
-      });
-  }
+  if (terminal.terminal !== true && terminal.status === undefined) reasons.push(unfinishedReason(running));
   return {
     // 'incomplete' rather than 'unknown': a receipt with no terminal record
     // is not a run whose outcome could not be read, it is a run that never
@@ -206,6 +154,65 @@ export function describeOutcome(receipt, { running = false } = /** @type {any} *
     ...(terminal.git?.mergeRehearsal ? { rehearsal: describeRehearsal(terminal.git.mergeRehearsal) } : {}),
     ...(terminal.cleanup ? { cleanup: terminal.cleanup } : {}),
   };
+}
+
+function stepReasons(failed, blocked) {
+  const reasons = failed.map((step) => ({ kind: "step", step: step.id, text: step.error ?? "failed", attempts: step.attempts }));
+  for (const step of blocked) {
+    reasons.push({
+      kind: "blocked",
+      step: step.id,
+      text: step.reason === "dependency-failed"
+        ? "never ran: a step it needs failed"
+        : step.reason === "fail-fast"
+          ? "never ran: the workflow stops at the first failure"
+          : step.reason ?? "never ran",
+    });
+  }
+  return reasons;
+}
+
+function approvalReasons(rejected) {
+  return rejected.map((approval) => ({
+    kind: "approval",
+    // What it was about and who or what said no: 'read was reject' named
+    // neither, and five of them in a row could not be told apart.
+    text: `${approval.subject || approval.operationKind || "an operation"} was ${approval.decision === "reject" ? "refused" : approval.decision}`
+      + (approval.reason ?? approval.evidence?.reason ? `: ${approval.reason ?? approval.evidence.reason}` : "")
+      + (approval.policy ? ` (policy: ${approval.policy.rule ? `rule '${approval.policy.rule}'` : "the section default"})` : ""),
+  }));
+}
+
+// What the run actually did with its tools. A run can be told to write a
+// file, have the write refused, and still end 'succeeded' because the model
+// finished its turn — the receipt records the refusal, so it is said here
+// rather than left for someone to notice by the file not being there.
+// A refusal that went through an approval already appears as that approval;
+// saying it twice is how five refusals became ten lines. One that never
+// reached an approval (a tool the agent may not use) appears only here.
+function toolReasons(toolCalls, rejected) {
+  const told = new Set(rejected.map((approval) => approval.reason ?? approval.evidence?.reason).filter(Boolean));
+  return toolCalls.filter((call) => call.ok === false && !(call.refused && told.has(call.error))).map((call) => ({
+    kind: "tool",
+    text: `${call.label ?? call.tool ?? "a tool"} ${call.refused ? "was refused" : "failed"}: ${call.error ?? "no reason recorded"}`,
+  }));
+}
+
+// A receipt with no terminal record looks the same while it is being written
+// and after it was abandoned. Saying 'the run stopped' about one that is still
+// going is the surface inventing what it cannot see: a run that then seals
+// turns that sentence into a plain falsehood.
+function unfinishedReason(running) {
+  return running
+    ? { kind: "running", text: "the run is still going: its receipt is sealed when it ends" }
+    : {
+      kind: "incomplete",
+      text: "the receipt has no terminal record: the run stopped before it could finish,"
+        + " or it is still going somewhere this surface did not start it."
+        + " A run started from the page or the terminal screen stops with the app: if it was closed"
+        + " or the phone ended it in the background, start the task again. The work it did is in its"
+        + " worktree (see Worktrees), which is kept until you remove it",
+    };
 }
 
 // One row per tool, so 'it wrote three files and one was refused' is readable

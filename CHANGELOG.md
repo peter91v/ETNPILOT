@@ -30,6 +30,8 @@ pre-1.0, so breaking changes may appear in any release.
 - **A provider that answers 200 with something that is not the API** (a proxy page, a health answer "OK") is
   reported with the address, status, content type and the first words of the body, instead of "Unexpected token
   'O'" or "stream ended before it finished".
+- **Complexity limit 60 → 50** (ESLint): `updateAgent`, `validateWorkflowDefinition`, `describeOutcome`, `planResume`,
+  `setUpRun` and `renderRunDetail` split into named parts, behaviour unchanged.
 - **Resume can discard what the stopped step left** (`etnpilot resume <run> --reset-partial`, and a button on the
   run's page): a step that broke half way leaves files in the worktree, which made the run unresumable. The plan now
   lists them (`resetOffer`), and with the flag the worktree goes back to how the last finished step left it, using

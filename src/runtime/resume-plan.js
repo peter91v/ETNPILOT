@@ -61,29 +61,7 @@ export async function planResume({
   // 2. Which steps would be carried over, in the run's own order. Only an
   // agent step that finished is carried over: its result is in the receipt.
   // Anything else is run again, and so is everything that needs it.
-  const steps = [];
-  const reuse = {};
-  const carried = new Set();
-  for (const step of start.plan) {
-    const evidence = finished.get(step.id);
-    const needsMet = (step.needs ?? []).every((id) => carried.has(id));
-    const agentEntry = [...entries].reverse().find((entry) => entry.type === undefined && entry.workflowStep === step.id && entry.status === "succeeded" && entry.parentRunId === undefined);
-    if (evidence && needsMet && step.type === "agent" && agentEntry) {
-      carried.add(step.id);
-      const { previousHash: _previous, hash, signature: _signature, proof: _proof, ...result } = agentEntry;
-      reuse[step.id] = { result, entryHash: hash, effect: evidence.effect };
-      steps.push({ id: step.id, type: step.type, action: "reuse", effect: evidence.effect, entryHash: hash, workspaceDigest: evidence.workspaceDigest?.digest });
-    } else {
-      const reason = !evidence
-        ? "did not finish"
-        : step.type !== "agent"
-          ? "only agent steps are carried over; this kind runs again"
-          : !needsMet
-            ? "a step it needs is not carried over"
-            : "its result is not in the receipt";
-      steps.push({ id: step.id, type: step.type, action: "rerun", reason });
-    }
-  }
+  const { steps, reuse } = planSteps({ start, entries, finished });
   if (steps.every((step) => step.action === "reuse")) {
     refuse("nothing-left", "Every step finished; the run stopped after them (while sealing or publishing), which a new run cannot help with.");
   }
@@ -222,4 +200,33 @@ async function checkWorkspace({ repositoryRoot, workspacePath, expected, lastDon
 function shortDigest(digest) {
   const parsed = parseDigest(digest);
   return parsed ? `${parsed.head.slice(0, 8)}:${parsed.tree.slice(0, 8)}` : String(digest);
+}
+
+// Step 2 of the plan: for each step of the run, in its own order, whether its
+// result is carried over or the step runs again, and why.
+function planSteps({ start, entries, finished }) {
+  const steps = [];
+  const reuse = {};
+  const carried = new Set();
+  for (const step of start.plan) {
+    const evidence = finished.get(step.id);
+    const needsMet = (step.needs ?? []).every((id) => carried.has(id));
+    const agentEntry = [...entries].reverse().find((entry) => entry.type === undefined && entry.workflowStep === step.id && entry.status === "succeeded" && entry.parentRunId === undefined);
+    if (evidence && needsMet && step.type === "agent" && agentEntry) {
+      carried.add(step.id);
+      const { previousHash: _previous, hash, signature: _signature, proof: _proof, ...result } = agentEntry;
+      reuse[step.id] = { result, entryHash: hash, effect: evidence.effect };
+      steps.push({ id: step.id, type: step.type, action: "reuse", effect: evidence.effect, entryHash: hash, workspaceDigest: evidence.workspaceDigest?.digest });
+    } else {
+      const reason = !evidence
+        ? "did not finish"
+        : step.type !== "agent"
+          ? "only agent steps are carried over; this kind runs again"
+          : !needsMet
+            ? "a step it needs is not carried over"
+            : "its result is not in the receipt";
+      steps.push({ id: step.id, type: step.type, action: "rerun", reason });
+    }
+  }
+  return { steps, reuse };
 }
