@@ -1,6 +1,7 @@
+// @ts-check
 // German texts for the review page, keyed by the exact English text. A text
 // that is not here shows in English: the page never shows an empty label.
-const DE = {
+export const DE = {
   "Overview": "Übersicht",
   "What is waiting for you, what is running, and how the last runs ended.": "Was auf dich wartet, was läuft und wie die letzten Läufe geendet haben.",
   "Chat": "Chat",
@@ -467,7 +468,8 @@ const DE = {
 // Texts built from running values: matched whole, with the values carried over.
 // The first that matches wins. Values that are themselves sentences stay as
 // they are.
-const DE_PATTERNS = [
+/** @type {Array<[RegExp, (...groups: any[]) => string]>} */
+export const DE_PATTERNS = [
   [/^Created (.+)\.$/, (_, file) => `${file} angelegt.`],
   [/^Created (.+)\. Opening the review page…$/, (_, file) => `${file} angelegt. Öffnet die Prüfseite…`],
   [/^Creating, and asking (.+) about this repository — this can take a minute…$/, (_, name) => `Legt an und fragt ${name} zu diesem Repository — das kann eine Minute dauern…`],
@@ -509,7 +511,7 @@ const DE_PATTERNS = [
   [/^This deletes (.+) from the project directory\. If it was committed, git can bring it back; if not, it is gone\. Content that other things still use is refused\.$/, (_, path) => `Das löscht ${path} aus dem Projektverzeichnis. Wenn es committet war, kann Git es zurückholen; sonst ist es weg. Inhalt, den anderes noch nutzt, wird abgelehnt.`],
   [/^Removed (.+)\.$/, (_, name) => `${name} entfernt.`],
   [/^Saved (.+)\. It is not reviewed yet: read it under Content, then lock it\.$/, (_, path) => `${path} gespeichert. Es ist noch nicht geprüft: Lies es unter Inhalt und sperr es dann.`],
-  [/^effort (.+)$/, (_, level) => `Aufwand ${level}`],
+  [/^effort ([^·]+)$/, (_, level) => `Aufwand ${level}`],
   [/^Edit (.+)$/, (_, name) => `${name} bearbeiten`],
   [/^(\d+) (new|changed|removed): (.+)$/, (_, n, kind, list) => `${n} ${{ new: "neu", changed: "geändert", removed: "entfernt" }[kind]}: ${list}`],
   [/^Resuming (.+): it appears under working now\.$/, (_, id) => `Setzt ${id} fort: er erscheint jetzt unter „Arbeitet gerade“.`],
@@ -518,16 +520,16 @@ const DE_PATTERNS = [
   [/^(\d+) checks$/, (_, n) => `${n} Prüfungen`],
   [/^(\d+) run$/, (_, n) => `${n} ausgeführt`],
   [/^(\d+) failing$/, (_, n) => `${n} fehlgeschlagen`],
-  [/^ran (.+)$/, (_, t) => `ausgeführt ${t}`],
+  [/^ran ([^·]+)$/, (_, t) => `ausgeführt ${t}`],
   [/^updated (.+) · polls every 5s$/, (_, t) => `aktualisiert ${t} · fragt alle 5 s ab`],
-  [/^oldest (.+)$/, (_, t) => `älteste ${t}`],
+  [/^oldest ([^·]+)$/, (_, t) => `älteste ${t}`],
   [/^(\d+) open$/, (_, n) => `${n} offen`],
   [/^(\d+) local settings are refused; a run will not start until they are gone\.$/, (_, n) => `${n} lokale Einstellungen werden abgelehnt; ein Lauf startet nicht, solange sie bestehen.`],
   [/^([\d.,]+) in · ([\d.,]+) out$/, (_, a, b) => `${a} ein · ${b} aus`],
   [/^([\d.,]+) agent calls, as the provider counts them$/, (_, n) => `${n} Agent-Aufrufe, wie der Anbieter sie zählt`],
-  [/^agent (.+)$/, (_, name) => `Agent ${name}`],
+  [/^agent ([^·]+)$/, (_, name) => `Agent ${name}`],
   [/^Stopping: (.+)\. It is sealed as failed; you can resume it from Runs\.$/, (_, task) => `Bricht ab: ${task}. Er wird als fehlgeschlagen versiegelt; du kannst ihn unter Läufe fortsetzen.`],
-  [/^in (.+)$/, (_, what) => `in ${what}`],
+  [/^in ([^·]+)$/, (_, what) => `in ${what}`],
   [/^working(.*)$/, (_, rest) => `arbeitet${rest}`],
   [/^(Answered|Left open) — recorded in the receipt\.$/, (_, what) => `${what === "Answered" ? "Beantwortet" : "Offen gelassen"} — im Beleg festgehalten.`],
   [/^(.+) (approved|rejected) — recorded in the receipt\.$/, (_, what, how) => `${what} ${how === "approved" ? "genehmigt" : "abgelehnt"} — im Beleg festgehalten.`],
@@ -550,7 +552,7 @@ const DE_PATTERNS = [
   [/^(.+) is gone; its branch (.*) still exists\.$/, (_, name, branch) => `${name} ist weg; sein Branch ${branch} gibt es noch.`],
   [/^(.+) keeps unsaved work — nothing was removed\.$/, (_, name) => `${name} hat ungesicherte Arbeit — nichts wurde entfernt.`],
   [/^(\d+) ours$/, (_, n) => `${n} unsere`],
-  [/^target (.+)$/, (_, name) => `Ziel ${name}`],
+  [/^target ([^·]+)$/, (_, name) => `Ziel ${name}`],
   [/^draft · (.+)$/, (_, status) => `Entwurf · ${status}`],
   [/^Show all (\d+)$/, (_, n) => `Alle ${n} zeigen`],
   [/^(\d+) in effect$/, (_, n) => `${n} in Kraft`],

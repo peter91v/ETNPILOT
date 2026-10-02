@@ -2,6 +2,7 @@
 import { screen, shortId } from "./ansi.js";
 import { parseSettingValue } from "../config/settings.js";
 import { createChatController } from "./chat-controller.js";
+import { languageFrom } from "../i18n/translate.js";
 import { activeRunFor, clamp, flattenAgents, mergeEntries, renderApp, settingEntries, settingLiteral, settingValue, viewList } from "./render.js";
 
 const VIEWS = viewList();
@@ -17,6 +18,7 @@ export function createTuiApp({
   worktreeIntervalMs = 5000,
   actor = process.env.USER ?? "tui",
   now = Date.now,
+  language = languageFrom(process.env),
 } = /** @type {any} */ ({})) {
   if (!state) throw new TypeError("The TUI requires an open project state.");
   if (!Number.isInteger(pollIntervalMs) || pollIntervalMs < 50) {
@@ -324,6 +326,7 @@ export function createTuiApp({
         width: output.columns || 100,
         height: output.rows || 30,
         color: output.isTTY === true && !process.env.NO_COLOR,
+        language,
         now: now(),
         editor,
         filter,
