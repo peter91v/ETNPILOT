@@ -124,3 +124,31 @@ test("the content lock does not see a proposal, so verification is unchanged unt
   await writeProposals(root, [{ ...good, agent: "builder" }], "run-1");
   assert.equal((await captureProjectContent(root)).manifest.digest, before);
 });
+
+test("the token goes to git for the GitLab's own address only, and a remote that is another project is refused before anything is pushed", async () => {
+  const { pushEnvironment, remoteMismatch } = await import("../src/gitlab/publisher.js");
+  const env = pushEnvironment("https://git.example.test/", "glpat-secret", { PATH: "/bin" });
+  assert.equal(env.GIT_CONFIG_KEY_0, "http.https://git.example.test/.extraHeader", "scoped to that address");
+  assert.equal(Buffer.from(env.GIT_CONFIG_VALUE_0.split(" ").at(-1), "base64").toString(), "oauth2:glpat-secret");
+  assert.equal(env.GIT_TERMINAL_PROMPT, "0", "nothing is asked on a terminal");
+  assert.equal(JSON.stringify(env).includes("glpat-secret"), false, "the token itself is not in the environment in the clear");
+
+  assert.match(remoteMismatch("https://git.example.test/g/other.git", "https://git.example.test", "g/p"), /points to 'g\/other' but git\.project is 'g\/p'/);
+  assert.match(remoteMismatch("git@git.example.test:g/other.git", "https://git.example.test", "g/p"), /g\/other/);
+  assert.equal(remoteMismatch("https://git.example.test/g/p.git", "https://git.example.test", "g/p"), undefined);
+  assert.equal(remoteMismatch("https://oauth2:x@git.example.test/G/P", "https://git.example.test", "g/p"), undefined, "case and credentials in the address do not matter");
+  assert.equal(remoteMismatch("/tmp/some/bare", "https://git.example.test", "g/p"), undefined, "a local path is not this check's business");
+  assert.equal(remoteMismatch("https://elsewhere.test/g/other.git", "https://git.example.test", "g/p"), undefined, "nor is another host");
+
+  const work = await mkdtemp(join(tmpdir(), "etn-mismatch-"));
+  await git(["init", "-b", "main"], { cwd: work });
+  await writeFile(join(work, "a.txt"), "one");
+  await git(["add", "."], { cwd: work });
+  await git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-m", "base"], { cwd: work });
+  await git(["remote", "add", "gitlab", "https://git.example.test/g/other.git"], { cwd: work });
+  await writeFile(join(work, "a.txt"), "two");
+  const publisher = new GitLabPublisher({ baseUrl: "https://git.example.test", project: "g/p", token: "t", fetchImpl: async () => { throw new Error("no request may be made"); } });
+  await assert.rejects(publisher.publish({ cwd: work, branch: "main", title: "x", description: "d" }), /git remote points to 'g\/other'/);
+  await git(["remote", "remove", "gitlab"], { cwd: work });
+  await assert.rejects(publisher.publish({ cwd: work, branch: "main", title: "x", description: "d" }), /no git remote called 'gitlab'/);
+});

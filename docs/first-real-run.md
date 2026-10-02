@@ -19,12 +19,13 @@ it has not, it says that too. Filling this in is the point of the document.
 | A real OpenAI call reaches a real model | a run failed at `plan` with the server's own 400 about `reasoning_effort`, which only a real endpoint produces | Termux, 2026-09-24 |
 | The review page works on a phone | driven in Chromium at 412px, every control | this repository |
 | A real GitLab instance can be read: the token, the address and the project resolve, merge requests are listed | merge requests listed on the page (reported by the owner; the exact output was not sent) | self-hosted GitLab, Termux, 2026-10-02 |
+| The forge protocol works against a real GitLab: branch, commit, Draft MR, approvals and pipelines read, cleanup | `smoke --gitlab-write`: `branch, commit and Draft MR !10 created and removed again; approvals read; no successful pipeline seen (created, created); receipt verified`. Before that, three runs showed that this GitLab answers `500` when a merge request is closed (the MRs end up closed or can be removed) | self-hosted GitLab, Termux, 2026-10-02 |
 | A real GitLab instance accepts what a run publishes | **nothing** | — |
 | A run completes end to end against a real provider | `plan → build → test → review` succeeded; 101,595 tokens, clean merge rehearsal | Termux, OpenAI, 2026-09-30 |
 
-The real GitLab *write* row remains open (the write smoke, `smoke --gitlab-write`, has not been reported yet): publishing a reviewed run to an isolated test
+The real GitLab *publication* row remains open (the forge protocol itself has now been exercised by the write smoke): publishing a reviewed run to an isolated test
 project, checking its pipeline and approvals, and cleaning up the Draft MR and branch
-(`etnpilot smoke --gitlab-write --confirm-writes`, then a published run).
+(a published run, after `etnpilot smoke --gitlab-write --confirm-writes`, which passed).
 
 ## Before you start
 
@@ -185,6 +186,19 @@ Six distinct failures, each now fixed and each with a test:
 
 Still open from that day: no step of a run reached GitLab, because the run
 never got past `plan`.
+
+### 2026-10-02 — a self-hosted GitLab, from a phone
+
+Reading worked at once (token, address, project, merge requests listed). The write smoke took four runs:
+
+1. A `502 GitLab is not responding` on the first request, once.
+2. Three runs created the branch, the commit and the Draft MR and then failed to close the MR: `500 Internal Server Error`,
+   with a body and through the address, and the cleanup said only `mr-close-failed`. The merge requests turned out to be
+   closed in the list while the call answered 500, and the oldest one cannot be opened at all (500 in GitLab's own page).
+   That is the server, not the client; request ids went to the GitLab administrator.
+3. What changed in ETNPilot because of it: a failed cleanup carries GitLab's status, message and request id; closing is
+   retried through the address; the state is read after an error; a merge request that cannot be closed is removed.
+4. The fourth run passed. Pipelines were created for the branch but stayed `created`: no runner picked them up.
 
 ### Not yet done
 

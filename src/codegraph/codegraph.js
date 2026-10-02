@@ -180,6 +180,11 @@ export function createCodeGraphMcpServer(projectRoot, config = {}) {
     env: {
       CODEGRAPH_TELEMETRY: "0",
       CODEGRAPH_NO_UPDATE_CHECK: "1",
+      // Every run has a worktree of its own. CodeGraph's daemon is meant to be shared by
+      // several clients of one project and keeps running after the last of them leaves; a
+      // run's worktree is removed, and a daemon still holding a socket in it writes into the
+      // place it was. Without it the server is an ordinary child that ends with its client.
+      CODEGRAPH_NO_DAEMON: "1",
     },
   };
 }

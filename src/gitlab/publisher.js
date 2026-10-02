@@ -4,10 +4,44 @@ import { GitLabClient } from "./client.js";
 
 const DEFAULT_COMMITTER = Object.freeze({ name: "ETNPilot", email: "etnpilot@localhost" });
 
+// The environment git is given to push to the GitLab: the token as a header for
+// that one address, so it is sent to that host and no other, and nothing is
+// asked on a terminal. It travels in the environment, not in the arguments,
+// where every process of the user can read it. 'oauth2' is the user name GitLab
+// takes for a token.
+export function pushEnvironment(baseUrl, token, base = process.env) {
+  const env = { ...base, GIT_TERMINAL_PROMPT: "0" };
+  let origin;
+  try { origin = new URL(baseUrl).origin; } catch { return env; }
+  if (!origin.startsWith("https://") && !origin.startsWith("http://")) return env;
+  const header = `Authorization: Basic ${Buffer.from(`oauth2:${token}`).toString("base64")}`;
+  return { ...env, GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: `http.${origin}/.extraHeader`, GIT_CONFIG_VALUE_0: header };
+}
+
+// Whether the remote is another project than the one the merge request is made
+// in: a branch pushed to one and a merge request opened in the other is a branch
+// in the wrong place and a merge request that cannot be made. Returns a sentence
+// when they differ, nothing when they match or when the remote is not an address
+// on this GitLab (a local path, another host), which is not this check's business.
+export function remoteMismatch(remoteUrl, baseUrl, project) {
+  if (!remoteUrl || !baseUrl || !project || /^\d+$/.test(String(project))) return undefined;
+  let host;
+  try { host = new URL(baseUrl).host; } catch { return undefined; }
+  const web = /^https?:\/\/(?:[^@/]+@)?([^/]+)\/(.+)$/i.exec(remoteUrl);
+  const scp = /^(?:[^@]+@)?([^:/]+):(?!\/\/)(.+)$/.exec(remoteUrl);
+  const match = web ?? scp;
+  if (!match || match[1].toLowerCase() !== host.toLowerCase()) return undefined;
+  const path = match[2].replace(/\.git$/i, "").replace(/\/+$/, "");
+  if (path.toLowerCase() === String(project).toLowerCase()) return undefined;
+  return `The git remote points to '${path}' but git.project is '${project}'. Point the remote at the project (git remote set-url <remote> ${web ? `${baseUrl.replace(/\/$/, "")}/${project}.git` : `<address of ${project}>`}) or git.project at the remote.`;
+}
+
 export class GitLabPublisher {
   constructor({ baseUrl, project, token, remote = "gitlab", committer, fetchImpl }) {
     if (!project) throw new TypeError("GitLab project is required.");
     if (!token) throw new Error("ETNPILOT_GITLAB_TOKEN is required for GitLab publishing.");
+    this.baseUrl = baseUrl;
+    this.token = token;
     this.project = project;
     this.remote = remote;
     this.committer = { ...DEFAULT_COMMITTER, ...(committer ?? {}) };
@@ -15,6 +49,12 @@ export class GitLabPublisher {
   }
 
   async publish({ cwd, branch, targetBranch = "main", title, description, receipt, receiptProof, proposalsPath }) {
+    // Before anything is committed: a push to the wrong project, or to a remote
+    // that is not there, is found out while nothing has happened yet.
+    const remoteUrl = await git(["remote", "get-url", this.remote], { cwd }).then((result) => result.stdout, () => undefined);
+    if (remoteUrl === undefined) throw new Error(`There is no git remote called '${this.remote}' in this worktree (git.remote). Add one: git remote add ${this.remote} <address of ${this.project}>.`);
+    const mismatch = remoteMismatch(remoteUrl, this.baseUrl, this.project);
+    if (mismatch) throw new Error(mismatch);
     const status = await git(["status", "--porcelain"], { cwd });
     if (!status.stdout) throw new Error("Nothing to publish: the worktree has no changes.");
     // Automated runs carry their own identity so publishing also works where
@@ -36,7 +76,7 @@ export class GitLabPublisher {
         await commit("ETNPilot: proposed instruction changes (not applied — read before adopting)");
       }
     }
-    await git(["push", "--set-upstream", this.remote, branch], { cwd });
+    await git(["push", "--set-upstream", this.remote, branch], { cwd, env: pushEnvironment(this.baseUrl, this.token) });
     const mergeRequest = await this.client.createMergeRequest(this.project, {
       sourceBranch: branch,
       targetBranch,

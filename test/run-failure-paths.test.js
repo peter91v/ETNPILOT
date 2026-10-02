@@ -76,7 +76,7 @@ test("a run that cannot be set up leaves no worktree and no receipt behind", asy
   const error = await runProject({ root, input: "x", providerFactories: fake() }).then(() => undefined, (failure) => failure);
   assert.match(error.message, /Unknown workflow agent/);
   assert.ok(error.workspaceCleanup, "the discarded workspace is reported");
-  assert.deepEqual(await readdir(join(root, ".etnpilot", "worktrees")).catch(() => []), []);
+  assert.deepEqual(await readdir(join(root, ".etnpilot", "worktrees")).catch(() => []), [], JSON.stringify(error.workspaceCleanup));
   assert.equal((await receipts(root)).length, 0);
 });
 
