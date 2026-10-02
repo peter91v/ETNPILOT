@@ -293,3 +293,22 @@ test("in a German browser the page speaks German in every view, still fits 412 p
     await ui.close();
   }
 });
+
+test("the page for a directory with no project speaks German in a German browser, and still creates the project", async (t) => {
+  if (skipReason) return t.skip(skipReason);
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-ui-empty-"));
+  const ui = await open({ root }, { locale: "de-DE" });
+  try {
+    assert.match(await ui.page.locator("h1").innerText(), /Hier gibt es noch kein Projekt/);
+    assert.match(await ui.page.locator("body").innerText(), /Wähle, was angelegt werden soll/);
+    assert.equal(await ui.page.title(), "ETNPilot — hier gibt es noch kein Projekt");
+    const overflow = await ui.page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    assert.ok(overflow <= 1, `the page is ${overflow}px wider than the screen`);
+    await ui.page.selectOption("#language", "en");
+    await ui.page.waitForLoadState("networkidle");
+    assert.match(await ui.page.locator("h1").innerText(), /No project here yet/);
+    assert.deepEqual(ui.problems, []);
+  } finally {
+    await ui.close();
+  }
+});

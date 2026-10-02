@@ -15,20 +15,27 @@ const LANG = (() => {
 
 const TRANSLATED_ATTRIBUTES = ["title", "aria-label", "placeholder"];
 
+// The text with its own leading and trailing space kept and everything between
+// replaced.
+function replaceTrimmed(text, replacement) {
+  return text.slice(0, text.length - text.trimStart().length) + replacement + text.slice(text.trimEnd().length);
+}
+
 function translateText(text) {
-  const trimmed = text.trim();
+  // Markup is wrapped over lines; a text is looked up as one line of single spaces.
+  const trimmed = text.trim().replace(/\s+/g, " ");
   if (!trimmed) return text;
-  if (Object.hasOwn(DE, trimmed)) return text.replace(trimmed, DE[trimmed]);
+  if (Object.hasOwn(DE, trimmed)) return replaceTrimmed(text, DE[trimmed]);
   for (const [pattern, build] of DE_PATTERNS) {
     const match = pattern.exec(trimmed);
-    if (match) return text.replace(trimmed, build(...match));
+    if (match) return replaceTrimmed(text, build(...match));
   }
   // Parts drawn as one line: "title — explanation", "a · b · c".
   for (const separator of [" — ", " · "]) {
     if (!trimmed.includes(separator)) continue;
     const parts = trimmed.split(separator);
     const translated = parts.map((part) => translateText(part));
-    if (translated.some((part, index) => part !== parts[index])) return text.replace(trimmed, translated.join(separator));
+    if (translated.some((part, index) => part !== parts[index])) return replaceTrimmed(text, translated.join(separator));
   }
   return text;
 }
@@ -53,6 +60,7 @@ function translateTree(root) {
 function startTranslation() {
   document.documentElement.lang = LANG;
   if (LANG !== "de") return;
+  document.title = translateText(document.title);
   const observer = new MutationObserver((records) => {
     for (const record of records) {
       if (record.type === "characterData") translateTree(record.target);
@@ -65,7 +73,7 @@ function startTranslation() {
 }
 
 function addLanguageSwitch() {
-  const footer = document.querySelector(".sidebar-footer");
+  const footer = document.getElementById("language-slot") ?? document.querySelector(".sidebar-footer");
   if (!footer) return;
   const label = document.createElement("label");
   label.className = "runtime-meta";

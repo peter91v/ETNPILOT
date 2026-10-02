@@ -23,7 +23,7 @@ test("every German text is for an English text the page can show", async () => {
   // a service's help), so the whole of src/ is searched.
   const { readdir: list } = await import("node:fs/promises");
   const names = (await list(new URL("../src/", import.meta.url), { recursive: true })).filter((file) => /\.(js|html)$/.test(file) && !file.endsWith("i18n-de.js"));
-  const source = (await Promise.all(names.map((file) => readFile(new URL(`../src/${file}`, import.meta.url), "utf8")))).join("\n");
+  const source = (await Promise.all(names.map((file) => readFile(new URL(`../src/${file}`, import.meta.url), "utf8")))).join("\n").replace(/"\s*\+\s*"/g, "").replace(/\s+/g, " ");
   const catalog = (await readFile(new URL("i18n-de.js", directory), "utf8")).split("\n").map((line) => /^ {2}"((?:[^"\\]|\\.)*)": "/.exec(line)?.[1]).filter(Boolean);
   const dead = catalog.filter((key) => !source.includes(JSON.stringify(key).slice(1, -1)) && !source.includes(key.replaceAll("'", "\\'")) && !source.includes(key));
   assert.deepEqual(dead, []);
@@ -33,7 +33,7 @@ test("every German text is for an English text the page can show", async () => {
 test("German patterns turn built texts into German, and leave other text alone", async () => {
   const directory = new URL("../src/ui/client/", import.meta.url);
   const source = `${await readFile(new URL("i18n-de.js", directory), "utf8")}\n${(await readFile(new URL("i18n.js", directory), "utf8")).split("const TRANSLATED_ATTRIBUTES")[0].split("const LANG")[0]}`;
-  const translate = new Function(`${source}\n${(await readFile(new URL("i18n.js", directory), "utf8")).match(/function translateText[\s\S]*?\n}\n/)[0]}\nreturn translateText;`)();
+  const translate = new Function(`${source}\n${(await readFile(new URL("i18n.js", directory), "utf8")).match(/function replaceTrimmed[\s\S]*?\n}\n/)[0]}\n${(await readFile(new URL("i18n.js", directory), "utf8")).match(/function translateText[\s\S]*?\n}\n/)[0]}\nreturn translateText;`)();
   assert.equal(translate("5m ago"), "5m ago".replace("5m ago", "vor 5m"));
   assert.equal(translate("  3 open "), "  3 offen ");
   assert.equal(translate("12 of 40 loaded"), "12 von 40 geladen");
