@@ -1,6 +1,7 @@
 // @ts-check
 import { randomBytes } from "node:crypto";
-import { AUTHOR_KINDS, IMPROVE_KINDS, applyDraft, draftImprovement, draftNew, renderDiff } from "../forge/author.js";
+import { join } from "node:path";
+import { AUTHOR_KINDS, IMPROVE_KINDS, applyDraft, draftImprovement, draftNew, listItems, renderDiff } from "../forge/author.js";
 
 // The page's side of 'etnpilot author'. A draft is made on request and kept
 // here; the page can only accept a draft by its id, so it can never ask for a
@@ -34,8 +35,11 @@ export function createAuthorRoutes({ root, env = process.env, getConfig, fetchIm
         if (!draft) return { status: 404, body: { error: "That draft is gone. Ask for it again.", code: "unknown_draft" } };
         const result = await applyDraft(draft, { root });
         drafts.delete(id);
-        const written = result.written ?? [...result.agents, ...result.skills, ...result.instructions].map((entry) => entry.to);
+        const written = result.written ?? [...result.agents, ...result.skills, ...result.instructions, ...(result.prompts ?? [])].map((entry) => entry.to);
         return { status: 200, body: { written, skipped: result.skipped ?? [] } };
+      }
+      if (method === "POST" && pathname === "/api/author/items") {
+        return { status: 200, body: { names: await listItems(String(body?.kind), join(root, ".etnpilot")) } };
       }
       if (method === "POST" && pathname === "/api/author/discard") {
         drafts.delete(String(body?.id ?? ""));
@@ -55,7 +59,7 @@ export function createAuthorRoutes({ root, env = process.env, getConfig, fetchIm
 function describe(id, draft) {
   const provider = draft.provider ? { name: draft.provider.name, model: draft.provider.model, preferred: draft.provider.preferred } : undefined;
   if (draft.mode === "new") {
-    const item = draft.plan.agents[0] ?? draft.plan.skills[0] ?? draft.plan.instructions[0];
+    const item = draft.plan.agents[0] ?? draft.plan.skills[0] ?? draft.plan.instructions[0] ?? draft.plan.prompts[0];
     return { id, mode: "new", kind: draft.kind, preview: draft.preview, notes: draft.notes ?? [], text: item.prompt ?? item.body, provider };
   }
   return { id, mode: "improve", kind: draft.kind, name: draft.name, path: draft.path, summary: draft.summary, diff: renderDiff(draft.diff), provider };
