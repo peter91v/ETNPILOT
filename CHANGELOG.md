@@ -30,6 +30,8 @@ pre-1.0, so breaking changes may appear in any release.
 - **A provider that answers 200 with something that is not the API** (a proxy page, a health answer "OK") is
   reported with the address, status, content type and the first words of the body, instead of "Unexpected token
   'O'" or "stream ended before it finished".
+- **The terminal interface in German** (`ETNPILOT_LANG=de`, or a German locale): header, keys, lists, empty states,
+  help and the first-run screen. The catalog is now a module, `src/i18n/` (shared with the pages). See docs/tui.md.
 - **The setup page in German** (the page for a directory with no project): same catalog, same language switch,
   title included.
 - **The review page in German**: a German browser gets German labels, descriptions, buttons and empty states;

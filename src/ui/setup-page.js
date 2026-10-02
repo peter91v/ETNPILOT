@@ -1,5 +1,6 @@
 // @ts-check
 import { readFileSync } from "node:fs";
+import { CATALOG } from "./page.js";
 // The page for a directory with no project in it. It is a page of its own
 // rather than an eighth view, for the same reason the terminal interface makes
 // it a screen of its own: there is nothing else to look at yet.
@@ -8,7 +9,7 @@ import { readFileSync } from "node:fs";
 // from a network, every value inserted as text. Material Design 3 throughout,
 // from the same tokens — a second design system for one screen would be a
 // second design system.
-const TRANSLATION = ["i18n-de", "i18n"].map((name) => readFileSync(new URL(`./client/${name}.js`, import.meta.url), "utf8")).join("\n");
+const TRANSLATION = `${CATALOG}\n${readFileSync(new URL("./client/i18n.js", import.meta.url), "utf8")}`;
 
 export function renderSetupPage(token, status) {
   const data = JSON.stringify({

@@ -35,10 +35,11 @@ export function renderApp(state, options = {}) {
     worktrees,
     merges,
     active = [],
+    language = "en",
   } = options;
   const worktreeDiffOpen = Boolean(options.worktreeDiff);
   const agentTextOpen = Boolean(options.agentText);
-  const style = createStyle({ color });
+  const style = createStyle({ color, language });
   // Typing happens on the bottom line, the way a terminal tool has always done
   // it, so whatever you were looking at stays on screen while you type.
   const input = inputState({ prompt, editor, filtering, filter, compose });
@@ -122,8 +123,8 @@ function header(state, { style, width, view, project, active = [] }) {
   // the strip was cut mid-word, which loses both the tabs it dropped and the
   // count on the right. Below that width the header names the view you are on
   // and its number, which is what the keys 1-7 need anyway.
-  const plain = `ETNPILOT  ${VIEWS.map(label).join("  ·  ")}`;
-  const compact = `${label(view)} ${VIEWS.indexOf(view) + 1}/${VIEWS.length}`;
+  const plain = `ETNPILOT  ${VIEWS.map((name) => style.say(label(name))).join("  ·  ")}`;
+  const compact = `${style.say(label(view))} ${VIEWS.indexOf(view) + 1}/${VIEWS.length}`;
   const left = plain.length + 12 <= width
     ? `${brand}  ${tabs}`
     : `${brand}  ${style.bold(style.accent(compact))}`;

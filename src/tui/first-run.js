@@ -1,4 +1,5 @@
 // @ts-check
+import { languageFrom } from "../i18n/translate.js";
 import { createStyle, pad, screen, truncate } from "./ansi.js";
 import { clamp, wrap } from "./render.js";
 import { splitKeys } from "./app.js";
@@ -19,8 +20,9 @@ export function renderFirstRun(status, {
   busy = false,
   importing = true,
   forging = true,
+  language = "en",
 } = /** @type {any} */ ({})) {
-  const style = createStyle({ color });
+  const style = createStyle({ color, language });
   const templates = status.templates ?? [];
   const lines = [
     `${style.bold(style.accent("ETNPILOT"))}  ${style.dim("no project here yet")}`,
@@ -82,6 +84,7 @@ export function createFirstRunApp({
   root = process.cwd(),
   output = process.stdout,
   input = process.stdin,
+  language = languageFrom(process.env),
 } = /** @type {any} */ ({})) {
   let status;
   let cursor = 0;
@@ -109,6 +112,7 @@ export function createFirstRunApp({
         width: output.columns || 100,
         height: output.rows || 30,
         color: output.isTTY === true && !process.env.NO_COLOR,
+        language,
         cursor,
         message,
         busy,

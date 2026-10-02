@@ -2,6 +2,8 @@
 // Terminal primitives as plain strings. Nothing here touches a real terminal,
 // so the renderers built on it stay pure and testable without a TTY.
 
+import { translateSegment } from "../i18n/translate.js";
+
 const ESCAPE = /\u001B\[[0-9;]*[A-Za-z]/g;
 
 // The same palette the web surface uses, mapped onto the 256-colour cube.
@@ -15,10 +17,15 @@ export const COLORS = Object.freeze({
   ink: 252,
 });
 
-export function createStyle({ color = true } = /** @type {any} */ ({})) {
-  const paint = (text, code) => (color ? `\u001B[38;5;${code}m${text}\u001B[39m` : String(text));
+// 'language' is "en" or "de". Every word on screen goes through one of these, so
+// translating here reaches nearly all of them, in colour and without, and before
+// a column is padded or a line cut.
+export function createStyle({ color = true, language = "en" } = /** @type {any} */ ({})) {
+  const say = (text) => translateSegment(text, language);
+  const paint = (text, code) => (color ? `\u001B[38;5;${code}m${say(text)}\u001B[39m` : say(text));
   return {
     enabled: color,
+    language,
     accent: (text) => paint(text, COLORS.accent),
     ok: (text) => paint(text, COLORS.ok),
     warn: (text) => paint(text, COLORS.warn),
@@ -27,8 +34,10 @@ export function createStyle({ color = true } = /** @type {any} */ ({})) {
     dim: (text) => paint(text, COLORS.dim),
     ink: (text) => paint(text, COLORS.ink),
     tone: (text, name) => paint(text, COLORS[name] ?? COLORS.ink),
-    bold: (text) => (color ? `\u001B[1m${text}\u001B[22m` : String(text)),
-    invert: (text) => (color ? `\u001B[7m${text}\u001B[27m` : String(text)),
+    bold: (text) => (color ? `\u001B[1m${say(text)}\u001B[22m` : say(text)),
+    invert: (text) => (color ? `\u001B[7m${say(text)}\u001B[27m` : say(text)),
+    // For text that is not drawn through a colour.
+    say,
   };
 }
 

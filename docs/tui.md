@@ -10,6 +10,15 @@ the settings in effect. It reads and writes the same files and databases the
 CLI uses, so a decision made here is the same decision made there, and a
 setting changed here is refused for the same reasons.
 
+## Language
+
+The interface is written in English and shows German when `ETNPILOT_LANG=de` is set, or when the locale says so
+(`LC_ALL`, `LC_MESSAGES`, then `LANG`, e.g. `de_DE.UTF-8`). `ETNPILOT_LANG=en` turns it off. The texts are in
+`src/i18n/de-tui.js` (and `src/i18n/de.js`, shared with the review page); a text that is not there stays English.
+Words are looked up where they are drawn, before a column is padded or a line is cut, so tables keep their
+alignment (the German header words are short on purpose). Names that happen to equal a catalog word (an agent called
+`plan`, say) are shown translated too.
+
 ## Keys
 
 | Key | Does |
