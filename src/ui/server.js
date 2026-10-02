@@ -249,6 +249,15 @@ export async function createReviewServer({
   });
   // The checks this project can run on itself. Listing them is part of the
   // state; running one is a POST, because it reads the working tree.
+  // Read only: which steps of a run would be reused if it were resumed.
+  route("GET", "/api/resume-plan", async ({ request, response, url, state }) => {
+    const file = url.searchParams.get("file");
+    if (!file) throw badRequest("A receipt file is required.");
+    const plan = await state.resumePlan(file).catch((error) => {
+      throw error instanceof TypeError ? badRequest(error.message) : error;
+    });
+    return send(response, 200, plan);
+  });
   route("GET", "/api/checks", async ({ request, response, url, state }) => {
     return send(response, 200, { checks: state.checks() });
   });

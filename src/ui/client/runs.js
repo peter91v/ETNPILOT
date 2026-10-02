@@ -595,6 +595,7 @@ function openReceipt(run) {
       openRun = { file: run.receiptFile, run, receipt: await api("/api/runs/" + encodeURIComponent(run.receiptFile)) };
       // One run's verdict must never be left attached to another run's file.
       verification = undefined;
+      resumePlan = undefined;
       expandedAgents = new Set();
       clearError();
       render();
@@ -736,7 +737,8 @@ function renderRunDetail() {
     ]));
     body.push(el("p", { class: verification.valid ? "muted" : "notice bad", text: verification.text }));
   }
-  body.push(el("div", { class: "row" }, [button("Close", { onClick: () => { openRun = undefined; verification = undefined; expandedAgents = new Set(); render(); renderPageActions(); } })]));
+  body.push(...resumePlanRows(receipt, run));
+  body.push(el("div", { class: "row" }, [button("Close", { onClick: () => { openRun = undefined; verification = undefined; resumePlan = undefined; expandedAgents = new Set(); render(); renderPageActions(); } })]));
   // What the panel says about the receipt has to be what the receipt is: the
   // header claimed 'sealed' over a note saying it never was.
   const meta = sealed ? "sealed receipt" : status === "running" ? "still running" : "receipt not sealed";

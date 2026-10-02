@@ -10,6 +10,8 @@ import { loadConfig } from "../config/load.js";
 import { describeSettings, setSetting, unsetSetting } from "../config/settings.js";
 import { ApprovalInbox } from "../core/approval-inbox.js";
 import { chatApi } from "./project-chat.js";
+import { planResume } from "./resume-plan.js";
+import { loadReceiptVerifiers } from "../core/receipt-signing.js";
 import { startProjectRun } from "./project-run-start.js";
 import { listChecks, runProjectCheck } from "./project-checks.js";
 import { createSecretResolver } from "../secrets/resolver.js";
@@ -183,6 +185,13 @@ export async function openProjectState({ root = process.cwd(), env = process.env
     // Whether a receipt is what it claims: the hash chain, and the signature
     // where the project signs. The same name check 'readReceipt' applies, for
     // the same reason — a file name from a surface never decides what is read.
+    // Whether an earlier run could be resumed, and which of its steps would be
+    // reused. Only a plan: nothing is changed or run.
+    resumePlan: async (file) => {
+      const configured = current.receipts?.signing?.publicKeyFile;
+      const verifiers = configured ? await loadReceiptVerifiers([resolve(projectRoot, configured)]).catch(() => undefined) : undefined;
+      return planResume({ root: projectRoot, receipt: file, env, ...(verifiers ? { verifiers, requireSignatures: true } : {}) });
+    },
     verifyReceipt: (file) => verifyProjectReceipt(runsDirectory, file, { root: projectRoot, config: current }),
     // Changing a setting from any surface goes through the same module the
     // CLI uses, so every surface is refused for the same reason.
