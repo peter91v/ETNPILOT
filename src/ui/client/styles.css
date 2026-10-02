@@ -443,6 +443,17 @@
      notch rather than animating into it. */
   .device-box { display: grid; gap: 12px; padding: 12px; border-radius: 12px; background: var(--md-surface-container-high, var(--md-surface-variant)); }
   .device-code { font-size: 28px; letter-spacing: 0.14em; font-weight: 600; margin: 0; user-select: all; }
+  .combo { position: relative; display: flex; align-items: center; min-width: 0; }
+  .combo > input { flex: 1 1 auto; min-width: 0; padding-right: 40px; }
+  .combo-toggle { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: var(--md-shape-full); background: transparent; color: var(--md-on-surface-variant); cursor: pointer; }
+  .combo-toggle svg { width: 20px; height: 20px; }
+  .combo-list { position: absolute; z-index: 30; left: 0; right: 0; top: calc(100% + 4px); margin: 0; padding: 4px 0; list-style: none; max-height: 260px; overflow: auto; border-radius: var(--md-shape-md); background: var(--md-surface-container-high); border: 1px solid var(--md-outline); }
+  .combo-option, .combo-empty { padding: 10px 14px; font: var(--md-body-medium); overflow-wrap: anywhere; cursor: pointer; }
+  .combo-empty { color: var(--md-on-surface-variant); cursor: default; }
+  .combo-option.active, .combo-option:hover { background: var(--md-surface-container-highest); }
+  .combo-option.chosen { color: var(--md-primary); font-weight: 500; }
+  .composer-controls .combo.inline { flex: 1 1 160px; max-width: 260px; }
+  .composer-controls .combo.inline > input { max-width: none; width: 100%; }
   .ladder-row { display: grid; gap: 4px; padding: 8px 0; border-top: 1px solid var(--md-outline-variant); }
   .ladder-flow-box { margin: 8px 0; overflow-x: auto; }
   .ladder-flow { width: 100%; max-width: 420px; height: auto; display: block; }

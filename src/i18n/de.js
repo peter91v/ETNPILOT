@@ -205,6 +205,7 @@ export const DE = {
   "What do you want": "Was möchtest du",
   "Something new": "Etwas Neues",
   "Improve an existing one": "Etwas Bestehendes verbessern",
+  "Which agent": "Welcher Agent",
   "Which prompt": "Welcher Prompt",
   "Which skill": "Welcher Skill",
   "Which instruction": "Welche Instruction",
@@ -529,6 +530,8 @@ export const DE = {
 // they are.
 /** @type {Array<[RegExp, (...groups: any[]) => string]>} */
 export const DE_PATTERNS = [
+  [/^model: (.+)$/, (_, model) => `Modell: ${model}`],
+  [/^(?:the default agent )?answers with (.+?)(?: \(the project's default provider\))?$/, (_, what) => `antwortet mit ${what}`],
   [/^Tier (\d+)(?: · (low|medium|high))?$/, (_, n, effort) => `Stufe ${n}${effort ? ` · ${{ low: "niedrig", medium: "mittel", high: "hoch" }[effort]}` : ""}`],
   [/^Checked with: (.+)\.$/, (_, list) => `Geprüft mit: ${list}.`],
   [/^Ladder '(.+)' · (?:passed on tier (\d+)|no tier passed)(?: · (.+))?$/, (_, id, tier, cost) => `Leiter '${id}' · ${tier ? `bestanden auf Stufe ${tier}` : "keine Stufe bestanden"}${cost ? ` · ${cost}` : ""}`],

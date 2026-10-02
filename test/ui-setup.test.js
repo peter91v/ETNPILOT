@@ -98,12 +98,27 @@ test("the page drafts with a model, shows it, and writes only the draft it kept"
     assert.equal(drafted.text, "Write the docs.");
     await assert.rejects(readFile(join(root, ".etnpilot", "agents", "doc-writer.yaml"), "utf8"), /ENOENT/, "nothing is written by drafting");
     assert.deepEqual((await (await call("/api/author/items", { kind: "prompt" })).json()).names, ["orchestrator"]);
-    assert.equal((await call("/api/author/items", { kind: "agent" })).status, 400);
+    assert.equal((await call("/api/author/items", { kind: "nonsense" })).status, 400);
     assert.equal((await call("/api/author/apply", { id: "made-up" })).status, 404);
     const applied = await (await call("/api/author/apply", { id: drafted.id })).json();
     assert.deepEqual(applied.written, [".etnpilot/agents/doc-writer.yaml"]);
     assert.match(await readFile(join(root, ".etnpilot", "prompts", "doc-writer.md"), "utf8"), /Write the docs/);
     assert.equal((await call("/api/author/apply", { id: drafted.id })).status, 404, "a draft is accepted once");
+  } finally {
+    await review.close();
+  }
+});
+
+test("the agents route names the default provider and what each provider answers with", async () => {
+  const { root, env } = await workdir();
+  const review = await createReviewServer({ root, env });
+  try {
+    const address = await review.listen({ port: 0 });
+    const answer = await (await fetch(`http://127.0.0.1:${address.port}/api/agents`, { headers: { "x-etnpilot-token": review.token } })).json();
+    assert.equal(typeof answer.defaultProvider, "string");
+    assert.ok(answer.providers.includes(answer.defaultProvider));
+    assert.equal(typeof answer.providerInfo.anthropic.model, "string");
+    assert.equal(answer.providerInfo.anthropic.type, "anthropic");
   } finally {
     await review.close();
   }

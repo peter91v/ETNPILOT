@@ -18,7 +18,7 @@ import { readFileSync } from "node:fs";
 // The page's script is written as ordinary JavaScript files under ./client/
 // (so it can be read, linted and syntax-checked like the rest of the code) and
 // joined here, in this order: later files use what earlier ones define.
-const CLIENT_FILES = ["core", "chat", "runs", "run-detail-parts", "run-list", "setup-guide", "getting-started", "resume-plan", "worktrees", "ladder", "project", "author", "accounts", "shell", "i18n"];
+const CLIENT_FILES = ["core", "chat", "runs", "run-detail-parts", "run-list", "setup-guide", "getting-started", "resume-plan", "worktrees", "combobox", "model-hint", "ladder", "project", "author", "accounts", "shell", "i18n"];
 // The German texts are a module (the terminal interface imports them); in the page
 // they are plain declarations.
 export const CATALOG = readFileSync(new URL("../i18n/de.js", import.meta.url), "utf8").replace(/^\/\/ @ts-check\n/, "").replaceAll("export const ", "const ");
@@ -55,6 +55,8 @@ ${client["setup-guide"]}
 ${client["getting-started"]}
 ${client["resume-plan"]}
 ${client.worktrees}
+${client.combobox}
+${client["model-hint"]}
 ${client.ladder}
 ${client.project}
 ${client.author}

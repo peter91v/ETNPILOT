@@ -52,12 +52,18 @@ export async function readAgents({ root, config }) {
       // What it may do, so a surface can say an agent only reads before anyone asks it to write.
       ...(Array.isArray(manifest.tools) ? { tools: manifest.tools } : {}),
       ...(typeof manifest.description === "string" ? { description: manifest.description } : {}),
+      ...(typeof manifest.model === "string" && manifest.model ? { model: manifest.model } : {}),
     });
   }
   return {
     agents,
     // The providers a conversation may name for one turn.
     providers: Object.keys(config?.providers ?? {}),
+    // What each answers with unless something says otherwise, and which one is
+    // the project's default, so a surface can name the model a choice leads to
+    // instead of leaving the field blank.
+    defaultProvider: config?.defaultProvider,
+    providerInfo: Object.fromEntries(Object.entries(config?.providers ?? {}).map(([name, entry]) => [name, { type: entry?.type, ...(entry?.model ? { model: String(entry.model) } : {}) }])),
     // What an empty choice means, so the surface does not have to guess.
     defaultAgent: config?.defaultAgent,
     steps: (config?.workflow?.steps ?? []).map((step) => step.id ?? step.agent).filter(Boolean),

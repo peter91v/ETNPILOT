@@ -159,6 +159,10 @@ test("an agent can be drafted with a model, read, and then written", async (t) =
     await ui.page.getByText("It is not reviewed yet").first().waitFor();
     // Improving picks from what exists, and a new prompt is a kind of its own.
     await ui.page.locator("#author-mode").selectOption("improve");
+    assert.ok((await ui.page.locator("#author-kind option").allTextContents()).includes("agent"), "an agent can be improved too");
+    await ui.page.locator("#author-kind").selectOption("agent");
+    await ui.page.locator("#author-name").waitFor();
+    assert.ok((await ui.page.locator("#author-name option").allTextContents()).includes("doc-writer"));
     await ui.page.locator("#author-kind").selectOption("prompt");
     await ui.page.locator("#author-name").waitFor();
     assert.ok((await ui.page.locator("#author-name option").allTextContents()).includes("doc-writer"));
@@ -214,6 +218,67 @@ test("a run with a ladder shows the path it took, which tier passed and what it 
     assert.match(await picture.textContent(), /strong-model/);
     assert.equal(await picture.locator(".lf-tier.passed").count(), 1);
     assert.equal(await picture.locator(".lf-tier.failed").count(), 1);
+    assert.deepEqual(ui.problems, []);
+  } finally {
+    await ui.close();
+  }
+});
+
+test("the model shown follows the default provider, the agent and the provider chosen in the chat and the run dialog", async (t) => {
+  if (skipReason) return t.skip(skipReason);
+  const setup = await project();
+  await writeFile(join(setup.root, ".etnpilot", "etnpilot.yaml"), [
+    "version: 1", "defaultProvider: alpha", "providers:",
+    "  alpha: { type: openai-compatible, baseUrl: 'http://127.0.0.1:9/v1', model: alpha-model }",
+    "  beta: { type: openai-compatible, baseUrl: 'http://127.0.0.1:9/v1', model: beta-model }",
+    "content:", "  provenance:", "    mode: enforce", "codegraph:", "  enabled: false", "observability:", "  enabled: false", "",
+  ].join("\n"));
+  const ui = await open(setup);
+  try {
+    await ui.page.evaluate(() => show("chat"));
+    await ui.page.locator("#chat-provider option[value=beta]").waitFor({ state: "attached" });
+    assert.equal(await ui.page.locator("#chat-model").getAttribute("placeholder"), "model: alpha-model");
+    assert.match(await ui.page.locator("#chat-summary").textContent(), /alpha · alpha-model/);
+    await ui.page.locator("#chat-summary").click();
+    await ui.page.locator("#chat-provider").selectOption("beta");
+    assert.equal(await ui.page.locator("#chat-model").getAttribute("placeholder"), "model: beta-model");
+    assert.match(await ui.page.locator("#chat-summary").textContent(), /beta · beta-model/);
+    await ui.page.locator("#chat-model").fill("typed-model");
+    assert.match(await ui.page.locator("#chat-summary").textContent(), /beta · typed-model/);
+
+    await ui.page.evaluate("startRunWith({})");
+    await ui.page.getByText("the default agent answers with alpha · alpha-model").waitFor();
+    assert.deepEqual(ui.problems.filter((problem) => !/Failed to load resource|ERR_/.test(problem)), []);
+  } finally {
+    await ui.close();
+  }
+});
+
+test("a combobox offers its list from the chevron, filters while typing, and keeps any typed value", async (t) => {
+  if (skipReason) return t.skip(skipReason);
+  const ui = await open(await project());
+  try {
+    await ui.page.evaluate(`(() => {
+      const host = document.createElement("div");
+      host.id = "combo-host";
+      host.append(combobox({ id: "combo-t", label: "Model", options: ["alpha-1", "alpha-2", "beta-1"], onInput: (value) => { window.comboValue = value; } }));
+      document.body.prepend(host);
+    })()`);
+    const options = () => ui.page.locator("#combo-t-list .combo-option").allTextContents();
+    await ui.page.locator("#combo-t").focus();
+    assert.deepEqual(await options(), ["alpha-1", "alpha-2", "beta-1"]);
+    await ui.page.locator("#combo-t").fill("beta");
+    assert.deepEqual(await options(), ["beta-1"]);
+    await ui.page.locator("#combo-t-list .combo-option").first().dispatchEvent("mousedown");
+    assert.equal(await ui.page.locator("#combo-t").inputValue(), "beta-1");
+    assert.equal(await ui.page.evaluate("window.comboValue"), "beta-1");
+    // The chevron shows everything, whatever is typed.
+    await ui.page.locator("#combo-host .combo-toggle").dispatchEvent("mousedown");
+    assert.equal((await options()).length, 3);
+    // A value the list does not have is kept.
+    await ui.page.locator("#combo-t").fill("brand-new-model");
+    assert.deepEqual(await options(), []);
+    assert.equal(await ui.page.evaluate("window.comboValue"), "brand-new-model");
     assert.deepEqual(ui.problems, []);
   } finally {
     await ui.close();

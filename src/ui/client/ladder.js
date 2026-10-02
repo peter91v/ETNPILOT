@@ -25,7 +25,13 @@ function ladderEditor(card, step, index, agents, redraw) {
   step.tiers.forEach((tier, position) => {
     const row = el("div", { class: "ladder-row" });
     row.append(el("span", { class: "builder-num", text: String(position + 1) }));
-    row.append(field("tier-model-" + index + "-" + position, "Model", tier.model ?? "", (value) => { tier.model = value.trim() || undefined; }, "model id"));
+    // The list is the models of the provider this tier would use: its own, else
+    // the agent's, else the project's default.
+    row.append(comboField("tier-model-" + index + "-" + position, "Model", tier.model ?? "", {
+      onInput: (value) => { tier.model = value.trim() || undefined; },
+      placeholder: "model id",
+      load: () => modelIdsFor(effectiveChoice({ agent: step.agent, provider: tier.provider })?.provider),
+    }));
     row.append(field("tier-provider-" + index + "-" + position, "Provider (optional)", tier.provider ?? "", (value) => { tier.provider = value.trim() || undefined; }, "as in providers"));
     row.append(selectField("tier-effort-" + index + "-" + position, "Effort", tier.effort ?? "", [["", "the agent's own"], ["low", "low"], ["medium", "medium"], ["high", "high"]], (value) => { tier.effort = value || undefined; }));
     row.append(button("Remove", { class: "btn link", onClick: () => { step.tiers.splice(position, 1); redraw(); } }));

@@ -13,7 +13,7 @@ function authorPanel() {
       body: [el("p", { class: "muted", text: "Describe an agent, skill or instruction, or what to change in an existing prompt, and a model drafts it. You read it before anything is written." })],
     });
   }
-  const kinds = s.mode === "new" ? ["agent", "skill", "instruction", "prompt"] : ["prompt", "skill", "instruction"];
+  const kinds = s.mode === "new" ? ["agent", "skill", "instruction", "prompt"] : ["agent", "prompt", "skill", "instruction"];
   if (!kinds.includes(s.kind)) s.kind = kinds[0];
   if (s.mode === "improve" && s.names === undefined) loadAuthorNames();
   const body = [
@@ -34,7 +34,7 @@ function authorPanel() {
 // Which existing one: chosen from what is there, not typed.
 function existingPicker() {
   const s = authorState;
-  const label = s.kind === "prompt" ? "Which prompt" : s.kind === "skill" ? "Which skill" : "Which instruction";
+  const label = { agent: "Which agent", prompt: "Which prompt", skill: "Which skill" }[s.kind] ?? "Which instruction";
   if (s.names === undefined || s.names === null) return el("p", { class: "muted", text: "Reading what exists…" });
   if (s.names.length === 0) return el("p", { class: "muted", text: "There is nothing of this kind to improve yet." });
   if (!s.names.includes(s.name)) s.name = s.names[0];

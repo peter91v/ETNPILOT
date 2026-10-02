@@ -39,7 +39,7 @@ export async function runAuthorCommand(subcommand, rest, values, { prompter, std
 
 async function menu(ask, say, options, values) {
   say("What do you need?");
-  const choices = ["A new agent", "A new skill", "A new instruction", "A new prompt", "Improve a prompt", "Improve a skill", "Improve an instruction"];
+  const choices = ["A new agent", "A new skill", "A new instruction", "A new prompt", "Improve an agent", "Improve a prompt", "Improve a skill", "Improve an instruction"];
   choices.forEach((choice, index) => say(`  ${index + 1}) ${choice}`));
   let index = -1;
   while (index < 0 || index >= choices.length) index = Number.parseInt(await ask.ask("Number", "1"), 10) - 1;
