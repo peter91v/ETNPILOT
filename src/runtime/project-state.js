@@ -11,6 +11,7 @@ import { describeSettings, setSetting, unsetSetting } from "../config/settings.j
 import { ApprovalInbox } from "../core/approval-inbox.js";
 import { chatApi } from "./project-chat.js";
 import { planResume } from "./resume-plan.js";
+import { runProject } from "./project-runner.js";
 import { loadReceiptVerifiers } from "../core/receipt-signing.js";
 import { startProjectRun } from "./project-run-start.js";
 import { listChecks, runProjectCheck } from "./project-checks.js";
@@ -118,6 +119,22 @@ export async function openProjectState({ root = process.cwd(), env = process.env
     // Whoever closes the surface stops what that surface started; a run left
     // working in a worktree nobody watches is worse than one that says why it
     // stopped, which its receipt records.
+    // One run, by the id the screen shows it under (or by its run id): asked to
+    // stop with a reason that reaches whatever it is waiting on, so a pending
+    // approval is rejected as "stopped", not as a shutdown. Its receipt is
+    // sealed as failed, and it can be continued with `resume`.
+    stopRun(which) {
+      const record = [...running].find((candidate) => candidate.id === which || (candidate.runId !== undefined && candidate.runId === which));
+      if (!record) {
+        const missing = new Error("That run is not running here; it may have finished already.");
+        /** @type {any} */ (missing).statusCode = 404;
+        throw missing;
+      }
+      const reason = new Error("The run was stopped.");
+      /** @type {any} */ (reason).code = "run_stopped";
+      record.controller.abort(reason);
+      return { stopped: true, id: record.id, task: record.task };
+    },
     stopRuns() {
       const stopped = [...running].map(presentRun);
       for (const record of running) record.controller.abort();
@@ -187,10 +204,38 @@ export async function openProjectState({ root = process.cwd(), env = process.env
     // the same reason — a file name from a surface never decides what is read.
     // Whether an earlier run could be resumed, and which of its steps would be
     // reused. Only a plan: nothing is changed or run.
-    resumePlan: async (file) => {
+    resumePlan: async (file, options = {}) => {
       const configured = current.receipts?.signing?.publicKeyFile;
       const verifiers = configured ? await loadReceiptVerifiers([resolve(projectRoot, configured)]).catch(() => undefined) : undefined;
-      return planResume({ root: projectRoot, receipt: file, env, ...(verifiers ? { verifiers, requireSignatures: true } : {}) });
+      return planResume({ root: projectRoot, receipt: file, env, allowDrift: options.allowDrift === true, ...(verifiers ? { verifiers, requireSignatures: true } : {}) });
+    },
+    // Resumes an earlier run: a new run that carries over what it finished and
+    // continues in its worktree. It is planned again first, so a page that
+    // showed a plan some minutes ago cannot start what is no longer possible.
+    // Not awaited, like any run started from a surface.
+    resumeRun: async (file, options = {}) => {
+      const plan = await self.resumePlan(file, options);
+      if (!plan.resumable) {
+        const refused = new Error(`This run cannot be resumed: ${plan.refusals.map((refusal) => refusal.message).join(" ")}`);
+        /** @type {any} */ (refused).statusCode = 409;
+        /** @type {any} */ (refused).details = { refusals: plan.refusals };
+        throw refused;
+      }
+      const request = plan.resume.request;
+      const started = startProjectRun(scope, {
+        input: request.input,
+        agent: request.agent,
+        ...(request.workflow ? { workflow: request.workflow } : {}),
+        ...(options.providerFactories ? { providerFactories: options.providerFactories } : {}),
+        via: (runOptions) => runProject({
+          ...runOptions,
+          ...(request.agentOverride ? { agentOverride: request.agentOverride } : {}),
+          ...(request.baseRef ? { baseRef: request.baseRef } : {}),
+          resume: plan.resume,
+        }),
+      });
+      started.catch(() => {});
+      return { started: true, resumedFrom: plan.runId, steps: plan.steps.map((step) => ({ id: step.id, action: step.action })) };
     },
     verifyReceipt: (file) => verifyProjectReceipt(runsDirectory, file, { root: projectRoot, config: current }),
     // Changing a setting from any surface goes through the same module the
@@ -252,6 +297,8 @@ function markRunning(runs, running) {
 
 function presentRun(record) {
   return {
+    id: record.id,
+    ...(record.runId ? { runId: record.runId } : {}),
     task: record.task,
     agent: record.agent,
     startedAt: record.startedAt,

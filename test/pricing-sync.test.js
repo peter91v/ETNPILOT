@@ -30,6 +30,8 @@ test("a model the table lacks is priced after a refresh, and the built-in table 
   const result = await refreshPricing({ root, config, fetchImpl: answer(catalog) });
   assert.equal(result.used, "network");
   assert.equal(knownPriceForModel("gpt-7-nova", { root }).inputPerMillion, 3);
+  // The age of a fetched rate is a date, as it is shown and written into receipts (not milliseconds).
+  assert.match(knownPriceForModel("gpt-7-nova", { root }).asOf, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
   assert.equal(knownPriceForModel("gpt-7-nova-2026-10-01", { root }).outputPerMillion, 12);
   // Checked by hand beats fetched.
   useLearnedRates({ "gpt-5-4": { inputPerMillion: 999, outputPerMillion: 999 } });

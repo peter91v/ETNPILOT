@@ -15,9 +15,19 @@ async function askForApproval(request, context, { input, output }) {
   if (!input.isTTY || !output.isTTY) {
     return { kind: "reject", reason: "Interactive approval is unavailable." };
   }
-  const details = describeRequest(request);
   const readline = createInterface({ input, output });
   try {
+    // A question is answered, not approved: the text typed is the answer, and
+    // an empty line leaves it unanswered.
+    if (request.kind === "question") {
+      const position = request.toolArguments?.number ? ` (${request.toolArguments.number} of ${request.toolArguments.of})` : "";
+      const options = Array.isArray(request.toolArguments?.options) ? `\nOptions: ${request.toolArguments.options.map(display).join(" | ")}` : "";
+      const answer = await readline.question(`\nETNPilot asks${position}: ${display(request.fullCommandText)}${options}\nYour answer (empty to leave it open): `);
+      return answer.trim() === ""
+        ? { kind: "reject", reason: "Not answered." }
+        : { kind: "approve-once", answer: answer.trim() };
+    }
+    const details = describeRequest(request);
     const answer = await readline.question(
       `\nETNPilot approval required\nAgent: ${display(context.agent)}\nOperation: ${display(request.kind ?? "unknown")}${details}\nApprove once? [y/N] `,
     );

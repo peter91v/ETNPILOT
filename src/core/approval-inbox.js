@@ -165,6 +165,7 @@ export function createInboxApprovalHandler({
     await notifier?.(pending);
     let record;
     let aborted = false;
+    let stoppedBy;
     try {
       while (true) {
         record = inbox.get(pending.id);
@@ -174,8 +175,11 @@ export function createInboxApprovalHandler({
     } catch (error) {
       if (error.name !== "AbortError") throw error;
       aborted = true;
+      // Someone stopped this run, or the service is going away: the person who
+      // reads the receipt should be told which.
+      stoppedBy = signal?.reason?.code === "run_stopped" ? signal.reason.message : undefined;
       try {
-        record = inbox.decide(pending.id, "rejected", { actor: "service", reason: "Service is shutting down." });
+        record = inbox.decide(pending.id, "rejected", { actor: "service", reason: stoppedBy ?? "Service is shutting down." });
       } catch (decisionError) {
         if (!(decisionError instanceof ApprovalStateError)) throw decisionError;
         record = inbox.get(pending.id);
@@ -185,7 +189,7 @@ export function createInboxApprovalHandler({
     if (aborted) {
       return {
         kind: "reject",
-        reason: "Approval wait stopped because the service is shutting down.",
+        reason: stoppedBy ? `Approval wait stopped: ${stoppedBy}` : "Approval wait stopped because the service is shutting down.",
         approvalId: record.id,
         evidence: approvalEvidence(record),
       };

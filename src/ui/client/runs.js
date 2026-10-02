@@ -247,6 +247,17 @@ function workingNow(run) {
   return run.stepAgent ? "agent " + run.stepAgent : (run.agent ? "agent " + run.agent : "the project's own workflow");
 }
 
+async function stopRun(run) {
+  try {
+    await api("/api/runs/stop", { method: "POST", body: JSON.stringify({ id: run.id }) });
+    clearError();
+    toast("Stopping: " + (run.task ?? "the run") + ". It is sealed as failed; you can resume it from Runs.");
+    await refresh({ force: true });
+  } catch (error) {
+    fail(error);
+  }
+}
+
 function runningPanel(run) {
   const steps = run.steps ?? [];
   const position = steps.length > 0 ? " · step " + Math.min(steps.length, (run.done ?? 0) + 1) + " of " + steps.length : "";
@@ -255,6 +266,9 @@ function runningPanel(run) {
       pill(run.step ? "in " + run.step : "starting", "warn"),
       el("span", { class: "grow", text: workingNow(run) }),
       timeSpan("since", run.stepSince ?? run.startedAt),
+      // Stops this run only. Its receipt is sealed as failed, and it can be
+      // continued from the Runs view, so one tap is enough.
+      button("Stop run", { class: "btn danger small", title: "Stops this run. Its steps so far stay in the receipt; you can resume it.", onClick: () => stopRun(run) }),
     ]),
   ];
   if (run.usage) {
@@ -322,13 +336,17 @@ function approvalCard(approval) {
   // nothing here authenticates anybody.
   actor.value = reviewerName();
   actor.addEventListener("change", () => rememberReviewer(actor.value));
-  const reason = el("input", { class: "grow", attrs: { placeholder: "reason (optional)", "aria-label": "reason" } });
+  // A question is answered, not approved: what is typed is the answer.
+  const isQuestion = approval.operationKind === "question";
+  const reason = el("input", { class: "grow", attrs: isQuestion ? { placeholder: "your answer", "aria-label": "your answer" } : { placeholder: "reason (optional)", "aria-label": "reason" } });
   const decide = (decision) => act(
     () => api("/api/approvals/decide", {
       method: "POST",
       body: JSON.stringify({ id: approval.id, decision, actor: actor.value, reason: reason.value }),
     }),
-    approval.operationKind + " " + (decision === "approve" ? "approved" : "rejected") + " — recorded in the receipt.",
+    isQuestion
+      ? (decision === "approve" ? "Answered" : "Left open") + " — recorded in the receipt."
+      : approval.operationKind + " " + (decision === "approve" ? "approved" : "rejected") + " — recorded in the receipt.",
   );
   const body = [];
   if (details.command) body.push(detailBlock("Command", details.command));
@@ -357,19 +375,19 @@ function approvalCard(approval) {
       el("span", { class: "muted", text: "← " + (approval.policy.rule ? "rule '" + approval.policy.rule + "'" : "the section default") }),
     ]));
   }
-  const approve = button("Approve once", { class: "btn primary", onClick: () => decide("approve") });
+  const approve = button(isQuestion ? "Answer" : "Approve once", { class: "btn primary", onClick: () => decide("approve") });
   // The same yes, with a reach: this operation and others like it until the
   // run ends. Offered only where a scope means something — twelve writes
   // under one directory were twelve identical questions, and a tool that
   // asks twelve times is one people switch off.
-  const forRun = ["write", "shell"].includes(approval.operationKind)
+  const forRun = !isQuestion && ["write", "shell"].includes(approval.operationKind)
     ? [button("Approve for this run", {
       class: "btn tonal",
       title: "Covers operations like this one until the run ends. A page fetched from outside cancels it.",
       onClick: () => decide("approve-for-run"),
     })]
     : [];
-  const reject = button("Reject", { class: "btn danger", onClick: () => decide("reject") });
+  const reject = button(isQuestion ? "Leave open" : "Reject", { class: isQuestion ? "btn" : "btn danger", onClick: () => decide("reject") });
   body.push(el("div", { class: "row" }, [actor, reason, approve, ...forRun, reject]));
   const fingerprint = details.fingerprint ?? "";
   body.push(el("p", {

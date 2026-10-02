@@ -5,6 +5,7 @@ import { loadConfig } from "../config/load.js";
 import { canonicalJson, verifyReceiptFile } from "../core/receipt-store.js";
 import { workspaceDigest } from "../git/workspace-digest.js";
 import { readLines } from "./jsonl.js";
+import { worktreeLockHolder } from "./worktree-lock.js";
 
 // Which steps of an earlier run could be carried over into a new one, and if
 // not, why not. It reads and checks; it changes nothing and runs nothing (see
@@ -15,6 +16,7 @@ import { readLines } from "./jsonl.js";
 // of the run, whether its result would be reused, run again, or needs a
 // person's say first.
 
+/** @returns {Promise<any>} */
 export async function planResume({
   root = process.cwd(),
   receipt,
@@ -94,6 +96,10 @@ export async function planResume({
   const lastDone = lastFinished ? { id: lastFinished.step } : undefined;
   const expected = lastFinished?.workspaceDigest?.digest ?? start.workspaceDigest?.digest;
   const workspacePath = start.workspace?.path;
+  const holder = workspacePath ? await worktreeLockHolder(repositoryRoot, workspacePath) : undefined;
+  if (holder) {
+    refuse("workspace-in-use", `Another run is working in that worktree (process ${holder.pid}, since ${holder.since}${holder.label ? `, ${holder.label}` : ""}).`);
+  }
   if (!workspacePath) {
     refuse("no-workspace", "The receipt does not say where the run worked.");
   } else if (!expected) {
@@ -127,11 +133,18 @@ export async function planResume({
   }
 
   const resumable = refusals.length === 0;
+  const failure = describeFailure(terminal);
+  const notes = [];
+  if (steps.every((step) => step.action === "rerun")) {
+    notes.push("Nothing from the earlier run can be carried over, so resuming keeps its worktree but runs every step again.");
+  }
   const costSoFar = entries.filter((entry) => entry.usage?.estimatedCost !== undefined).reduce((sum, entry) => sum + entry.usage.estimatedCost, 0);
   return {
     receipt: path,
     runId: start.runId,
     status: terminal?.status ?? "incomplete",
+    ...(failure ? { failure } : {}),
+    notes,
     resumable,
     refusals,
     drift: drift ? { was: start.configDigest, now: configDigest } : undefined,
@@ -155,4 +168,15 @@ function resolveReceiptPath(runsDirectory, receipt) {
     throw new TypeError(`A receipt to resume must be one of this project's runs (${basename(runsDirectory)}/).`);
   }
   return candidate;
+}
+
+// Why the run stopped, from what its sealing entry kept: the step that failed
+// and what it said, or the run's own error.
+function describeFailure(terminal) {
+  const summary = terminal?.summary;
+  if (!summary) return undefined;
+  const failedStep = Object.entries(summary.steps ?? {}).find(([, step]) => step?.status === "failed");
+  if (failedStep) return { step: failedStep[0], error: String(failedStep[1].error ?? "").slice(0, 500) || undefined };
+  if (summary.error) return { error: String(summary.error).slice(0, 500) };
+  return undefined;
 }

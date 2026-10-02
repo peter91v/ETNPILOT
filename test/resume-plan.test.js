@@ -6,6 +6,7 @@ import test from "node:test";
 import { runCli } from "../src/cli/commands.js";
 import { git } from "../src/git/command.js";
 import { planResume } from "../src/runtime/resume-plan.js";
+import { acquireWorktreeLock } from "../src/runtime/worktree-lock.js";
 import { runProject } from "../src/runtime/project-runner.js";
 
 // A project whose workflow has two agent steps; the provider fails the second
@@ -171,4 +172,35 @@ test("a run that cannot be planned is not started by the command", async () => {
     assert.equal(await runCli(["resume", file], { root, "dry-run": false, "public-key": [] }), 1);
   } finally { console.log = log; }
   assert.equal((await readdir(join(root, ".etnpilot", "state", "runs"))).filter((name) => name.endsWith(".jsonl")).length, 1, "no new run was started");
+});
+
+test("a worktree another run is working in cannot be resumed into: the plan says so and the run does not start", async () => {
+  const { root, file, path } = await failedRun();
+  const start = JSON.parse((await readFile(path, "utf8")).split("\n")[0]);
+  const held = await acquireWorktreeLock(root, start.workspace.path, { label: "someone else" });
+  try {
+    const plan = await planResume({ root, receipt: file });
+    assert.equal(plan.resumable, false);
+    assert.ok(plan.refusals.some((refusal) => refusal.code === "workspace-in-use"));
+    // The plan is re-checked by the run itself: asking for the run anyway is refused too.
+    await assert.rejects(
+      runProject({ root, input: "do both", resume: { from: { runId: start.runId, receiptHash: "x" }, workspace: start.workspace, reuse: {} }, providerFactories: failingSecond() }),
+      /Another run is working in this worktree/,
+    );
+  } finally {
+    await held.release();
+  }
+  assert.equal((await planResume({ root, receipt: file })).resumable, true, "free again once the other run is done");
+});
+
+test("the plan says why the run stopped, and what resuming amounts to when nothing can be carried over", async () => {
+  const root = await project();
+  const first = await runProject({ root, input: "do both", providerFactories: { fake: (name) => ({ name, invoke: async () => { throw new Error("the very first step broke"); } }) } }).then(() => undefined, (error) => error);
+  assert.ok(first);
+  const runs = join(root, ".etnpilot", "state", "runs");
+  const [file] = (await readdir(runs)).filter((name) => name.endsWith(".jsonl"));
+  const plan = await planResume({ root, receipt: file });
+  assert.equal(plan.failure.step, "first");
+  assert.match(plan.failure.error, /the very first step broke/);
+  assert.match(plan.notes[0], /runs every step again/);
 });

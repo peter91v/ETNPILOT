@@ -67,6 +67,7 @@ export function validateWorkflowDefinition(input, { agents = [], maxSteps = 50 }
       if (typeof step.name === "string" && step.name.trim()) out.name = step.name.trim().slice(0, 80);
     } else if (type === "gate") {
       if (typeof step.prompt === "string" && step.prompt.trim()) out.prompt = step.prompt.trim().slice(0, LIMITS.text);
+      if (step.questions === false) out.questions = false;
     }
     cleaned.push(out);
   }

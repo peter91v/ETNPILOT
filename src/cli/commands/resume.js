@@ -28,10 +28,12 @@ export const resumeCommands = [
         return plan.resumable ? 0 : 1;
       }
       console.log(`${plan.runId ?? receipt}: ${plan.status ?? "?"}`);
+      if (plan.failure) console.log(`  stopped${plan.failure.step ? ` in '${plan.failure.step}'` : ""}${plan.failure.error ? `: ${plan.failure.error}` : ""}`);
       for (const step of plan.steps) {
         const what = step.action === "reuse" ? `reuse   (${step.effect ?? "?"})` : `run again${step.reason ? ` — ${step.reason}` : ""}`;
         console.log(`  ${step.id.padEnd(18)} ${what}${step.needsConfirmation ? "  needs confirmation: it has an effect outside the workspace" : ""}`);
       }
+      for (const note of plan.notes ?? []) console.log(note);
       if (plan.costSoFar !== undefined) console.log(`Cost so far: ${plan.costSoFar.toFixed(4)} (shown, not counted against a new run's budget)`);
       if (plan.drift) console.log("The configuration changed since the run started (allowed by --allow-drift).");
       if (!plan.resumable) {

@@ -258,6 +258,21 @@ export async function createReviewServer({
     });
     return send(response, 200, plan);
   });
+  // Starts a resumption (planned again first; refused with the reasons when it
+  // cannot be done). Answered 202 like any run started from the page.
+  route("POST", "/api/runs/resume", async ({ request, response, state }) => {
+    const body = await readJsonBody(request);
+    if (typeof body.file !== "string" || body.file === "") throw badRequest("A receipt file is required.");
+    const started = await state.resumeRun(body.file, { allowDrift: body.allowDrift === true }).catch((error) => {
+      throw error instanceof TypeError ? badRequest(error.message) : error;
+    });
+    return send(response, 202, started);
+  });
+  route("POST", "/api/runs/stop", async ({ request, response, state }) => {
+    const body = await readJsonBody(request);
+    if (typeof body.id !== "string" || body.id === "") throw badRequest("A run id is required.");
+    return send(response, 200, state.stopRun(body.id));
+  });
   route("GET", "/api/checks", async ({ request, response, url, state }) => {
     return send(response, 200, { checks: state.checks() });
   });
