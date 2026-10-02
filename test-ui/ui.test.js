@@ -209,3 +209,27 @@ test("a project with no runs shows what is left before the first one, and the li
     await later.close();
   }
 });
+
+test("a run that did not succeed can be checked for whether it could be resumed, and the page says why not", async (t) => {
+  if (skipReason) return t.skip(skipReason);
+  const { JsonlReceiptStore } = await import("../src/core/receipt-store.js");
+  const setup = await project();
+  const runs = join(setup.root, ".etnpilot", "state", "runs");
+  await mkdir(runs, { recursive: true });
+  const store = new JsonlReceiptStore(join(runs, "broken-run.jsonl"));
+  await store.append({ type: "run-start", runId: "broken-run", mode: "execute", configDigest: "sha256:x", plan: [{ id: "first", type: "agent", needs: [] }, { id: "second", type: "agent", needs: ["first"] }], workspace: { path: join(setup.root, "gone"), branch: "b", managed: true }, workspaceDigest: { digest: "git:a:b" } });
+  await store.append({ type: "step", runId: "broken-run", step: "first", stepType: "agent", status: "succeeded", effect: "workspace", workspaceDigest: { digest: "git:a:c" } });
+  await store.append({ type: "workflow", terminal: true, runId: "broken-run", status: "failed", mode: "execute" });
+  const ui = await open(setup);
+  try {
+    await ui.page.evaluate(() => show("runs"));
+    await ui.page.getByRole("button", { name: "broken-run" }).first().click();
+    await ui.page.getByRole("button", { name: "Check", exact: true }).click();
+    await ui.page.getByText("cannot be resumed").waitFor();
+    await ui.page.getByText("can no longer be read").waitFor();
+    assert.match(await ui.page.locator("#view-runs").innerText(), /first[\s\S]*reuse|reuse[\s\S]*first/);
+    assert.deepEqual(ui.problems, []);
+  } finally {
+    await ui.close();
+  }
+});

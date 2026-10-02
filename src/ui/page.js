@@ -18,7 +18,7 @@ import { readFileSync } from "node:fs";
 // The page's script is written as ordinary JavaScript files under ./client/
 // (so it can be read, linted and syntax-checked like the rest of the code) and
 // joined here, in this order: later files use what earlier ones define.
-const CLIENT_FILES = ["core", "chat", "runs", "run-list", "getting-started", "worktrees", "project", "accounts", "shell"];
+const CLIENT_FILES = ["core", "chat", "runs", "run-list", "getting-started", "resume-plan", "worktrees", "project", "accounts", "shell"];
 const STYLES = readFileSync(new URL("./client/styles.css", import.meta.url), "utf8");
 const MARKUP = readFileSync(new URL("./client/markup.html", import.meta.url), "utf8");
 const client = Object.fromEntries(CLIENT_FILES.map((name) => [name, readFileSync(new URL(`./client/${name}.js`, import.meta.url), "utf8")]));
@@ -48,6 +48,7 @@ ${client.chat}
 ${client.runs}
 ${client["run-list"]}
 ${client["getting-started"]}
+${client["resume-plan"]}
 ${client.worktrees}
 ${client.project}
 ${client.accounts}
