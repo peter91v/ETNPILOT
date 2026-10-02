@@ -40,7 +40,7 @@ export const SERVICES = Object.freeze({
     secret: "github.token",
     env: "ETNPILOT_GITHUB_TOKEN",
     method: "device",
-    scope: "read:user models:read",
+    scope: "read:user",
     host: "https://github.com",
     apiBase: "https://api.github.com",
     hosts: ["github.com", "api.github.com", "models.github.ai"],

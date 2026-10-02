@@ -16,10 +16,10 @@ etnpilot models --provider gemini         # which model ids this account has
   the `secrets.providers.env.allow` list. Your local file is not allowed to widen what a project may read, so
   this cannot live there. Because the committed file changed, `etnpilot trust` asks again.
 - A provider without a key (`ollama`, on this machine) goes into your own local settings. So does `github-models`:
-  its key is your stored GitHub login (`etnpilot login github`), which needs the "models" permission (a fine-grained
-  token with Models: read is the sure way; the browser sign-in now asks for `read:user models:read`, but that is not verified against GitHub, and an
-  earlier sign-in has to be repeated: `etnpilot login github`. If `smoke` reports an answer of `OK` from
-  models.github.ai, the token was not accepted as a Models token).
+  its key is your stored GitHub login. A browser sign-in (OAuth app) cannot carry the Models permission: GitHub rejects
+  `models:read` as a scope there. Use a fine-grained personal access token with Account permissions → Models: Read, and
+  paste it on the Accounts page (or pipe it: `etnpilot login github --key-stdin`). If `smoke` reports an answer of `OK` from
+  models.github.ai, the token was not accepted as a Models token.
   Projects created by `init` already have a `github-models` entry; this is for projects from before that.
 - `--name` adds a second entry from the same preset; `--force` replaces an existing one; `--model` picks the
   model. The model in a preset is a starting point: ask `etnpilot models` what the account has.
