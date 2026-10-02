@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { describeTui, waitFor as waitForCondition } from "./helpers/wait.js";
 import { test } from "node:test";
 import { git } from "../src/git/command.js";
 import { JsonlReceiptStore } from "../src/core/receipt-store.js";
@@ -24,12 +25,19 @@ function screen(app) {
   return stripAnsi(app.frame().join("\n"));
 }
 
-async function waitFor(condition, what) {
-  for (let attempt = 0; attempt < 1600; attempt += 1) {
-    if (await condition()) return;
-    await delay(25);
-  }
-  assert.fail(`Timed out waiting for ${what}.`);
+// The window most recently made here, so a timeout can say what it was doing.
+let watched;
+function newApp(options) {
+  const app = createTuiApp(options);
+  watched = { app, state: options.state };
+  return app;
+}
+
+function waitFor(condition, what) {
+  return waitForCondition(condition, what, {
+    attempts: 1600,
+    diagnose: () => (watched ? describeTui(watched.app, watched.state, screen) : "(no window)"),
+  });
 }
 
 // A project with one agent whose provider asks for one approval, so a run
@@ -74,7 +82,7 @@ async function runnableProject() {
 test("a run started from the TUI asks the screen that started it", async () => {
   const root = await runnableProject();
   const state = await openProjectState({ root });
-  const app = createTuiApp({ state, output: fakeOutput(), input: new EventEmitter(), actor: "peter" });
+  const app = newApp({ state, output: fakeOutput(), input: new EventEmitter(), actor: "peter" });
   const asked = [];
 
   // The app does not pass providers; the test does, so the run is offline.
@@ -131,7 +139,7 @@ test("a run started from the TUI asks the screen that started it", async () => {
 test("a run needs a task, and an empty agent field says what would run instead", async () => {
   const root = await runnableProject();
   const state = await openProjectState({ root });
-  const app = createTuiApp({ state, output: fakeOutput(), input: new EventEmitter(), actor: "peter" });
+  const app = newApp({ state, output: fakeOutput(), input: new EventEmitter(), actor: "peter" });
   try {
     await app.refresh();
     await app.handle("n");
@@ -178,7 +186,7 @@ test("naming an agent runs that agent, even where the project defines a workflow
       }),
     },
   });
-  const app = createTuiApp({ state, output: fakeOutput(), input: new EventEmitter(), actor: "peter" });
+  const app = newApp({ state, output: fakeOutput(), input: new EventEmitter(), actor: "peter" });
   try {
     await app.refresh();
 
@@ -209,7 +217,7 @@ test("naming an agent runs that agent, even where the project defines a workflow
 test("quitting stops a run rather than stranding it", async () => {
   const root = await runnableProject();
   const state = await openProjectState({ root });
-  const app = createTuiApp({ state, output: fakeOutput(), input: new EventEmitter(), actor: "peter" });
+  const app = newApp({ state, output: fakeOutput(), input: new EventEmitter(), actor: "peter" });
   const start = state.startRun.bind(state);
   let settled;
   state.startRun = (options) => {
@@ -256,7 +264,7 @@ test("enter on a run opens its receipt", async () => {
   });
 
   const state = await openProjectState({ root });
-  const app = createTuiApp({ state, output: fakeOutput(), input: new EventEmitter() });
+  const app = newApp({ state, output: fakeOutput(), input: new EventEmitter() });
   try {
     await app.refresh();
     await app.handle("2");
@@ -345,7 +353,7 @@ test("the agents in a run are a navigable tree, and 'a' then enter reads one's f
   });
 
   const state = await openProjectState({ root });
-  const app = createTuiApp({ state, output: fakeOutput(), input: new EventEmitter() });
+  const app = newApp({ state, output: fakeOutput(), input: new EventEmitter() });
   try {
     await app.refresh();
     await app.handle("2"); // switch to the runs view
@@ -404,7 +412,7 @@ test("'v' says whether the receipt on screen verifies, and a tampered one does n
   await store.append({ runId: "verify-1", terminal: true, status: "succeeded", approvals: [] });
 
   const state = await openProjectState({ root });
-  const app = createTuiApp({ state, output: fakeOutput(), input: new EventEmitter() });
+  const app = newApp({ state, output: fakeOutput(), input: new EventEmitter() });
   try {
     await app.refresh();
     await app.handle("2");
@@ -438,7 +446,7 @@ test("'v' says whether the receipt on screen verifies, and a tampered one does n
   await writeFile(join(runs, file), `${lines.join("\n")}\n`);
 
   const tampered = await openProjectState({ root });
-  const second = createTuiApp({ state: tampered, output: fakeOutput(), input: new EventEmitter() });
+  const second = newApp({ state: tampered, output: fakeOutput(), input: new EventEmitter() });
   try {
     await second.refresh();
     await second.handle("2");
