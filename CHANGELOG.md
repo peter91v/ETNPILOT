@@ -8,6 +8,11 @@ pre-1.0, so breaking changes may appear in any release.
 
 ### Checks and hygiene (follow-up to the review)
 
+- **Ladders can be built and read on the review page.** The workflow builder has a "Ladder" step type: the agent, the tiers
+  (model, provider, effort), the checks (a command or a reviewer agent), and an optional triage router with a lighter check
+  for low risk. A **flow picture** draws the ladder: on a workflow card it shows the plan; in a run's detail it shows the path
+  the run took (which tier failed, which passed, what each cost, what the router decided), drawn from the receipt's
+  `ladder-attempt` and `ladder-route` entries.
 - **Cheap first, verify, climb: the `ladder` workflow step** (`docs/ladder.md`). One agent on a stack of tiers (model,
   provider, effort); each result is verified by a command and/or a reviewer agent; a failure moves the task up one tier
   with the failure report as feedback; the receipt keeps every attempt (`ladder-attempt`). An optional **router** agent

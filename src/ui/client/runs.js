@@ -667,6 +667,7 @@ function renderRunDetail() {
   // What it did, not only that it succeeded: a run told to write a file that
   // wrote none is a run whose 'succeeded' needs reading twice.
   body.push(...toolRows(outcome));
+  body.push(...ladderRunPanels(receipt));
   if (outcome.usage) body.push(usagePanelBody(outcome.usage));
   // Clean, conflicting, or never attempted: three answers, and the reader
   // gives the same one here, in the terminal, and on the command line.

@@ -19,7 +19,7 @@ const TOOL_WORDS = {
   ask_human: "asks you",
 };
 const TOOLS_THAT_CHANGE = ["write_file", "edit_file", "run_command"];
-const STEP_LABELS = { agent: "Agent", check: "Check", gate: "Your approval", quorum: "Agents compare" };
+const STEP_LABELS = { agent: "Agent", check: "Check", gate: "Your approval", quorum: "Agents compare", ladder: "Ladder" };
 const TYPE_LABELS = { agent: "Agents", workflow: "Workflows", instruction: "Instructions", prompt: "Prompts", skill: "Skills" };
 
 async function loadProjectViews({ notify = false } = {}) {
@@ -321,6 +321,7 @@ function workflowCard(workflow) {
     ...(workflow.description ? [el("p", { class: "card-sub", text: workflow.description })] : []),
     el("div", { class: "chips" }, present([lockPill(workflow.lock), originPill(workflow.origin), failed ? pill("has problems", "bad") : null])),
     flow(workflow.steps),
+    ...(workflow.steps ?? []).filter((step) => step.type === "ladder").map((step) => ladderDiagram(step)),
   ]);
   for (const message of workflow.errors ?? []) card.append(el("p", { class: "notice bad", text: message }));
   card.append(el("div", { class: "card-actions" }, [
@@ -340,6 +341,7 @@ function flow(steps) {
     if (type === "check") what = (step.command ?? []).join(" ");
     if (type === "gate") what = step.prompt ?? "you decide whether it goes on";
     if (type === "quorum") what = (step.agents ?? []).join(", ");
+    if (type === "ladder") what = (step.agent ?? "") + " · " + (step.tiers ?? []).map((tier) => tier.model ?? tier.provider ?? "own").join(" → ");
     list.append(el("li", { class: "flow-step type-" + type }, [
       el("span", { class: "flow-head" }, [
         el("span", { class: "flow-id", text: step.id }),
@@ -414,9 +416,10 @@ function drawBuilder() {
       field("step-id-" + index, "Step name", step.id, (value) => { step.id = value; }, ""),
       button("Remove", { class: "btn link", onClick: () => { w.steps.splice(index, 1); drawBuilder(); } }),
     ]));
-    card.append(selectField("step-type-" + index, "What it does", step.type, [["agent", "An agent works"], ["check", "A command is checked"], ["gate", "You approve before it goes on"], ["quorum", "Several agents compare"]], (value) => {
+    card.append(selectField("step-type-" + index, "What it does", step.type, [["agent", "An agent works"], ["check", "A command is checked"], ["gate", "You approve before it goes on"], ["quorum", "Several agents compare"], ["ladder", "A ladder: cheap first, checked, climbs on failure"]], (value) => {
       step.type = value;
       if (value === "agent" && !step.agent) step.agent = agents[0] ?? "";
+      if (value === "ladder") Object.assign(step, ladderDefaults(agents));
       drawBuilder();
     }));
     if (step.type === "agent") {
@@ -425,6 +428,7 @@ function drawBuilder() {
     }
     if (step.type === "check") card.append(field("step-command-" + index, "Command", Array.isArray(step.command) ? step.command.join(" ") : (step.command ?? ""), (value) => { step.command = value; }, "npm test"));
     if (step.type === "gate") card.append(field("step-prompt-" + index, "The question you are asked", step.prompt ?? "", (value) => { step.prompt = value; }, "Continue past this step?"));
+    if (step.type === "ladder") ladderEditor(card, step, index, agents, drawBuilder);
     if (step.type === "quorum") {
       card.append(el("p", { class: "muted", text: "Agents that compare (choose at least two):" }));
       for (const name of agents) {

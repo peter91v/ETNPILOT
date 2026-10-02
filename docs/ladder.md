@@ -43,6 +43,12 @@ it. A simple task starts on the first rung, a medium one in the middle, a comple
 `verifyLight`; a high risk or an answer that cannot be read uses the full `verify`: **an unreadable answer never lowers
 the checking**. The decision is in the receipt (`ladder-route`). Give `triage` a cheap model and no tools.
 
+## On the review page
+
+Agents → New workflow → step type **A ladder** builds it without YAML. The same picture is shown on the workflow's card, and
+in a run's detail it shows the path that run took: the tiers it tried, which check failed, which tier passed, what each
+attempt cost and what the router decided.
+
 ## What it costs, measured on your own tasks
 
 ```

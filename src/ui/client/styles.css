@@ -443,6 +443,20 @@
      notch rather than animating into it. */
   .device-box { display: grid; gap: 12px; padding: 12px; border-radius: 12px; background: var(--md-surface-container-high, var(--md-surface-variant)); }
   .device-code { font-size: 28px; letter-spacing: 0.14em; font-weight: 600; margin: 0; user-select: all; }
+  .ladder-row { display: grid; gap: 4px; padding: 8px 0; border-top: 1px solid var(--md-outline-variant); }
+  .ladder-flow-box { margin: 8px 0; overflow-x: auto; }
+  .ladder-flow { width: 100%; max-width: 420px; height: auto; display: block; }
+  .ladder-flow .lf-node, .ladder-flow .lf-pill, .ladder-flow .lf-end { fill: var(--md-surface-container-high); stroke: var(--md-outline); stroke-width: 1; }
+  .ladder-flow .lf-tier { fill: var(--md-surface-container-high); stroke: var(--md-outline); stroke-width: 1.2; }
+  .ladder-flow .lf-tier.passed, .ladder-flow .lf-pill.ok, .ladder-flow .lf-end.ok { fill: var(--md-primary-container); stroke: var(--md-primary); }
+  .ladder-flow .lf-tier.failed, .ladder-flow .lf-tier.error, .ladder-flow .lf-pill.bad { fill: var(--md-warning-container); stroke: var(--md-warning); }
+  .ladder-flow .lf-line { fill: none; stroke: var(--md-outline); stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+  .ladder-flow .lf-line.ok { stroke: var(--md-primary); stroke-width: 2.2; }
+  .ladder-flow .lf-line.fail { stroke-dasharray: 4 4; }
+  .ladder-flow .lf-line.fail.taken { stroke: var(--md-warning); stroke-width: 2.2; stroke-dasharray: none; }
+  .ladder-flow .lf-text { fill: var(--md-on-surface); font: 500 12px/16px var(--sans); }
+  .ladder-flow .lf-sub { fill: var(--md-on-surface-variant); font: 400 11px/14px var(--mono); }
+  .ladder-flow .center { text-anchor: middle; }
   .draft { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 360px; overflow: auto; margin: 8px 0; padding: 12px; border-radius: 12px; background: var(--md-surface-container-high, var(--md-surface-variant)); font-size: 12px; line-height: 1.6; }
   .setup-step { padding: 8px 0 12px; border-top: 1px solid var(--md-outline); }
   .setup-step:first-child { border-top: 0; }
