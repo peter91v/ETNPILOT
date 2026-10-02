@@ -215,7 +215,7 @@ gebaut, so dass sich jede später lockern lässt, ohne etwas zurückzunehmen:
 2. **Budget:** wiederverwendete Kosten werden angezeigt, zählen nicht gegen den neuen Lauf.
 3. **Granularität:** der Workflow-Schritt, und nur **Agenten-Schritte** werden übernommen. Prüfschritte, Gates und
    Quorum-Schritte laufen neu, ebenso alles, was von einem neu laufenden Schritt abhängt.
-4. **Kein Zurücksetzen des Worktrees:** weicht er vom Stand des zuletzt fertigen Schritts ab, wird abgelehnt.
+4. **Kein Zurücksetzen des Worktrees von allein:** weicht er vom Stand des zuletzt fertigen Schritts ab, wird abgelehnt. Das Verwerfen der Teilarbeit gibt es nur auf ausdrücklichen Wunsch (`--reset-partial`, auf der Seite ein Knopf mit Bestätigung), mit der Liste der Dateien vorher; nie im eigenen Checkout des Projekts und nie über einen Commit hinweg.
 5. **Digest** nach jedem Schritt (nicht nur am Ende der ändernden Schritte).
 6. **`external`:** nichts, was eine Wirkung nach außen hatte und nicht fertig wurde, wird von allein wiederholt;
    der Planer kennt dafür noch keine Bestätigung (`--include-external` gibt es nicht).

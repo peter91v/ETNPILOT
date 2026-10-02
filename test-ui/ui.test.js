@@ -312,3 +312,43 @@ test("the page for a directory with no project speaks German in a German browser
     await ui.close();
   }
 });
+
+test("a run whose step left half-written files can be resumed from the page once the person agrees to discard them", async (t) => {
+  if (skipReason) return t.skip(skipReason);
+  const { runProject } = await import("../src/runtime/project-runner.js");
+  const { git } = await import("../src/git/command.js");
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-ui-reset-"));
+  await mkdir(join(root, ".etnpilot", "agents"), { recursive: true });
+  await writeFile(join(root, ".gitignore"), ".etnpilot/state/\n.etnpilot/worktrees/\n.codegraph/\n");
+  await writeFile(join(root, ".etnpilot", "agents", "worker.yaml"), "name: worker\nprovider: fake\nprompt: Do it.\n");
+  await writeFile(join(root, ".etnpilot", "etnpilot.yaml"), [
+    "version: 1", "defaultAgent: worker", "providers:", "  fake:", "    type: fake", "content:", "  provenance:", "    mode: off",
+    "codegraph:", "  enabled: false", "observability:", "  enabled: false",
+    "workflow:", "  steps:", "    - id: first", "      type: agent", "      agent: worker", "    - id: second", "      type: agent", "      agent: worker", "      needs: [first]", "",
+  ].join("\n"));
+  for (const args of [["init", "-b", "main"], ["config", "user.email", "t@example.invalid"], ["config", "user.name", "t"], ["add", "."], ["commit", "-m", "initial"]]) await git(args, { cwd: root });
+  let calls = 0;
+  await runProject({ root, input: "do both", providerFactories: { fake: (name) => ({ name, invoke: async ({ metadata }) => {
+    calls += 1;
+    if (calls === 1) return { text: "first done" };
+    await writeFile(join(metadata.workspace, "half.txt"), "half\n");
+    throw new Error("the second step broke");
+  } }) } }).then(() => assert.fail("meant to fail"), () => {});
+
+  const ui = await open({ root });
+  try {
+    await ui.page.evaluate(() => show("runs"));
+    await ui.page.locator("#view-runs tbody tr").first().waitFor();
+    await ui.page.locator("#view-runs tbody tr button").first().click();
+    await ui.page.getByRole("button", { name: "Check", exact: true }).click();
+    await ui.page.getByText("cannot be resumed").first().waitFor();
+    await ui.page.getByText("1 files were left by the step that stopped.").waitFor();
+    await ui.page.getByRole("button", { name: "Discard them and resume", exact: true }).click();
+    await ui.page.getByText("removed half.txt").waitFor();
+    await ui.page.getByRole("button", { name: "Discard and resume", exact: true }).click();
+    await ui.page.getByText(/Resuming .*: it appears under working now/).waitFor();
+    assert.deepEqual(ui.problems, []);
+  } finally {
+    await ui.close();
+  }
+});

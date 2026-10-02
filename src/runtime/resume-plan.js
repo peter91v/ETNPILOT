@@ -4,6 +4,7 @@ import { basename, dirname, join, resolve, sep } from "node:path";
 import { loadConfig } from "../config/load.js";
 import { canonicalJson, verifyReceiptFile } from "../core/receipt-store.js";
 import { workspaceDigest } from "../git/workspace-digest.js";
+import { describeRestore, parseDigest } from "../git/workspace-restore.js";
 import { readLines } from "./jsonl.js";
 import { worktreeLockHolder } from "./worktree-lock.js";
 
@@ -24,6 +25,7 @@ export async function planResume({
   verifiers = new Map(),
   requireSignatures = false,
   allowDrift = false,
+  resetPartial = false,
 } = /** @type {any} */ ({})) {
   const repositoryRoot = resolve(root);
   const runsDirectory = join(repositoryRoot, ".etnpilot", "state", "runs");
@@ -96,22 +98,8 @@ export async function planResume({
   const lastDone = lastFinished ? { id: lastFinished.step } : undefined;
   const expected = lastFinished?.workspaceDigest?.digest ?? start.workspaceDigest?.digest;
   const workspacePath = start.workspace?.path;
-  const holder = workspacePath ? await worktreeLockHolder(repositoryRoot, workspacePath) : undefined;
-  if (holder) {
-    refuse("workspace-in-use", `Another run is working in that worktree (process ${holder.pid}, since ${holder.since}${holder.label ? `, ${holder.label}` : ""}).`);
-  }
-  if (!workspacePath) {
-    refuse("no-workspace", "The receipt does not say where the run worked.");
-  } else if (!expected) {
-    refuse("no-workspace-digest", "No workspace digest was recorded to compare against (the directory was not a git working tree).");
-  } else {
-    const now = await workspaceDigest(workspacePath);
-    if (now.unavailable) {
-      refuse("workspace-gone", `The run's workspace can no longer be read (${now.unavailable}).`);
-    } else if (now.digest !== expected) {
-      refuse("workspace-changed", `The workspace differs from how ${lastDone ? `step '${lastDone.id}'` : "the run start"} left it (${expected} then, ${now.digest} now).`);
-    }
-  }
+  const checked = await checkWorkspace({ repositoryRoot, workspacePath, expected, lastDone, resetPartial, refuse, refusals });
+  const { reset, resetOffer } = checked;
 
   // 4. The configuration is the one the run started under.
   let configDigest;
@@ -149,9 +137,12 @@ export async function planResume({
     refusals,
     drift: drift ? { was: start.configDigest, now: configDigest } : undefined,
     workspace: workspacePath,
+    ...(reset ? { reset } : {}),
+    ...(resetOffer ? { resetOffer } : {}),
     resume: resumable ? {
       from: { runId: start.runId, receiptHash: /** @type {any} */ (verification).lastHash },
       workspace: { path: workspacePath, branch: start.workspace?.branch },
+      ...(reset ? { reset } : {}),
       reuse,
       request: start.request,
     } : undefined,
@@ -179,4 +170,56 @@ function describeFailure(terminal) {
   if (failedStep) return { step: failedStep[0], error: String(failedStep[1].error ?? "").slice(0, 500) || undefined };
   if (summary.error) return { error: String(summary.error).slice(0, 500) };
   return undefined;
+}
+
+// Whether what a stopped step left in the worktree could be discarded, and what
+// that would be. Never the main checkout: its uncommitted changes are a
+// person's, not a run's.
+async function restoreFor({ repositoryRoot, workspacePath, expected }) {
+  if (!parseDigest(expected)) return { possible: false, why: "the recorded state is not a git tree" };
+  if (resolve(workspacePath) === repositoryRoot) return { possible: false, why: "the run worked in the project's own checkout, whose changes may be yours" };
+  const described = await describeRestore(workspacePath, expected);
+  if ("unavailable" in described) return { possible: false, why: described.unavailable };
+  return { possible: true, files: described.files };
+}
+
+// Step 3 of the plan: nobody else is working in the worktree, and it is as the
+// last finished step left it. When it is not, and the person asked for it, what
+// the stopped step left behind is to be discarded; when they did not, the offer
+// is made in the plan.
+async function checkWorkspace({ repositoryRoot, workspacePath, expected, lastDone, resetPartial, refuse, refusals }) {
+  const holder = workspacePath ? await worktreeLockHolder(repositoryRoot, workspacePath) : undefined;
+  if (holder) {
+    refuse("workspace-in-use", `Another run is working in that worktree (process ${holder.pid}, since ${holder.since}${holder.label ? `, ${holder.label}` : ""}).`);
+  }
+  if (!workspacePath) {
+    refuse("no-workspace", "The receipt does not say where the run worked.");
+    return {};
+  }
+  if (!expected) {
+    refuse("no-workspace-digest", "No workspace digest was recorded to compare against (the directory was not a git working tree).");
+    return {};
+  }
+  const now = await workspaceDigest(workspacePath);
+  if (now.unavailable) {
+    refuse("workspace-gone", `The run's workspace can no longer be read (${now.unavailable}).`);
+    return {};
+  }
+  if (now.digest === expected) return {};
+  const restore = await restoreFor({ repositoryRoot, workspacePath, expected });
+  if (resetPartial && restore.possible) return { reset: { digest: expected, files: restore.files } };
+  const how = lastDone ? `step '${lastDone.id}'` : "the run start";
+  const advice = restore.possible
+    ? " What the stopped step left behind can be discarded: ask for it explicitly (--reset-partial)."
+    : ` It cannot be put back automatically: ${restore.why}.`;
+  refuse("workspace-changed", `The workspace differs from how ${how} left it (${shortDigest(expected)} then, ${shortDigest(now.digest)} now).${advice}`);
+  if (!restore.possible) return {};
+  refusals[refusals.length - 1].canReset = true;
+  return { resetOffer: { digest: expected, files: restore.files } };
+}
+
+// 'git:<head>:<tree>' as the first characters of each, enough to tell two apart.
+function shortDigest(digest) {
+  const parsed = parseDigest(digest);
+  return parsed ? `${parsed.head.slice(0, 8)}:${parsed.tree.slice(0, 8)}` : String(digest);
 }

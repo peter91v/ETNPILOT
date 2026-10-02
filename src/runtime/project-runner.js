@@ -1,4 +1,5 @@
 // @ts-check
+import { restoreWorkspace } from "../git/workspace-restore.js";
 import { swallow } from "./swallow.js";
 import { acquireWorkspaceLease } from "./workspace-lease.js";
 import { commandEnvironment } from "./command-environment.js";
@@ -180,6 +181,10 @@ async function setUpRun({
         })
       : { name: "in-place", branch: await currentBranch(repositoryRoot), path: repositoryRoot, managed: false };
     if (useWorktree) workspace.managed = true;
+    // The person asked for what the stopped step left behind to be discarded
+    // (the plan listed it): the worktree goes back to how the last finished
+    // step left it, before anything runs in it.
+    if (resume?.reset) await restoreWorkspace(workspace.path, resume.reset.digest);
     receiptStore = new JsonlReceiptStore(receiptPath, { signer: receiptSigner });
     harness.telemetry = telemetry;
     harness.receiptStore = receiptStore;

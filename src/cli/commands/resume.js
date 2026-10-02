@@ -14,7 +14,7 @@ export const resumeCommands = [
   {
     match: ({ command }) => command === "resume",
     async run({ subcommand: receipt, values }) {
-      if (!receipt) throw new Error("Usage: etnpilot resume <run-id|receipt-file> [--dry-run] [--allow-drift] [--approvals terminal|inbox] [--publish] [--public-key path] [--json]");
+      if (!receipt) throw new Error("Usage: etnpilot resume <run-id|receipt-file> [--dry-run] [--allow-drift] [--reset-partial] [--approvals terminal|inbox] [--publish] [--public-key path] [--json]");
       const verifiers = await loadReceiptVerifiers(await resolveReceiptPublicKeys(resolve(values.root), values["public-key"] ?? []), { windows: await resolveKeyWindows(resolve(values.root)) });
       const plan = await planResume({
         root: resolve(values.root),
@@ -22,6 +22,7 @@ export const resumeCommands = [
         verifiers,
         requireSignatures: verifiers.size > 0 && !values["allow-unsigned"],
         allowDrift: values["allow-drift"],
+        resetPartial: values["reset-partial"],
       });
       if (values.json) {
         console.log(JSON.stringify(plan, null, 2));
@@ -35,10 +36,19 @@ export const resumeCommands = [
       }
       for (const note of plan.notes ?? []) console.log(note);
       if (plan.costSoFar !== undefined) console.log(`Cost so far: ${plan.costSoFar.toFixed(4)} (shown, not counted against a new run's budget)`);
+      if (plan.reset) {
+        console.log(`\nWill discard what the stopped step left in the worktree (${plan.reset.files.length} file${plan.reset.files.length === 1 ? "" : "s"}), going back to how the last finished step left it:`);
+        for (const file of plan.reset.files.slice(0, 30)) console.log(`  ${file.status.padEnd(9)} ${file.path}`);
+        if (plan.reset.files.length > 30) console.log(`  … ${plan.reset.files.length - 30} more`);
+      }
       if (plan.drift) console.log("The configuration changed since the run started (allowed by --allow-drift).");
       if (!plan.resumable) {
         console.log("\nThis run cannot be resumed:");
         for (const refusal of plan.refusals) console.log(`  - ${refusal.message}`);
+        if (plan.resetOffer) {
+          console.log(`\nResuming with --reset-partial would discard (${plan.resetOffer.files.length}):`);
+          for (const file of plan.resetOffer.files.slice(0, 30)) console.log(`  ${file.status.padEnd(9)} ${file.path}`);
+        }
         return 1;
       }
       if (values["dry-run"]) {

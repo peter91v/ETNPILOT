@@ -204,3 +204,90 @@ test("the plan says why the run stopped, and what resuming amounts to when nothi
   assert.match(plan.failure.error, /the very first step broke/);
   assert.match(plan.notes[0], /runs every step again/);
 });
+
+// The second step writes a file and edits one the first step made, then breaks:
+// what a step that stopped half way leaves in the worktree.
+function breakingHalfWay() {
+  let calls = 0;
+  return {
+    fake: (name) => ({
+      name,
+      invoke: async ({ metadata }) => {
+        calls += 1;
+        if (calls === 1) {
+          await writeFile(join(metadata.workspace, "first.txt"), "from the first step\n");
+          return { text: "first done" };
+        }
+        await writeFile(join(metadata.workspace, "partial.txt"), "half of something\n");
+        await appendFile(join(metadata.workspace, "first.txt"), "half an edit\n");
+        throw new Error("the second step broke");
+      },
+    }),
+  };
+}
+
+async function halfDoneRun() {
+  const root = await project();
+  await runProject({ root, input: "do both", providerFactories: breakingHalfWay(), cleanupWorktree: false }).then(() => undefined, () => undefined);
+  const runs = join(root, ".etnpilot", "state", "runs");
+  const [file] = (await readdir(runs)).filter((name) => name.endsWith(".jsonl"));
+  const start = JSON.parse((await readFile(join(runs, file), "utf8")).split("\n")[0]);
+  return { root, file, workspace: start.workspace.path };
+}
+
+test("what a step left half done is refused, offered for discarding, and discarded only when asked", async () => {
+  const { root, file, workspace } = await halfDoneRun();
+
+  const refused = await planResume({ root, receipt: file });
+  assert.equal(refused.resumable, false);
+  assert.equal(refused.refusals[0].code, "workspace-changed");
+  assert.equal(refused.refusals[0].canReset, true);
+  assert.match(refused.refusals[0].message, /--reset-partial/);
+  assert.deepEqual(refused.resetOffer.files.map((entry) => `${entry.status} ${entry.path}`).sort(), ["removed partial.txt", "reverted first.txt"]);
+  assert.equal(await readFile(join(workspace, "partial.txt"), "utf8"), "half of something\n", "planning discards nothing");
+
+  const plan = await planResume({ root, receipt: file, resetPartial: true });
+  assert.equal(plan.resumable, true);
+  assert.deepEqual(plan.reset.files.map((entry) => entry.path).sort(), ["first.txt", "partial.txt"]);
+  assert.equal(await readFile(join(workspace, "partial.txt"), "utf8"), "half of something\n", "a plan with a reset discards nothing either");
+
+  // Running it: the worktree goes back before the step runs again.
+  const seen = [];
+  const result = await runProject({
+    root,
+    input: plan.resume.request.input,
+    resume: plan.resume,
+    providerFactories: { fake: (name) => ({ name, invoke: async ({ metadata }) => {
+      seen.push({ partial: await readFile(join(metadata.workspace, "partial.txt"), "utf8").catch(() => undefined), first: await readFile(join(metadata.workspace, "first.txt"), "utf8") });
+      return { text: "second done" };
+    } }) },
+  });
+  assert.equal(result.summary.status, "succeeded");
+  assert.deepEqual(seen, [{ partial: undefined, first: "from the first step\n" }], "the second step started from how the first left the worktree");
+});
+
+test("going back is refused where it could take a person's work: the main checkout, and across a commit", async () => {
+  const { root, file, workspace } = await halfDoneRun();
+  await git(["add", "-A"], { cwd: workspace });
+  await git(["commit", "-m", "someone committed"], { cwd: workspace });
+  const plan = await planResume({ root, receipt: file, resetPartial: true });
+  assert.equal(plan.resumable, false);
+  assert.match(plan.refusals[0].message, /cannot be put back automatically: the worktree's HEAD moved/);
+  assert.equal(plan.reset, undefined);
+});
+
+test("the command lists what --reset-partial would discard, and does not discard on --dry-run", async () => {
+  const { root, file, workspace } = await halfDoneRun();
+  const lines = [];
+  const log = console.log;
+  console.log = (line) => lines.push(String(line));
+  try {
+    assert.equal(await runCli(["resume", file], { root, "dry-run": true, "public-key": [] }), 1);
+    assert.equal(await runCli(["resume", file], { root, "dry-run": true, "reset-partial": true, "public-key": [] }), 0);
+  } finally { console.log = log; }
+  const text = lines.join("\n");
+  assert.match(text, /would discard \(2\)/);
+  assert.match(text, /Will discard what the stopped step left/);
+  assert.match(text, /removed\s+partial\.txt/);
+  assert.equal(await readFile(join(workspace, "partial.txt"), "utf8"), "half of something\n");
+});

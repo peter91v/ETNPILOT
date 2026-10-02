@@ -265,7 +265,7 @@ export async function createReviewServer({
   route("GET", "/api/resume-plan", async ({ request, response, url, state }) => {
     const file = url.searchParams.get("file");
     if (!file) throw badRequest("A receipt file is required.");
-    const plan = await state.resumePlan(file).catch((error) => {
+    const plan = await state.resumePlan(file, { resetPartial: url.searchParams.get("resetPartial") === "true" }).catch((error) => {
       throw error instanceof TypeError ? badRequest(error.message) : error;
     });
     return send(response, 200, plan);
@@ -275,7 +275,7 @@ export async function createReviewServer({
   route("POST", "/api/runs/resume", async ({ request, response, state }) => {
     const body = await readJsonBody(request);
     if (typeof body.file !== "string" || body.file === "") throw badRequest("A receipt file is required.");
-    const started = await state.resumeRun(body.file, { allowDrift: body.allowDrift === true }).catch((error) => {
+    const started = await state.resumeRun(body.file, { allowDrift: body.allowDrift === true, resetPartial: body.resetPartial === true }).catch((error) => {
       throw error instanceof TypeError ? badRequest(error.message) : error;
     });
     return send(response, 202, started);
