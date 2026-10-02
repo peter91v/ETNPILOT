@@ -62,6 +62,8 @@ export function createTuiApp({
   // Whether the open receipt verifies. Read when asked, next to the receipt it
   // is about, and cleared when another run is opened.
   let verification;
+  // Whether the open run could be continued, once asked for.
+  let resumePlan;
   let messageTimer;
   let timer;
   let stopped = false;
@@ -207,6 +209,19 @@ export function createTuiApp({
     },
   },
   {
+    when: (key) => key === "p" && detail && view === "runs" && !agentMode,
+    async run() {
+      await checkResumePlan();
+    },
+  },
+  {
+    // Only once the plan is on screen and says yes: that is the confirmation.
+    when: (key) => key === "R" && detail && view === "runs" && !agentMode && resumePlan?.resumable === true && resumePlan.file === selection()[clamp(cursor, selection().length)]?.receiptFile,
+    async run() {
+      await resumeOpenRun();
+    },
+  },
+  {
     when: (key) => key === "a" && detail && view === "runs" && !agentMode && agentRows().length > 0,
     async run(key) {
       agentMode = true;
@@ -267,6 +282,7 @@ export function createTuiApp({
     get checks() { return checks; },
     get checkResults() { return checkResults; },
     get verification() { return verification; },
+    get resumePlan() { return resumePlan; },
     // What is running is tracked in the shared state, because the page needs
     // the same answer; this is a view of it, not a second copy.
     get active() { return snapshot.active ?? []; },
@@ -319,6 +335,7 @@ export function createTuiApp({
         checkResults,
         checksRunning,
         verification,
+        resumePlan,
         active: snapshot.active ?? [],
         project: state.config?.git?.project ?? "",
       });
@@ -612,6 +629,7 @@ export function createTuiApp({
     detail = true;
     receipt = undefined;
     verification = undefined;
+    resumePlan = undefined;
     agentMode = false;
     agentCursor = 0;
     agentText = undefined;
@@ -636,6 +654,35 @@ export function createTuiApp({
       verification = await state.verifyReceipt(run.receiptFile);
     } catch (error) {
       verification = undefined;
+      note(error.message);
+    }
+  }
+
+  // Planning reads the receipt and the workspace and changes nothing; it is
+  // asked for, like verifying.
+  async function checkResumePlan() {
+    const run = selection()[clamp(cursor, selection().length)];
+    if (!run) return;
+    resumePlan = { file: undefined };
+    app.paint();
+    try {
+      resumePlan = { ...(await state.resumePlan(run.receiptFile)), file: run.receiptFile };
+    } catch (error) {
+      resumePlan = undefined;
+      note(error.message);
+    }
+  }
+
+  async function resumeOpenRun() {
+    const run = selection()[clamp(cursor, selection().length)];
+    if (!run) return;
+    try {
+      const started = await state.resumeRun(run.receiptFile);
+      resumePlan = undefined;
+      detail = false;
+      note(`Resuming ${started.resumedFrom}: it is under working now.`);
+    } catch (error) {
+      resumePlan = undefined;
       note(error.message);
     }
   }

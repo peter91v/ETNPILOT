@@ -26,6 +26,8 @@ import { createHash } from "node:crypto";
 import { canonicalJson } from "../core/receipt-store.js";
 import { WorktreeManager } from "../git/worktrees.js";
 import { workspaceDigest } from "../git/workspace-digest.js";
+import { extractOpenQuestions } from "./open-questions.js";
+import { acquireWorktreeLock } from "./worktree-lock.js";
 import { GitLabClient } from "../gitlab/client.js";
 import { inspectMergeTrain } from "../gitlab/merge-train.js";
 import { GitLabPublisher } from "../gitlab/publisher.js";
@@ -50,9 +52,17 @@ const PROPOSALS_ROOT = ".etnpilot/proposals";
 export const RUN_BRANCH_PREFIX = "etnpilot/";
 
 async function executeProject(options = {}) {
-  const run = await setUpRun(options);
-  const outcome = await runWorkflow(run);
-  return finishRun(run, outcome);
+  // A worktree that is being continued has one run in it at a time.
+  const lock = options.resume
+    ? await acquireWorktreeLock(resolve(options.root ?? process.cwd()), options.resume.workspace.path, { label: `resuming ${options.resume.from.runId}` })
+    : undefined;
+  try {
+    const run = await setUpRun(options);
+    const outcome = await runWorkflow(run);
+    return await finishRun(run, outcome);
+  } finally {
+    await lock?.release();
+  }
 }
 
 // Everything a run needs before its first step: configuration, a workspace, the
@@ -736,12 +746,35 @@ async function verifyContentAfterRun(root, config, initial) {
 // wave it through, because a gate nobody answers is not a gate.
 async function runGateStep(step, harness, { execution, runId, workspace }) {
   const previous = Object.entries(execution.dependencyResults ?? {});
-  const forReview = previous
-    .map(([id, result]) => {
-      const payload = result?.result ?? result ?? {};
-      return `### ${id}\n${payload.result?.text ?? payload.text ?? "(it produced no text)"}`;
-    })
-    .join("\n\n");
+  const textOf = (result) => {
+    const payload = result?.result ?? result ?? {};
+    return payload.result?.text ?? payload.text;
+  };
+  const context = { runId, agent: step.id, workspace: workspace.path };
+  // What the steps before left open, asked one question at a time before the
+  // run goes on: a plan that ends in four questions is four decisions, and
+  // answering them as one "yes" is not answering them. A question can be left
+  // unanswered; then the next step is told so. `questions: false` turns it off.
+  const asked = step.questions === false
+    ? []
+    : previous.flatMap(([id, result]) => extractOpenQuestions(textOf(result)).map((question) => ({ from: id, question })));
+  const answers = [];
+  for (const [index, entry] of asked.entries()) {
+    const reply = await harness.requestDecision({
+      kind: "question",
+      toolName: step.id,
+      toolArguments: { step: step.id, from: entry.from, number: index + 1, of: asked.length },
+      fullCommandText: entry.question,
+    }, context);
+    const text = reply.kind === "approve-once" ? String(reply.answer ?? reply.reason ?? "").trim() : "";
+    answers.push({ from: entry.from, question: entry.question, answer: text === "" ? null : text });
+  }
+  const forReview = [
+    ...previous.map(([id, result]) => `### ${id}\n${textOf(result) ?? "(it produced no text)"}`),
+    ...(answers.length > 0
+      ? [`### Your answers to the open questions\n${answers.map((entry, index) => `${index + 1}. ${entry.question}\n   -> ${entry.answer ?? "(not answered)"}`).join("\n")}`]
+      : []),
+  ].join("\n\n");
   const decision = await harness.requestDecision({
     kind: step.kind ?? "plan",
     toolName: step.id,
@@ -750,7 +783,7 @@ async function runGateStep(step, harness, { execution, runId, workspace }) {
     toolArguments: { step: step.id, waitingOn: previous.map(([id]) => id) },
     diff: forReview,
     fullCommandText: step.prompt ?? `Continue the run past '${step.id}'?`,
-  }, { runId, agent: step.id, workspace: workspace.path });
+  }, context);
   if (decision.kind !== "approve-once") {
     const error = new Error(
       `Stopped at '${step.id}': ${decision.reason ?? "the plan was not approved"}.`,
@@ -758,7 +791,7 @@ async function runGateStep(step, harness, { execution, runId, workspace }) {
     error.code = "gate_rejected";
     throw error;
   }
-  return { step: step.id, approved: true, evidence: decision.evidence, reviewed: previous.map(([id]) => id) };
+  return { step: step.id, approved: true, evidence: decision.evidence, reviewed: previous.map(([id]) => id), ...(answers.length > 0 ? { answers } : {}) };
 }
 
 async function runQuorumStep(step, harness, { input, execution, metadata, traceMetadata, runId, workspace }) {
@@ -985,6 +1018,9 @@ function composeAgentInput(input, dependencies) {
       const refused = tools.filter((call) => call.ok === false);
       parts.push(`Tools: ${tools.length} call${tools.length === 1 ? "" : "s"}`
         + (refused.length > 0 ? `, ${refused.length} refused (${[...new Set(refused.map((call) => call.tool))].join(", ")})` : ""));
+    }
+    if (Array.isArray(payload.answers) && payload.answers.length > 0) {
+      parts.push(`Answers to the open questions:\n${payload.answers.map((entry) => `- ${entry.question}\n  Answer: ${entry.answer ?? "(not answered; use your judgement and say what you assumed)"}`).join("\n")}`);
     }
     if (payload.status && payload.status !== "succeeded") parts.push(`Status: ${payload.status}`);
     if (payload.error) parts.push(`Error: ${payload.error}`);

@@ -16,6 +16,24 @@ async function loadResumePlan(file) {
   render();
 }
 
+// Starts the resumption the plan describes. The server plans again first, so a
+// plan that has gone stale is refused with its reasons, not started.
+async function startResume(file) {
+  try {
+    const started = await api("/api/runs/resume", { method: "POST", body: JSON.stringify({ file }) });
+    clearError();
+    toast("Resuming " + started.resumedFrom + ": it appears under working now.");
+    resumePlan = undefined;
+    openRun = undefined;
+    await refresh({ force: true });
+    show("overview");
+  } catch (error) {
+    fail(error);
+    resumePlan = undefined;
+  }
+  render();
+}
+
 function resumePlanRows(receipt, run) {
   if (run.status === "succeeded" || run.status === "running") return [];
   const rows = [el("p", { class: "muted", text: "Could this run be continued?" })];
@@ -32,8 +50,13 @@ function resumePlanRows(receipt, run) {
   }
   rows.push(el("div", { class: "row" }, [
     pill(resumePlan.resumable ? "could be resumed" : "cannot be resumed", resumePlan.resumable ? "ok" : "warn"),
-    el("span", { class: "muted", text: (resumePlan.resumable ? "Continue it from the terminal: etnpilot resume " + (resumePlan.runId ?? "<run>") : "This is the plan; nothing was changed.") }),
+    el("span", { class: "muted", text: resumePlan.resumable ? "Nothing has been started yet." : "This is the plan; nothing was changed." }),
+    ...(resumePlan.resumable ? [button("Resume", { class: "btn primary", onClick: () => startResume(receipt.file) })] : []),
   ]));
+  if (resumePlan.failure) {
+    rows.push(el("p", { class: "muted", text: "It stopped" + (resumePlan.failure.step ? " in '" + resumePlan.failure.step + "'" : "") + (resumePlan.failure.error ? ": " + resumePlan.failure.error : "") }));
+  }
+  for (const note of resumePlan.notes ?? []) rows.push(el("p", { class: "muted", text: note }));
   for (const step of resumePlan.steps ?? []) {
     rows.push(el("div", { class: "row" }, [
       pill(step.action === "reuse" ? "reuse" : "run again", step.action === "reuse" ? "ok" : "warn"),

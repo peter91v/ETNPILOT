@@ -54,6 +54,7 @@ export function renderApp(state, options = {}) {
     agentMode: options.agentMode, agentCursor: options.agentCursor,
     checks: options.checks ?? [], results: options.checkResults ?? {}, running: options.checksRunning ?? new Set(),
     verification: options.verification,
+    resumePlan: options.resumePlan,
     chat: options.chat,
   };
   const rendered = help
@@ -153,7 +154,7 @@ function footerKeys({ view, detail, editor, prompt, help, diff, agentMode, agent
   }
   if (agentText && view === "runs") return [["↑↓", "scroll"], ["esc", "back"], ["q", "quit"]];
   if (agentMode && view === "runs") return [["↑↓", "move"], ["enter", "read"], ["esc", "back"], ["q", "quit"]];
-  if (detail && view === "runs") return [["a", "agents"], ["v", "verify"], ["esc", "back"], ["n", "run"], ["q", "quit"]];
+  if (detail && view === "runs") return [["a", "agents"], ["v", "verify"], ["p", "resume?"], ["esc", "back"], ["n", "run"], ["q", "quit"]];
   if (diff && view === "worktrees") return [["↑↓", "scroll"], ["esc", "back"], ["q", "quit"]];
   if (detail && view === "worktrees") {
     return [["↑↓", "move"], ["enter", "what changed"], ["esc", "back"], ["x", "remove if clean"], ["q", "quit"]];
@@ -734,7 +735,7 @@ function queueTone(status) {
   return "muted";
 }
 
-function renderRunDetail(state, { style, width, height, cursor, receipt, verification, agentMode = false, agentCursor = 0 }) {
+function renderRunDetail(state, { style, width, height, cursor, receipt, verification, resumePlan, agentMode = false, agentCursor = 0 }) {
   const runs = state.runs ?? [];
   const run = runs[clamp(cursor, runs.length)];
   if (!run) return [style.dim("No runs have been recorded yet.")];
@@ -753,7 +754,7 @@ function renderRunDetail(state, { style, width, height, cursor, receipt, verific
   const outcome = receipt.outcome ?? { reasons: [], steps: [] };
   // What every section reads. Each is a function of its own so that the
   // detail is a list of sections, not one long function.
-  const c = { lines, style, width, height, run, receipt, verification, agentMode, agentCursor, outcome, terminal };
+  const c = { lines, style, width, height, run, receipt, verification, resumePlan, agentMode, agentCursor, outcome, terminal };
   runDetailReasons(c);
   runDetailAgents(c);
   runDetailSteps(c);
@@ -767,6 +768,7 @@ function renderRunDetail(state, { style, width, height, cursor, receipt, verific
   runDetailSettings(c);
   runDetailApprovals(c);
   runDetailReceipt(c);
+  runDetailResume(c);
   runDetailError(c);
   return lines.slice(0, height);
 }
@@ -888,6 +890,31 @@ function runDetailApprovals({ lines, style, height, receipt }) {
   }
 }
 
+// Whether the run could be continued, once asked for ('p'): the plan, in the
+// words the other surfaces use, and the one key that starts it.
+function runDetailResume({ lines, style, width, run, resumePlan }) {
+  if (run.status === "succeeded" || run.status === "running") return;
+  lines.push("", style.dim("Resume"));
+  if (resumePlan === undefined) {
+    lines.push(`  ${style.dim("press 'p' to see whether this run could be continued")}`);
+    return;
+  }
+  if (resumePlan.file !== run.receiptFile) {
+    lines.push(`  ${style.dim("checking…")}`);
+    return;
+  }
+  if (resumePlan.failure) lines.push(`  ${style.muted(`it stopped${resumePlan.failure.step ? ` in '${resumePlan.failure.step}'` : ""}${resumePlan.failure.error ? `: ${resumePlan.failure.error}` : ""}`)}`);
+  for (const step of resumePlan.steps ?? []) {
+    lines.push(`  ${style.tone(pad(step.action === "reuse" ? "reuse" : "run again", 10), step.action === "reuse" ? "ok" : "warn")} ${style.ink(step.id)} ${style.muted(step.action === "reuse" ? "" : step.reason ?? "")}`.trimEnd());
+  }
+  for (const note of resumePlan.notes ?? []) for (const piece of wrap(note, width - 4)) lines.push(`  ${style.muted(piece)}`);
+  if (resumePlan.resumable) lines.push(`  ${style.ok("could be resumed")} ${style.dim("— press 'R' to start it")}`);
+  else {
+    lines.push(`  ${style.bad("cannot be resumed")}`);
+    for (const refusal of resumePlan.refusals ?? []) for (const piece of wrap(refusal.message, width - 6)) lines.push(`    ${style.muted(piece)}`);
+  }
+}
+
 function runDetailReceipt({ lines, style, width, run, verification }) {
   lines.push(style.dim("Receipt"));
   lines.push(`  ${style.muted(run.receiptFile)} · ${run.entries} entries · ${run.signed ? style.ok("signed") : style.warn("unsigned")}`);
@@ -973,7 +1000,7 @@ const HELP_SECTIONS = Object.freeze([
   ["Runs", [
     ["enter", "open the receipt"],
     ["a", "its agents, as a tree — enter reads one"],
-    ["v", "check its hash chain and signatures"],
+    ["v / p", "verify its chain / can it resume? (R)"],
   ]],
   ["Queue", [["c", "request cancellation"], ["R", "resume a failed job"]]],
   ["Worktrees", [
