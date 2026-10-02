@@ -36,11 +36,11 @@ async function project({ lock = false } = {}) {
   return { root, lock };
 }
 
-async function open(setup, { width = 412, fetchImpl } = {}) {
+async function open(setup, { width = 412, fetchImpl, locale } = {}) {
   const home = await mkdtemp(join(tmpdir(), "etnpilot-ui-home-"));
   const server = await createReviewServer({ root: setup.root, env: { ...process.env, ETNPILOT_HOME: home }, fetchImpl });
   const address = await server.listen({ port: 0 });
-  const context = await browser.newContext({ viewport: { width, height: 900 }, isMobile: width < 600, hasTouch: width < 600, colorScheme: "dark" });
+  const context = await browser.newContext({ viewport: { width, height: 900 }, isMobile: width < 600, hasTouch: width < 600, colorScheme: "dark", locale });
   const page = await context.newPage();
   const problems = [];
   page.on("pageerror", (error) => problems.push(error.message));
@@ -264,6 +264,30 @@ test("a run that failed in its second step can be resumed from the page, after t
     assert.equal(await ui.page.getByRole("button", { name: "Resume", exact: true }).count(), 1);
     await ui.page.getByRole("button", { name: "Resume", exact: true }).click();
     await ui.page.getByText(/Resuming .*: it appears under working now/).waitFor();
+    assert.deepEqual(ui.problems, []);
+  } finally {
+    await ui.close();
+  }
+});
+
+test("in a German browser the page speaks German in every view, still fits 412 px, and the switch brings English back", async (t) => {
+  if (skipReason) return t.skip(skipReason);
+  const ui = await open(await project(), { locale: "de-DE" });
+  try {
+    assert.equal(await ui.page.evaluate(() => document.documentElement.lang), "de");
+    assert.match(await ui.page.locator("#nav").innerText(), /Übersicht/);
+    for (const id of VIEWS) {
+      await ui.page.evaluate((view) => show(view), id);
+      await ui.page.waitForTimeout(250);
+      const overflow = await ui.page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+      assert.ok(overflow <= 1, `${id} is ${overflow}px wider than the screen`);
+    }
+    await ui.page.evaluate(() => show("runs"));
+    await ui.page.waitForTimeout(250);
+    assert.match(await ui.page.locator("#view-runs").innerText(), /Es wurden noch keine Läufe aufgezeichnet/);
+    await ui.page.selectOption("#language", "en");
+    await ui.page.waitForLoadState("networkidle");
+    assert.match(await ui.page.locator("#nav").innerText(), /Overview/);
     assert.deepEqual(ui.problems, []);
   } finally {
     await ui.close();
