@@ -67,7 +67,8 @@ function setupGuide() {
       el("p", { class: "muted", text: "Needs " + (chosen.note || "nothing more") + "." }),
     ];
     if (!chosen.ready && chosen.method === "key") {
-      const input = el("input", { attrs: { id: "setup-key", type: "password", autocomplete: "off", placeholder: "Paste the key", value: setupDraft.key } });
+      const input = el("input", { attrs: { id: "setup-key", type: "password", autocomplete: "off", placeholder: "Paste the key" } });
+      input.value = setupDraft.key;
       input.addEventListener("input", () => { setupDraft.key = input.value; });
       parts.push(el("div", { class: "field" }, [el("label", { text: "API key", attrs: { for: "setup-key" } }), input]));
     }
@@ -94,7 +95,8 @@ function setupGuide() {
     ]));
   }
 
-  const tokenInput = el("input", { attrs: { id: "setup-token", type: "password", autocomplete: "off", placeholder: gitlab.connected ? "A token is stored; leave empty to keep it" : "Paste a token (scope api)", value: setupDraft.token } });
+  const tokenInput = el("input", { attrs: { id: "setup-token", type: "password", autocomplete: "off", placeholder: gitlab.connected ? "A token is stored; leave empty to keep it" : "Paste a token (scope api)" } });
+  tokenInput.value = setupDraft.token;
   tokenInput.addEventListener("input", () => { setupDraft.token = tokenInput.value; });
   steps.push(el("div", { class: "setup-step" }, [
     el("div", { class: "row" }, [pill(gitlabDone ? "done" : "optional", gitlabDone ? "ok" : ""), el("strong", { text: "2. Publish to GitLab" })]),
