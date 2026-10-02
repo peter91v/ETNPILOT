@@ -112,3 +112,15 @@ test("GitLab client reports request timeouts", async () => {
   });
   await assert.rejects(() => client.project("group/project"), /timed out after 5 ms/);
 });
+
+test("a failed GitLab request carries the request id GitLab gave it, so an administrator can find it in the logs", async () => {
+  const client = new GitLabClient({
+    baseUrl: "https://gitlab.example.invalid",
+    token: "secret",
+    fetchImpl: async () => new Response("<html>500</html>", { status: 500, headers: { "x-request-id": "01HZ-abc.123<script>" } }),
+  });
+  await assert.rejects(
+    () => client.project("group/project"),
+    (error) => error.status === 500 && error.requestId === "01HZ-abc.123script" && /\[request id 01HZ-abc\.123script\]$/.test(error.message),
+  );
+});
