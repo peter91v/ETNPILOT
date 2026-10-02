@@ -38,6 +38,7 @@ import { PolicyEngine } from "../policy/engine.js";
 import { loadPlugins } from "../plugins/load-plugin.js";
 import { WorkflowEngine } from "../workflow/engine.js";
 import { evaluateQuorum, parseVerdict, QUORUM_INSTRUCTION, quorumError } from "../workflow/quorum.js";
+import { runLadder } from "../workflow/ladder.js";
 import { createSecretResolver } from "../secrets/resolver.js";
 import { createTelemetry } from "../observability/telemetry.js";
 import { refreshPricing } from "../observability/pricing-sync.js";
@@ -329,6 +330,22 @@ async function runWorkflow(run) {
         assertStepExpectation(step, receipt);
         return receipt;
       }
+      if (step.type === "ladder") {
+        if (dryRun) return { step: step.id, skipped: true, reason: "dry-run" };
+        return runLadderStep(step, harness, {
+          input, execution, metadata, traceMetadata, runId, workspace, receiptStore,
+          verifyCommand: async (verifier) => {
+            try {
+              await runObservedCheck({ ...step, id: `${step.id}-verify`, name: verifier.name ?? verifier.command.join(" "), command: verifier.command }, {
+                cwd: workspace.path, root, signal: execution.signal, env: checkEnv, sandbox, telemetry, trace: traceMetadata, workflowRunId: runId,
+              });
+              return { ok: true };
+            } catch (error) {
+              return { ok: false, detail: String(error.message ?? error) };
+            }
+          },
+        });
+      }
       if (step.type === "quorum") {
         return runQuorumStep(step, harness, {
           input,
@@ -366,7 +383,7 @@ async function runWorkflow(run) {
       // someone reading a workflow file with no idea which line is wrong.
       throw new Error(
         `Workflow step '${step.id}' has an unsupported type: '${step.type}'.`
-        + " Every step needs one of 'agent', 'quorum', 'check' or 'gate'.",
+        + " Every step needs one of 'agent', 'quorum', 'ladder', 'check' or 'gate'.",
       );
     };
     summary = await engine.run(workflow.steps, async (step, execution) => {
@@ -613,7 +630,7 @@ function plannedSteps(workflow) {
   return workflow.steps.map((step) => ({
     id: step.id,
     type: step.type ?? "agent",
-    agents: step.type === "quorum" ? (step.agents ?? []) : (step.type ?? "agent") === "agent" && step.agent ? [step.agent] : [],
+    agents: step.type === "quorum" ? (step.agents ?? []) : step.type === "ladder" ? [step.agent, ...(step.router ? [step.router.agent] : []), ...(step.verify ?? []).concat(step.verifyLight ?? []).flatMap((verifier) => verifier.reviewer ? [verifier.reviewer] : [])] : (step.type ?? "agent") === "agent" && step.agent ? [step.agent] : [],
     ...(step.type === "check" ? { command: (step.command ?? []).join(" ") } : {}),
     ...(step.needs?.length ? { needs: step.needs } : {}),
   }));
@@ -682,6 +699,7 @@ async function resolveSandboxConfig(sandboxConfig, workspacePath) {
 function assertWorkflowAgents(harness, workflow) {
   const referenced = workflow.steps.flatMap((step) => {
     if (step.type === "quorum") return step.agents ?? [];
+    if (step.type === "ladder") return [step.agent, step.router?.agent, ...(step.verify ?? []).concat(step.verifyLight ?? []).map((verifier) => verifier.reviewer)];
     return step.type === "agent" || step.type === undefined ? [step.agent] : [];
   });
   const missing = [...new Set(referenced.filter((name) => name && !harness.agents.has(name)))];
@@ -863,6 +881,47 @@ async function runQuorumStep(step, harness, { input, execution, metadata, traceM
   });
   if (!outcome.satisfied) throw quorumError(outcome);
   return outcome;
+}
+
+// The ladder: one tier at a time, cheapest first, each result verified. A tier
+// is the step's agent with another model, provider and effort, registered
+// under its own name for the run so the receipt says which one answered.
+async function runLadderStep(step, harness, { input, execution, metadata, traceMetadata, runId, workspace, receiptStore, verifyCommand }) {
+  const base = harness.agents.get(step.agent);
+  const composed = composeAgentInput(input, execution.dependencyResults);
+  const call = (agent, text) => harness.run({
+    agent,
+    input: text,
+    metadata: { ...metadata, ...traceMetadata, workflowRunId: runId, workflowStep: step.id, workspace: workspace.path },
+    signal: execution.signal,
+  });
+  const result = await runLadder(step, {
+    input: composed,
+    signal: execution.signal,
+    record: (entry) => receiptStore.append({ runId, ...entry }),
+    runAgent: async (tier, text) => {
+      const name = `${step.agent}.${step.id}-t${tier.index + 1}`;
+      const variant = Object.freeze(tierAgent(base, name, tier));
+      if (harness.agents.has(name)) harness.agents.replace(name, variant);
+      else harness.agents.register(name, variant);
+      return call(name, text);
+    },
+    runReviewer: (name, text) => call(name, text),
+    runTriage: step.router ? (text) => call(step.router.agent, text) : undefined,
+    verifyCommand,
+  });
+  return result;
+}
+
+function tierAgent(base, name, tier) {
+  const next = { ...base, name };
+  if (tier.model) next.model = tier.model;
+  if (tier.effort) next.effort = tier.effort;
+  if (tier.provider) {
+    next.provider = tier.provider;
+    delete next.providers;
+  }
+  return next;
 }
 
 async function runSequentially(agents, run) {

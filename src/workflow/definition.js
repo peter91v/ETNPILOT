@@ -1,5 +1,6 @@
 // @ts-check
 import YAML from "yaml";
+import { cleanLadder } from "./ladder.js";
 
 // A named workflow: a file under '.etnpilot/workflows/' holding the steps a run
 // goes through. It is project content like an agent or a prompt — read, pinned
@@ -9,7 +10,7 @@ import YAML from "yaml";
 // The same check runs where a workflow is made (the page), where it is loaded
 // (a run) and in tests. It says what is wrong in the words of the step.
 
-export const STEP_TYPES = Object.freeze(["agent", "check", "gate", "quorum"]);
+export const STEP_TYPES = Object.freeze(["agent", "check", "gate", "quorum", "ladder"]);
 const LIMITS = Object.freeze({ steps: 30, id: 40, text: 400, command: 20 });
 
 export function slugName(value) {
@@ -39,7 +40,7 @@ export function validateWorkflowDefinition(input, { agents = [], maxSteps = 50 }
     if (ids.has(id)) { errors.push(`Two steps are called '${id}'.`); continue; }
     ids.add(id);
     const type = step.type ?? "agent";
-    if (!STEP_TYPES.includes(type)) { errors.push(`'${id}' has type '${type}'; use agent, check, gate or quorum.`); continue; }
+    if (!STEP_TYPES.includes(type)) { errors.push(`'${id}' has type '${type}'; use agent, check, gate, quorum or ladder.`); continue; }
     const out = { id, type };
     if (Array.isArray(step.needs) && step.needs.length > 0) out.needs = step.needs.map(String);
     STEP_CLEANERS[type](step, { id, known, errors, out });
@@ -64,6 +65,7 @@ export function validateWorkflowDefinition(input, { agents = [], maxSteps = 50 }
 // What each kind of step keeps, and what is wrong with it. They write into
 // `out` (the cleaned step) and `errors`.
 const STEP_CLEANERS = {
+  ladder: cleanLadder,
   agent(step, { id, known, errors, out }) {
     if (typeof step.agent !== "string" || !step.agent) errors.push(`'${id}' needs an agent.`);
     else if (known.size > 0 && !known.has(step.agent)) errors.push(`'${id}' names the agent '${step.agent}', which does not exist.`);

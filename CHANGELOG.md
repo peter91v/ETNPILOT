@@ -8,6 +8,13 @@ pre-1.0, so breaking changes may appear in any release.
 
 ### Checks and hygiene (follow-up to the review)
 
+- **Cheap first, verify, climb: the `ladder` workflow step** (`docs/ladder.md`). One agent on a stack of tiers (model,
+  provider, effort); each result is verified by a command and/or a reviewer agent; a failure moves the task up one tier
+  with the failure report as feedback; the receipt keeps every attempt (`ladder-attempt`). An optional **router** agent
+  classifies the task: it picks the first rung and whether the light or the full verification runs; an unreadable answer
+  never lowers the checking (`ladder-route`).
+- **`etnpilot usage --tasks`: cost per finished task**, from the receipts, counting failed attempts too, split by the rung
+  that passed and by the router's difficulty.
 - **"Draft with AI": improving picks from a list, and a prompt can be new.** Improving a prompt, skill or instruction no
   longer asks for a typed name: the page (and the terminal menu) lists what exists. "Something new" now also offers
   `prompt` (written as `.etnpilot/prompts/<name>.md`, never over an existing one; an agent points at it with `promptRef`).
