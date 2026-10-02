@@ -39,6 +39,9 @@ remembers it.
 Without a client id, `login` says so and offers a pasted token instead
 (`--key-stdin` reads one from a pipe).
 
+`etnpilot init` on a terminal walks through all of this: default provider, its key or sign-in, and GitLab address,
+project, user name and token, stored once.
+
 Inside a git repository, signing in to GitLab also installs `etnpilot credential` as that repository's git credential
 helper for the GitLab address, so a plain `git push` uses the stored user name and token without asking. The helper only
 answers for the host the login was issued for, and only over https; it never writes anything (`store` and `erase` do
