@@ -2,7 +2,7 @@
 import { screen, shortId } from "./ansi.js";
 import { parseSettingValue } from "../config/settings.js";
 import { createChatController } from "./chat-controller.js";
-import { clamp, flattenAgents, mergeEntries, renderApp, settingEntries, settingLiteral, settingValue, viewList } from "./render.js";
+import { activeRunFor, clamp, flattenAgents, mergeEntries, renderApp, settingEntries, settingLiteral, settingValue, viewList } from "./render.js";
 
 const VIEWS = viewList();
 
@@ -206,6 +206,20 @@ export function createTuiApp({
     when: (key) => key === "v" && detail && view === "runs",
     async run(key) {
       await verifyOpenReceipt();
+    },
+  },
+  {
+    // Stops the run that is still working, if this is it. Sealed failed; it can
+    // be resumed afterwards.
+    when: (key) => key === "x" && detail && view === "runs" && !agentMode && activeRunFor(snapshot.runs, cursor, snapshot.active) !== undefined,
+    async run() {
+      const active = activeRunFor(snapshot.runs, cursor, snapshot.active);
+      try {
+        state.stopRun(active.id);
+        note("Stopping the run. It is sealed as failed; 'p' then 'R' resumes it.");
+      } catch (error) {
+        note(error.message);
+      }
     },
   },
   {

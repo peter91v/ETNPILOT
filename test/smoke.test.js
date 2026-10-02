@@ -68,6 +68,8 @@ test("on a good day every step passes, over the API that was asked for", async (
   assert.ok(report.tokens.input > 0);
   const text = formatSmoke(report).join("\n");
   assert.match(text, /✓ reply/);
+  // The longest step name still has a space before its detail.
+  assert.match(text, /✓ toolstream \S/);
   assert.match(text, /6\/6 passed against 'openai'/);
 });
 

@@ -79,7 +79,7 @@ export async function refreshPricing({ root, config, fetchImpl = globalThis.fetc
   if (pricing?.autoUpdate === false || underTest || typeof fetchImpl !== "function") { useLearnedRates({}, { root: resolve(root) }); return { used: "none" }; }
   const file = resolve(root, ".etnpilot", "state", "pricing-cache.json");
   const cache = await readRegularFile(file, 4 * 1024 * 1024).then((bytes) => JSON.parse(bytes.toString("utf8"))).catch(() => undefined);
-  if (cache?.rates) useLearnedRates(cache.rates, { asOf: cache.fetchedAt, source: cache.source ?? CATALOG_URL, root: resolve(root) });
+  if (cache?.rates) useLearnedRates(cache.rates, { asOf: asDate(cache.fetchedAt), source: cache.source ?? CATALOG_URL, root: resolve(root) });
   const age = cache ? now() - (cache.fetchedAt ?? 0) : Infinity;
   const retryAfter = cache?.failedAt ? now() - cache.failedAt : Infinity;
   if (age < DAY || retryAfter < HOUR) return { used: cache?.rates ? "cache" : "none" };
@@ -91,7 +91,7 @@ export async function refreshPricing({ root, config, fetchImpl = globalThis.fetc
     if (Object.keys(rates).length === 0) throw new Error("catalog held no prices");
     const fetchedAt = now();
     await save(file, { fetchedAt, source: url, rates });
-    useLearnedRates(rates, { asOf: fetchedAt, source: url, root: resolve(root) });
+    useLearnedRates(rates, { asOf: asDate(fetchedAt), source: url, root: resolve(root) });
     return { used: "network", models: Object.keys(rates).length };
   } catch (error) {
     // Remembered, so an offline phone does not wait for a timeout on every run.
@@ -109,4 +109,11 @@ async function save(file, value) {
 
 function round(value) {
   return Math.round(value * 1e6) / 1e6;
+}
+
+// A rate's age is shown to people and written into receipts, so it is a date,
+// not the milliseconds the cache keeps it in (a usage report once printed
+// "as of 1790851331573").
+function asDate(milliseconds) {
+  return Number.isFinite(milliseconds) ? new Date(milliseconds).toISOString() : undefined;
 }

@@ -185,7 +185,7 @@ export function formatSmoke(report) {
   for (const step of report.steps) {
     const mark = step.status === "pass" ? "✓" : step.status === "skip" ? "-" : "✗";
     const time = step.ms !== undefined ? `  ${(step.ms / 1000).toFixed(1)} s` : "";
-    lines.push(`${mark} ${step.id.padEnd(7)}${step.status === "skip" ? "skipped" : step.detail ?? ""}${time}`);
+    lines.push(`${mark} ${step.id.padEnd(11)}${step.status === "skip" ? "skipped" : step.detail ?? ""}${time}`);
     if (step.status === "fail" && step.hint) lines.push(`    → ${step.hint}`);
   }
   const ran = report.steps.filter((step) => step.status !== "skip");

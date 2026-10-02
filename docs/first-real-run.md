@@ -275,6 +275,12 @@ included as encrypted content, are handed back with the tool results, and the ef
 arrive, and the finished response in the stream's last event is what the loop continues from, so tool calls and
 reasoning items are never reassembled from fragments.
 
+**Checked on a real key (2026-10-02).** `etnpilot smoke --provider openai --model gpt-5.6-sol` passed 6/6 on a
+phone: reply on chat completions, tools on `/v1/responses` (`auto` switched by itself), stream on chat, and the
+combination, `toolstream`, on `/v1/responses` with the tool call arriving while 8 pieces streamed; 1,118
+tokens in, 92 out. `etnpilot usage` for `gpt-5-2025-08-07` reproduces by hand from the published rates (1.25 / 0.125
+cached / 10 USD per million): 78,285 uncached in + 369,792 cached in + 35,931 out = USD 0.5034.
+
 ## `etnpilot smoke` — the quick check on a real key
 
 ```

@@ -79,9 +79,19 @@ export function renderApp(state, options = {}) {
     lines.push(footer({
       style, width, view, detail, message, editor, prompt, help, diff: worktreeDiffOpen,
       agentMode: options.agentMode, agentText: agentTextOpen,
+      stoppable: view === "runs" && detail && activeRunFor(state.runs, cursor, active) !== undefined,
     }));
   }
   return lines.slice(0, height).map((line) => truncate(line, width));
+}
+
+// The run being worked on right now that the run under the cursor is, if any:
+// what 'x' would stop. Matched by run id, which a working run learns once its
+// plan is made; before that it cannot be told apart from the list.
+export function activeRunFor(runs, cursor, active) {
+  const run = (runs ?? [])[clamp(cursor, (runs ?? []).length)];
+  if (!run) return undefined;
+  return (active ?? []).find((candidate) => candidate.runId !== undefined && candidate.runId === run.runId);
 }
 
 function renderView(view, state, context) {
@@ -135,13 +145,13 @@ function header(state, { style, width, view, project, active = [] }) {
 
 function footer({ style, width, view, detail, message, editor, prompt, help, ...options }) {
   if (message) return truncate(style.warn(message), width);
-  const keys = footerKeys({ view, detail, editor, prompt, help, diff: options.diff, agentMode: options.agentMode, agentText: options.agentText });
+  const keys = footerKeys({ view, detail, editor, prompt, help, diff: options.diff, agentMode: options.agentMode, agentText: options.agentText, stoppable: options.stoppable });
   return truncate(keys.map(([key, label]) => `${style.accent(key)} ${style.dim(label)}`).join(style.dim("  ")), width);
 }
 
 // Whatever is on screen decides which keys the footer promises. A key it names
 // has to do something here, or the footer is teaching the wrong thing.
-function footerKeys({ view, detail, editor, prompt, help, diff, agentMode, agentText }) {
+function footerKeys({ view, detail, editor, prompt, help, diff, agentMode, agentText, stoppable }) {
   if (view === "chat" && !detail) {
     return [["enter", "write"], ["a", "approve"], ["r", "reject"], ["s", "stop"], ["PgUp", "back"], ["tab", "view"], ["q", "quit"]];
   }
@@ -154,7 +164,7 @@ function footerKeys({ view, detail, editor, prompt, help, diff, agentMode, agent
   }
   if (agentText && view === "runs") return [["↑↓", "scroll"], ["esc", "back"], ["q", "quit"]];
   if (agentMode && view === "runs") return [["↑↓", "move"], ["enter", "read"], ["esc", "back"], ["q", "quit"]];
-  if (detail && view === "runs") return [["a", "agents"], ["v", "verify"], ["p", "resume?"], ["esc", "back"], ["n", "run"], ["q", "quit"]];
+  if (detail && view === "runs") return [["a", "agents"], ["v", "verify"], stoppable ? ["x", "stop run"] : ["p", "resume?"], ["esc", "back"], ["n", "run"], ["q", "quit"]];
   if (diff && view === "worktrees") return [["↑↓", "scroll"], ["esc", "back"], ["q", "quit"]];
   if (detail && view === "worktrees") {
     return [["↑↓", "move"], ["enter", "what changed"], ["esc", "back"], ["x", "remove if clean"], ["q", "quit"]];

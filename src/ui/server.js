@@ -268,6 +268,11 @@ export async function createReviewServer({
     });
     return send(response, 202, started);
   });
+  route("POST", "/api/runs/stop", async ({ request, response, state }) => {
+    const body = await readJsonBody(request);
+    if (typeof body.id !== "string" || body.id === "") throw badRequest("A run id is required.");
+    return send(response, 200, state.stopRun(body.id));
+  });
   route("GET", "/api/checks", async ({ request, response, url, state }) => {
     return send(response, 200, { checks: state.checks() });
   });

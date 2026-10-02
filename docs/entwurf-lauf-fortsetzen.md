@@ -220,6 +220,8 @@ gebaut, so dass sich jede später lockern lässt, ohne etwas zurückzunehmen:
 6. **`external`:** nichts, was eine Wirkung nach außen hatte und nicht fertig wurde, wird von allein wiederholt;
    der Planer kennt dafür noch keine Bestätigung (`--include-external` gibt es nicht).
 
-Bekannte Lücken: Es gibt **keine Sperre** gegen zwei gleichzeitige Fortsetzungen desselben Laufs (zwei Läufe im selben
+Bekannte Lücken (Stand E3, die Sperre ist inzwischen gebaut, siehe unten): Es gab **keine Sperre** gegen zwei gleichzeitige Fortsetzungen desselben Laufs (zwei Läufe im selben
 Worktree); der Befehl bricht ab, wenn der Worktree nicht mehr bei git registriert ist, aber er verhindert das
-Doppelstarten nicht. Die Prüfseite und die TUI zeigen den Plan, starten aber nichts.
+Doppelstarten nicht. Die Prüfseite (Knopf „Resume“ nach dem Plan) und die TUI (`p`, dann `R`) starten die Fortsetzung; die Sperre
+gegen gleichzeitiges Fortsetzen gibt es inzwischen (`.etnpilot/state/locks/`, ein Prozess hält sie, ein toter
+Prozess hält nichts).

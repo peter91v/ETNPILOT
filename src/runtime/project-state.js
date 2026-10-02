@@ -119,6 +119,22 @@ export async function openProjectState({ root = process.cwd(), env = process.env
     // Whoever closes the surface stops what that surface started; a run left
     // working in a worktree nobody watches is worse than one that says why it
     // stopped, which its receipt records.
+    // One run, by the id the screen shows it under (or by its run id): asked to
+    // stop with a reason that reaches whatever it is waiting on, so a pending
+    // approval is rejected as "stopped", not as a shutdown. Its receipt is
+    // sealed as failed, and it can be continued with `resume`.
+    stopRun(which) {
+      const record = [...running].find((candidate) => candidate.id === which || (candidate.runId !== undefined && candidate.runId === which));
+      if (!record) {
+        const missing = new Error("That run is not running here; it may have finished already.");
+        /** @type {any} */ (missing).statusCode = 404;
+        throw missing;
+      }
+      const reason = new Error("The run was stopped.");
+      /** @type {any} */ (reason).code = "run_stopped";
+      record.controller.abort(reason);
+      return { stopped: true, id: record.id, task: record.task };
+    },
     stopRuns() {
       const stopped = [...running].map(presentRun);
       for (const record of running) record.controller.abort();
@@ -281,6 +297,8 @@ function markRunning(runs, running) {
 
 function presentRun(record) {
   return {
+    id: record.id,
+    ...(record.runId ? { runId: record.runId } : {}),
     task: record.task,
     agent: record.agent,
     startedAt: record.startedAt,

@@ -1,4 +1,5 @@
 // @ts-check
+import { randomUUID } from "node:crypto";
 import { createInboxApprovalHandler } from "../core/approval-inbox.js";
 import { createApprovalNotifier } from "../core/approval-notify.js";
 import { runProject } from "./project-runner.js";
@@ -22,7 +23,7 @@ export function startProjectRun(scope, { input, agent, workflow, signal, dryRun,
     if (signal.aborted) controller.abort();
     else signal.addEventListener("abort", () => controller.abort(), { once: true });
   }
-  const record = /** @type {any} */ ({ task, agent, startedAt: new Date().toISOString(), controller, done: 0, ...(session ? { session } : {}) });
+  const record = /** @type {any} */ ({ id: randomUUID(), task, agent, startedAt: new Date().toISOString(), controller, done: 0, ...(session ? { session } : {}) });
   const execute = via ?? runProject;
   const started = execute({
     root: projectRoot,
