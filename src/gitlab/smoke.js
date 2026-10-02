@@ -69,16 +69,30 @@ export async function runGitLabSmoke({ client, project, receiptPath, confirmWrit
 // be asked for in the address. If that fails too, the first answer is the one
 // worth reading, after one more look: a GitLab that answers 500 may still have
 // closed the merge request (the error can come from what follows the change, a
-// notification or a hook), and the state is what the cleanup is about.
+// notification or a hook), and the state is what the cleanup is about. A merge
+// request that stays open is removed instead.
 async function closeMergeRequest(client, base) {
   try {
     await client.request("PUT", base, { state_event: "close" });
     return "mr-closed";
   } catch (first) {
     try { await client.request("PUT", `${base}?state_event=close`); return "mr-closed"; } catch { /* look at the state */ }
-    const now = await client.request("GET", base).catch(() => undefined);
-    if (now?.state === "closed") return "mr-closed-after-error";
-    throw first;
+    let seen = "unreadable";
+    try {
+      const now = await client.request("GET", base);
+      if (now?.state === "closed") return "mr-closed-after-error";
+      seen = String(now?.state ?? "unknown");
+    } catch (error) { seen = `unreadable${reasonOf(error)}`; }
+    // The merge request is this smoke's own, in a project made for it: if it
+    // cannot be closed it can be removed, which asks more of the token's role
+    // (owner) and leaves nothing behind.
+    try {
+      await client.request("DELETE", base);
+      return "mr-deleted-after-close-error";
+    } catch (error) {
+      first.message = `${first.message}; its state: ${seen}; removing it failed too${reasonOf(error)}`;
+      throw first;
+    }
   }
 }
 
