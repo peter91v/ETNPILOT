@@ -3,7 +3,7 @@
 Anything that speaks the OpenAI chat API needs no code, only an address, a key and a model.
 
 ```bash
-etnpilot provider presets                 # gemini, mistral, openrouter, groq, ollama
+etnpilot provider presets                 # gemini, mistral, openrouter, groq, github-models, ollama
 etnpilot provider add gemini              # then: export GEMINI_API_KEY=...
 etnpilot smoke --provider gemini          # does it answer, call tools, stream?
 etnpilot models --provider gemini         # which model ids this account has
@@ -15,7 +15,10 @@ etnpilot models --provider gemini         # which model ids this account has
   `.etnpilot/etnpilot.yaml`, together with a secret mapped to its environment variable and that variable on
   the `secrets.providers.env.allow` list. Your local file is not allowed to widen what a project may read, so
   this cannot live there. Because the committed file changed, `etnpilot trust` asks again.
-- A provider without a key (`ollama`, on this machine) goes into your own local settings.
+- A provider without a key (`ollama`, on this machine) goes into your own local settings. So does `github-models`:
+  its key is your stored GitHub login (`etnpilot login github`), which needs the "models" permission (a fine-grained
+  token with Models: read is the sure way; whether a browser sign-in's scope is enough is not verified against GitHub).
+  Projects created by `init` already have a `github-models` entry; this is for projects from before that.
 - `--name` adds a second entry from the same preset; `--force` replaces an existing one; `--model` picks the
   model. The model in a preset is a starting point: ask `etnpilot models` what the account has.
 
