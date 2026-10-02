@@ -11,6 +11,8 @@ import { WorkflowQueueStateError } from "../workflow/queue.js";
 import { createProject, describeProject } from "../runtime/first-run.js";
 import { createAccountRoutes } from "./accounts.js";
 import { createSetupRoutes } from "./setup-routes.js";
+import { installCredentialHelper } from "../auth/git-credential.js";
+import { isPlaceholderAddress } from "../runtime/guided-setup.js";
 import { renderReviewPage } from "./page.js";
 import { renderIcon, renderManifest, renderServiceWorker } from "./app.js";
 import { renderSetupPage } from "./setup-page.js";
@@ -58,6 +60,18 @@ export async function createReviewServer({
       const address = normalizeAuthHost(host);
       await state.setSetting("git.baseUrl", address, { scope: "local" });
       return address;
+    },
+    // So that a plain 'git push' in this project uses the GitLab login too.
+    // Says nothing when there is no git repository or no address yet.
+    installGitHelper: async () => {
+      const address = state?.config?.git?.baseUrl;
+      if (!address || isPlaceholderAddress(address)) return undefined;
+      try {
+        await installCredentialHelper(root, address);
+        return new URL(address).host;
+      } catch {
+        return undefined;
+      }
     },
   });
 

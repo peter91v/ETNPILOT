@@ -491,6 +491,7 @@ export const DE = {
 // they are.
 /** @type {Array<[RegExp, (...groups: any[]) => string]>} */
 export const DE_PATTERNS = [
+  [/^git in this project now uses this login for (.+); a push asks for nothing\.$/, (_, host) => `git in diesem Projekt nutzt diesen Login jetzt für ${host}; ein Push fragt nach nichts.`],
   [/^(.+) — (ready|no login yet)$/, (_, id, state) => `${id} — ${state === "ready" ? "bereit" : "noch kein Login"}`],
   [/^Needs (.+)\.$/, (_, what) => `Braucht ${what}.`],
   [/^Default provider: (.+)\.$/, (_, id) => `Standard-Anbieter: ${id}.`],
