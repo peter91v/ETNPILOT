@@ -122,5 +122,53 @@ test("the command prints the plan, and refuses to do more than plan", async () =
   assert.match(text, /first\s+reuse/);
   assert.match(text, /second\s+run again/);
   assert.match(text, /could be resumed/);
-  await assert.rejects(runCli(["resume", file], { root, "dry-run": false, "public-key": [] }), /not built yet/);
+});
+
+test("resuming continues in the same worktree, runs only what did not finish, and the new receipt says whose steps it carried", async () => {
+  const { root, file, path } = await failedRun();
+  const oldEntries = (await readFile(path, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+  const oldStart = oldEntries[0];
+  const plan = await planResume({ root, receipt: file });
+  assert.equal(plan.resumable, true);
+  assert.deepEqual(Object.keys(plan.resume.reuse), ["first"]);
+
+  // The provider now works; it records what the second step was asked.
+  const asked = [];
+  const result = await runProject({
+    root,
+    input: plan.resume.request.input,
+    resume: plan.resume,
+    providerFactories: { fake: (name) => ({ name, invoke: async ({ input }) => { asked.push(input); return { text: "second done" }; } }) },
+  });
+  assert.equal(result.summary.status, "succeeded");
+  assert.equal(asked.length, 1, "only the step that had not finished ran");
+  assert.match(asked[0], /first done/, "the carried result reached the step that needs it");
+  assert.equal(result.workspace.path, oldStart.workspace.path, "the earlier worktree was continued");
+  assert.equal(await readFile(join(oldStart.workspace.path, "first.txt"), "utf8"), "from the first step\n");
+
+  const runs = join(root, ".etnpilot", "state", "runs");
+  const newFile = (await readdir(runs)).filter((name) => name.endsWith(".jsonl") && name !== file)[0];
+  const entries = (await readFile(join(runs, newFile), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+  const start = entries[0];
+  assert.equal(start.resumedFrom.runId, oldStart.runId);
+  assert.equal(start.resumedFrom.receiptHash, oldEntries.at(-1).hash);
+  assert.deepEqual(start.resumedFrom.reusedSteps.map((entry) => entry.step), ["first"]);
+  const steps = entries.filter((entry) => entry.type === "step");
+  assert.equal(steps.find((entry) => entry.step === "first").reused.runId, oldStart.runId);
+  assert.equal(steps.find((entry) => entry.step === "second").reused, undefined);
+  assert.equal(entries.filter((entry) => entry.type === undefined && entry.workflowStep === "first").length, 0, "the first step was not run again");
+  // The old receipt is untouched, and the worktree was not discarded.
+  assert.equal((await readFile(path, "utf8")).trim().split("\n").length, oldEntries.length);
+});
+
+test("a run that cannot be planned is not started by the command", async () => {
+  const { root, file, path } = await failedRun();
+  const start = JSON.parse((await readFile(path, "utf8")).split("\n")[0]);
+  await appendFile(join(start.workspace.path, "first.txt"), "edited afterwards\n");
+  const log = console.log;
+  console.log = () => {};
+  try {
+    assert.equal(await runCli(["resume", file], { root, "dry-run": false, "public-key": [] }), 1);
+  } finally { console.log = log; }
+  assert.equal((await readdir(join(root, ".etnpilot", "state", "runs"))).filter((name) => name.endsWith(".jsonl")).length, 1, "no new run was started");
 });

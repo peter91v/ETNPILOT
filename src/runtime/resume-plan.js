@@ -54,27 +54,45 @@ export async function planResume({
     refuse("dry-run", "A dry run did nothing that could be resumed.");
   }
 
-  // 2. Which steps are done, in the run's own order. A step counts as done
-  // only if every step it needed is also done.
+  // 2. Which steps would be carried over, in the run's own order. Only an
+  // agent step that finished is carried over: its result is in the receipt.
+  // Anything else is run again, and so is everything that needs it.
   const steps = [];
-  const done = new Set();
+  const reuse = {};
+  const carried = new Set();
   for (const step of start.plan) {
     const evidence = finished.get(step.id);
-    const needsMet = (step.needs ?? []).every((id) => done.has(id));
-    if (evidence && needsMet) {
-      done.add(step.id);
-      steps.push({ id: step.id, type: step.type, action: "reuse", effect: evidence.effect, entryHash: evidence.hash, workspaceDigest: evidence.workspaceDigest?.digest });
+    const needsMet = (step.needs ?? []).every((id) => carried.has(id));
+    const agentEntry = [...entries].reverse().find((entry) => entry.type === undefined && entry.workflowStep === step.id && entry.status === "succeeded" && entry.parentRunId === undefined);
+    if (evidence && needsMet && step.type === "agent" && agentEntry) {
+      carried.add(step.id);
+      const { previousHash: _previous, hash, signature: _signature, proof: _proof, ...result } = agentEntry;
+      reuse[step.id] = { result, entryHash: hash, effect: evidence.effect };
+      steps.push({ id: step.id, type: step.type, action: "reuse", effect: evidence.effect, entryHash: hash, workspaceDigest: evidence.workspaceDigest?.digest });
     } else {
-      steps.push({ id: step.id, type: step.type, action: "rerun", reason: evidence ? "a step it needs is not done" : "did not finish" });
+      const reason = !evidence
+        ? "did not finish"
+        : step.type !== "agent"
+          ? "only agent steps are carried over; this kind runs again"
+          : !needsMet
+            ? "a step it needs is not carried over"
+            : "its result is not in the receipt";
+      steps.push({ id: step.id, type: step.type, action: "rerun", reason });
     }
   }
   if (steps.every((step) => step.action === "reuse")) {
     refuse("nothing-left", "Every step finished; the run stopped after them (while sealing or publishing), which a new run cannot help with.");
   }
+  if (!start.request?.input) {
+    refuse("no-request", "The receipt does not record what was asked, so the run cannot be asked again.");
+  }
 
   // 3. The workspace is as the last finished step left it.
-  const lastDone = [...steps].reverse().find((step) => step.action === "reuse");
-  const expected = lastDone?.workspaceDigest ?? start.workspaceDigest?.digest;
+  // The state to match is the one the last step to finish (of any kind) left:
+  // that is where the work stands now.
+  const lastFinished = [...entries].reverse().find((entry) => entry.type === "step" && entry.status === "succeeded");
+  const lastDone = lastFinished ? { id: lastFinished.step } : undefined;
+  const expected = lastFinished?.workspaceDigest?.digest ?? start.workspaceDigest?.digest;
   const workspacePath = start.workspace?.path;
   if (!workspacePath) {
     refuse("no-workspace", "The receipt does not say where the run worked.");
@@ -108,15 +126,22 @@ export async function planResume({
     if (step.action === "rerun" && step.type === "publish") step.needsConfirmation = true;
   }
 
+  const resumable = refusals.length === 0;
   const costSoFar = entries.filter((entry) => entry.usage?.estimatedCost !== undefined).reduce((sum, entry) => sum + entry.usage.estimatedCost, 0);
   return {
     receipt: path,
     runId: start.runId,
     status: terminal?.status ?? "incomplete",
-    resumable: refusals.length === 0,
+    resumable,
     refusals,
     drift: drift ? { was: start.configDigest, now: configDigest } : undefined,
     workspace: workspacePath,
+    resume: resumable ? {
+      from: { runId: start.runId, receiptHash: /** @type {any} */ (verification).lastHash },
+      workspace: { path: workspacePath, branch: start.workspace?.branch },
+      reuse,
+      request: start.request,
+    } : undefined,
     steps,
     costSoFar: costSoFar > 0 ? costSoFar : undefined,
   };

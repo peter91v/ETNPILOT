@@ -4,7 +4,7 @@ import { acquireWorkspaceLease } from "./workspace-lease.js";
 import { commandEnvironment } from "./command-environment.js";
 import { randomUUID } from "node:crypto";
 import { access } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { loadConfig } from "../config/load.js";
 import { settingsEvidence } from "../config/layers.js";
 import { loadProject } from "../content/load-project.js";
@@ -86,16 +86,20 @@ async function setUpRun({
   agentOverride,
   secretResolver,
   onEvent,
+  // Set by 'etnpilot resume': { from: { runId, receiptHash }, workspace: { path, branch }, reuse: { [stepId]: { result, entryHash, effect } } }.
+  // The run carries the finished steps of an earlier run into a new one and continues in the
+  // earlier run's worktree, which this run does not own and never discards.
+  resume,
 } = /** @type {any} */ ({})) {
   if (!input) throw new TypeError("A task prompt is required.");
   const repositoryRoot = resolve(root);
   const bootstrapConfig = await loadConfig(join(repositoryRoot, ".etnpilot", "etnpilot.yaml"), env);
   const secrets = secretResolver ?? createSecretResolver({ root: repositoryRoot, config: bootstrapConfig, env });
-  const useWorktree = worktree ?? (inPlace ? false : bootstrapConfig.workspace?.mode !== "in-place");
+  const useWorktree = resume ? true : worktree ?? (inPlace ? false : bootstrapConfig.workspace?.mode !== "in-place");
   const effectiveCleanupPolicy = cleanupPolicy ?? bootstrapConfig.workspace?.cleanup ?? "never";
   assertCleanupPolicy(effectiveCleanupPolicy);
   const runId = createRunId();
-  const branch = `${RUN_BRANCH_PREFIX}run-${runId}`;
+  const branch = resume ? resume.workspace.branch : `${RUN_BRANCH_PREFIX}run-${runId}`;
   const worktreeManager = new WorktreeManager(repositoryRoot);
   const receiptPath = join(repositoryRoot, ".etnpilot", "state", "runs", `${runId}.jsonl`);
   const policy = new PolicyEngine(bootstrapConfig.policy);
@@ -156,7 +160,9 @@ async function setUpRun({
       env,
       secretResolver: secrets,
     });
-    workspace = useWorktree
+    workspace = resume
+      ? await adoptWorkspace(worktreeManager, resume.workspace)
+      : useWorktree
       ? await worktreeManager.create({
           name: `run-${runId}`,
           branch,
@@ -254,7 +260,7 @@ async function setUpRun({
   }
   return {
     root, input, agent, workflowName, dryRun, publish, env, fetchImpl, signal, metadata, session, approvalHandler,
-    repositoryRoot, bootstrapConfig, secrets, useWorktree, effectiveCleanupPolicy, runId, branch, worktreeManager,
+    repositoryRoot, bootstrapConfig, secrets, useWorktree, effectiveCleanupPolicy, runId, branch, worktreeManager, resume, agentOverride, baseRef,
     receiptPath, policy, harness, config, gitLabToken, receiptSigner, receiptStore, telemetry, workspace,
     codegraph, mcp, codegraphBefore, codegraphUnavailable, contentEvidence, workflow, sandbox, recorder, fixturePlayer,
     toolsReleased: false,
@@ -267,7 +273,7 @@ async function runWorkflow(run) {
   const {
     root, input, dryRun, publish, fetchImpl, metadata, session, env, signal,
     bootstrapConfig, useWorktree, runId, harness, config, gitLabToken, receiptSigner, receiptStore, telemetry,
-    workspace, sandbox, workflow, receiptPath,
+    workspace, sandbox, workflow, receiptPath, resume, agent, workflowName, agentOverride, baseRef,
   } = run;
   let { contentEvidence } = run;
   const engine = new WorkflowEngine({
@@ -304,6 +310,9 @@ async function runWorkflow(run) {
       // still there.
       plan: workflow.steps.map((step) => ({ id: step.id, type: step.type ?? "agent", needs: step.needs ?? [] })),
       workspace: { path: workspace.path, branch: workspace.branch, managed: workspace.managed === true },
+      // What was asked, so a later reader can ask for the same thing again.
+      request: { input, ...(agent ? { agent } : {}), ...(workflowName ? { workflow: workflowName } : {}), ...(agentOverride ? { agentOverride } : {}), ...(baseRef ? { baseRef } : {}) },
+      ...(resume ? { resumedFrom: { runId: resume.from.runId, receiptHash: resume.from.receiptHash, reusedSteps: Object.entries(resume.reuse).map(([step, carried]) => ({ step, entryHash: carried.entryHash })) } } : {}),
       ...(dryRun ? {} : { workspaceDigest: await workspaceDigest(workspace.path) }),
     });
     const runStep = async (step, execution) => {
@@ -365,10 +374,13 @@ async function runWorkflow(run) {
       );
     };
     summary = await engine.run(workflow.steps, async (step, execution) => {
-      const result = await runStep(step, execution);
+      // A step an earlier run finished is not run again: its result is carried
+      // over, and the receipt says whose it is.
+      const carried = resume?.reuse?.[step.id];
+      const result = carried ? carried.result : await runStep(step, execution);
       // What the workspace looked like when this step finished, so a later
       // reader can tell whether the step's result still describes it.
-      if (!dryRun) await recordStepEvidence(receiptStore, { runId, step, result, workspace });
+      if (!dryRun) await recordStepEvidence(receiptStore, { runId, step, result, workspace, ...(carried ? { reused: { runId: resume.from.runId, entryHash: carried.entryHash }, effect: carried.effect } : {}) });
       return result;
     }, { signal, context: { runId, workspace } });
     contentEvidence = await verifyContentAfterRun(workspace.path, config, contentEvidence);
@@ -560,10 +572,10 @@ async function finishRun(run, { summary, contentEvidence, publisher, startedAt, 
 // have, and the digest of the workspace it left behind. The effect is derived
 // from what the step is and what it was approved to do; it is a label for
 // readers, never a permission.
-async function recordStepEvidence(receiptStore, { runId, step, result, workspace }) {
+async function recordStepEvidence(receiptStore, /** @type {any} */ { runId, step, result, workspace, reused, effect: carriedEffect }) {
   const approvals = Array.isArray(result?.approvals) ? result.approvals : [];
   const reachedOut = approvals.some((approval) => approval?.operationKind === "network");
-  const effect = reachedOut ? "external" : step.type === "gate" ? "read" : "workspace";
+  const effect = carriedEffect ?? (reachedOut ? "external" : step.type === "gate" ? "read" : "workspace");
   await receiptStore.append({
     type: "step",
     runId,
@@ -571,8 +583,21 @@ async function recordStepEvidence(receiptStore, { runId, step, result, workspace
     stepType: step.type,
     status: "succeeded",
     effect,
+    ...(reused ? { reused } : {}),
     workspaceDigest: await workspaceDigest(workspace.path),
   });
+}
+
+// The worktree of an earlier run, taken over by a run that continues it. It has
+// to be one git still knows, on the branch the earlier run recorded.
+async function adoptWorkspace(manager, { path, branch }) {
+  const wanted = resolve(path);
+  const known = (await manager.list()).find((entry) => typeof entry.worktree === "string" && resolve(entry.worktree) === wanted);
+  if (!known) throw new Error(`The earlier run's worktree is no longer registered with git: ${wanted}.`);
+  if (known.branch && known.branch !== `refs/heads/${branch}`) {
+    throw new Error(`The earlier run's worktree is on '${String(known.branch).replace("refs/heads/", "")}', not on '${branch}'.`);
+  }
+  return { name: basename(wanted), branch, path: wanted, managed: true, adopted: true };
 }
 
 // Closes the code index and the MCP servers, once, however the run ends.
@@ -654,6 +679,8 @@ function describeProjectLoadError(error, useWorktree) {
 
 async function discardWorkspace(workspace, manager, branch) {
   if (!workspace?.managed) return { removed: false, reason: "in-place-run" };
+  // A worktree this run took over belongs to the run it came from.
+  if (workspace.adopted) return { removed: false, reason: "adopted-workspace" };
   try {
     const removal = await manager.removeIfClean(workspace.name);
     if (!removal.removed) return removal;

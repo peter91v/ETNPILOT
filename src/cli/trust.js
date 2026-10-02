@@ -11,7 +11,7 @@ import { requireTrust, revokeTrust, trustProject, trustState } from "../trust/tr
 export const TRUST_USAGE = `  etnpilot trust [--revoke] [--root directory]      look at what this project can do, and trust it (or stop trusting it)
   (commands that act on a project ask once; --trust answers yes, ETNPILOT_TRUST=all skips the question in a pipeline)`;
 
-const ACTING = new Set(["run", "replay", "smoke", "forge", "tui", "ui", "chat", "eval", "check"]);
+const ACTING = new Set(["run", "resume", "replay", "smoke", "forge", "tui", "ui", "chat", "eval", "check"]);
 const ACTING_WITH_SUBCOMMAND = new Set(["webhook serve", "queue resume", "pipeline status"]);
 
 export function needsTrust(command, subcommand) {
@@ -35,6 +35,8 @@ function askYesNo(stdin, stdout) {
 }
 
 export async function guardProject(command, subcommand, values, { env = process.env, stdin = process.stdin, stdout = process.stdout } = /** @type {any} */ ({})) {
+  // The plan only reads; it is resuming that acts.
+  if (command === "resume" && values["dry-run"] === true) return;
   if (!needsTrust(command, subcommand)) return;
   const root = resolve(values.root ?? ".");
   if (!(await projectExists(root))) return;

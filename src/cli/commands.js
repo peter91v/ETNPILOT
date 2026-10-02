@@ -168,7 +168,7 @@ ${TRUST_USAGE}
   etnpilot telemetry summary [workflow-run-id] [--root directory]
   etnpilot provider presets
   etnpilot provider add <preset> [--name name] [--model id] [--force] [--root directory]
-  etnpilot resume <run-id|receipt-file> --dry-run [--allow-drift] [--public-key path] [--json] [--root directory]
+  etnpilot resume <run-id|receipt-file> [--dry-run] [--allow-drift] [--approvals terminal|inbox] [--publish] [--public-key path] [--json] [--root directory]
   etnpilot gc [--older-than days] [--keep n] [--apply] [--json] [--root directory]
   etnpilot models [--provider name] [--json]       what the provider offers this account, with known prices
   etnpilot usage [--json] [--root directory]       tokens, requests and cost by model and by day
