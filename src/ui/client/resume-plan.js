@@ -32,7 +32,7 @@ function resumePlanRows(receipt, run) {
   }
   rows.push(el("div", { class: "row" }, [
     pill(resumePlan.resumable ? "could be resumed" : "cannot be resumed", resumePlan.resumable ? "ok" : "warn"),
-    el("span", { class: "muted", text: "Resuming itself is not available yet; this is the plan." }),
+    el("span", { class: "muted", text: (resumePlan.resumable ? "Continue it from the terminal: etnpilot resume " + (resumePlan.runId ?? "<run>") : "This is the plan; nothing was changed.") }),
   ]));
   for (const step of resumePlan.steps ?? []) {
     rows.push(el("div", { class: "row" }, [

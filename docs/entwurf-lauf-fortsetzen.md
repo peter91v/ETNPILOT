@@ -1,6 +1,7 @@
 # Entwurf: einen abgebrochenen Lauf fortsetzen
 
-Status: **Vorschlag. Gebaut sind die Etappen E1 und E2** (E2: `etnpilot resume <lauf> --dry-run`, nur Plan, es
+Status: **Vorschlag, gebaut bis einschließlich E3 mit den vorsichtigen Standardwerten (siehe unten).
+Gebaut sind die Etappen E1, E2 und E3** (E2: `etnpilot resume <lauf> --dry-run`, nur Plan, es
 wird nichts ausgeführt) (`run-start`- und `step`-Einträge mit Digests, siehe
 `docs/signed-receipts.md`, „What a run writes“); E3 bis E5 sind offen (die Prüfseite zeigt
 schon den Plan für Läufe, die nicht erfolgreich waren, mit einem „Check“-Knopf; fortsetzen kann sie noch nicht). Geschrieben, um vor dem Bauen zu entscheiden, was
@@ -204,3 +205,21 @@ wert ist.**
 Fortsetzen mitten in einem Schritt oder Werkzeugaufruf, automatisches Fortsetzen ohne Mensch, Fortsetzen
 nach geändertem Code ohne `--allow-drift`, Zusammenführen von Belegketten, und alles bei Chat-Sitzungen
 (dort gibt es `undo` und das Zug-Journal).
+
+## 11. Was gebaut wurde (E3) und womit
+
+Die offenen Fragen aus Abschnitt 9 sind nicht beantwortet worden; E3 wurde mit den **vorsichtigsten** Antworten
+gebaut, so dass sich jede später lockern lässt, ohne etwas zurückzunehmen:
+
+1. **Neuer Lauf mit Verweis** (`resumedFrom`), nie Anhängen an die alte Kette.
+2. **Budget:** wiederverwendete Kosten werden angezeigt, zählen nicht gegen den neuen Lauf.
+3. **Granularität:** der Workflow-Schritt, und nur **Agenten-Schritte** werden übernommen. Prüfschritte, Gates und
+   Quorum-Schritte laufen neu, ebenso alles, was von einem neu laufenden Schritt abhängt.
+4. **Kein Zurücksetzen des Worktrees:** weicht er vom Stand des zuletzt fertigen Schritts ab, wird abgelehnt.
+5. **Digest** nach jedem Schritt (nicht nur am Ende der ändernden Schritte).
+6. **`external`:** nichts, was eine Wirkung nach außen hatte und nicht fertig wurde, wird von allein wiederholt;
+   der Planer kennt dafür noch keine Bestätigung (`--include-external` gibt es nicht).
+
+Bekannte Lücken: Es gibt **keine Sperre** gegen zwei gleichzeitige Fortsetzungen desselben Laufs (zwei Läufe im selben
+Worktree); der Befehl bricht ab, wenn der Worktree nicht mehr bei git registriert ist, aber er verhindert das
+Doppelstarten nicht. Die Prüfseite und die TUI zeigen den Plan, starten aber nichts.

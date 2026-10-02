@@ -92,15 +92,17 @@ what state it was in:
 
 - `run-start` (the first): `configDigest`, a SHA-256 over the effective configuration, `workspaceDigest`,
   the state of the working tree when the steps began, `plan` (the steps, their types and what each needs) and
-  `workspace` (path and branch).
-- `step` (one per finished step): the step, its type, an `effect` label (`workspace`, `read`, or `external` when
+  `workspace` (path and branch), `request` (what was asked: the task, agent or workflow, overrides) and, for a
+  resumed run, `resumedFrom` (the earlier run, the last hash of its receipt, and the steps carried over).
+- `step` (one per finished step; `reused` names the earlier run and entry when the step was carried over instead
+  of run): the step, its type, an `effect` label (`workspace`, `read`, or `external` when
   the step was approved to use the network) and the `workspaceDigest` it left behind.
 
 A workspace digest is `git:<HEAD>:<tree>`, where the tree covers everything git would add (tracked changes and
 untracked files that are not ignored). It is taken in a throwaway copy of the index, so the staging area and the
 files are not touched. Where it cannot be taken (not a git working tree) the entry says `unavailable` and why;
 the run goes on. These entries are evidence for a reader, and the groundwork for resuming a run
-(`docs/entwurf-lauf-fortsetzen.md`); `etnpilot resume <run> --dry-run` reads them, and nothing else acts on them. Receipts written before they existed stay valid.
+(`docs/entwurf-lauf-fortsetzen.md`); `etnpilot resume <run>` reads them. Resuming never appends to the old chain: it writes a new run that points back. Receipts written before they existed stay valid.
 
 ## Canonical encoding
 

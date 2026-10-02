@@ -52,3 +52,29 @@ test("a directory that is not a repository has no digest, and says why", async (
   assert.equal(result.digest, undefined);
   assert.match(result.unavailable, /git/);
 });
+
+// git skips re-reading a file whose size and time match the index, except when
+// the file is as new as the index itself ("racily clean"). A copy of the index
+// stamped with the current time takes that protection away: an edit of the
+// same size, made in the same instant as the last index write, then goes
+// unseen. This builds exactly that situation, with timestamps that do not
+// depend on how fast the machine is.
+test("an edit of the same size in the same instant as the index is still seen", async () => {
+  const { utimes } = await import("node:fs/promises");
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-racy-"));
+  await git(["init", "-q"], { cwd: root });
+  await git(["config", "user.email", "t@example.com"], { cwd: root });
+  await git(["config", "user.name", "t"], { cwd: root });
+  await git(["config", "core.trustctime", "false"], { cwd: root });
+  const then = new Date(Date.now() - 60_000);
+  await writeFile(join(root, "a.txt"), "one\n");
+  await utimes(join(root, "a.txt"), then, then);
+  await git(["add", "-A"], { cwd: root });
+  await git(["commit", "-qm", "base"], { cwd: root });
+  await utimes(join(root, ".git", "index"), then, then);
+  const clean = await workspaceDigest(root);
+  await writeFile(join(root, "a.txt"), "two\n");
+  await utimes(join(root, "a.txt"), then, then);
+  const edited = await workspaceDigest(root);
+  assert.notEqual(edited.digest, clean.digest);
+});
