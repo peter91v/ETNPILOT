@@ -112,7 +112,14 @@ test("project runner executes an agent and check in an isolated worktree", async
   }
   assert.match(await readFile(join(result.workspace.path, "result.txt"), "utf8"), /create result/);
   const receipts = (await readFile(result.receiptPath, "utf8")).trim().split("\n");
-  assert.equal(receipts.length, 2);
+  const entries = receipts.map((line) => JSON.parse(line));
+  // What a run writes: how it started, the agent's own receipt, one entry per
+  // finished step (with the workspace it left), and the seal.
+  assert.deepEqual(entries.map((entry) => entry.type ?? "agent-receipt"), ["run-start", "agent-receipt", "step", "step", "workflow"]);
+  assert.match(entries[0].configDigest, /^sha256:[0-9a-f]{64}$/);
+  assert.match(entries[0].workspaceDigest.digest, /^git:[0-9a-f]{40}:[0-9a-f]{40}$/);
+  assert.deepEqual(entries.filter((entry) => entry.type === "step").map((entry) => [entry.stepType, entry.effect]).sort(), [["agent", "workspace"], ["check", "workspace"]]);
+  for (const step of entries.filter((entry) => entry.type === "step")) assert.match(step.workspaceDigest.digest, /^git:/);
   assert.equal(result.receiptProof.algorithm, "Ed25519");
   assert.equal(result.receiptProof.keyId, receiptKeys.keyId);
   assert.match(result.observability.traceId, /^[a-f0-9]{32}$/);

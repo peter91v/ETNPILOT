@@ -1,6 +1,7 @@
 # Entwurf: einen abgebrochenen Lauf fortsetzen
 
-Status: **Vorschlag, nichts davon ist gebaut.** Geschrieben, um vor dem Bauen zu entscheiden, was
+Status: **Vorschlag. Gebaut ist nur Etappe E1** (`run-start`- und `step`-Einträge mit Digests, siehe
+`docs/signed-receipts.md`, „What a run writes“); der Rest ist offen. Geschrieben, um vor dem Bauen zu entscheiden, was
 „fortsetzen“ hier überhaupt heißen darf. Die offenen Fragen stehen am Ende (Abschnitt 9).
 
 ## 1. Das Problem

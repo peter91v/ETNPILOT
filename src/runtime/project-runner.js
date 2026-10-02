@@ -22,7 +22,10 @@ import {
 } from "../codegraph/codegraph.js";
 import { git } from "../git/command.js";
 import { rehearseMerge } from "../git/merge-rehearsal.js";
+import { createHash } from "node:crypto";
+import { canonicalJson } from "../core/receipt-store.js";
 import { WorktreeManager } from "../git/worktrees.js";
+import { workspaceDigest } from "../git/workspace-digest.js";
 import { GitLabClient } from "../gitlab/client.js";
 import { inspectMergeTrain } from "../gitlab/merge-train.js";
 import { GitLabPublisher } from "../gitlab/publisher.js";
@@ -288,7 +291,17 @@ async function runWorkflow(run) {
     : {};
   let summary;
   try {
-    summary = await engine.run(workflow.steps, async (step, execution) => {
+    // The first entry of every run: under which configuration, and from which
+    // workspace state, the steps below started. Both are digests, never the
+    // configuration itself.
+    await receiptStore.append({
+      type: "run-start",
+      runId,
+      mode: dryRun ? "dry-run" : "execute",
+      configDigest: `sha256:${createHash("sha256").update(canonicalJson(config)).digest("hex")}`,
+      ...(dryRun ? {} : { workspaceDigest: await workspaceDigest(workspace.path) }),
+    });
+    const runStep = async (step, execution) => {
       if (step.type === "agent") {
         const receipt = await harness.run({
           agent: step.agent,
@@ -345,6 +358,13 @@ async function runWorkflow(run) {
         `Workflow step '${step.id}' has an unsupported type: '${step.type}'.`
         + " Every step needs one of 'agent', 'quorum', 'check' or 'gate'.",
       );
+    };
+    summary = await engine.run(workflow.steps, async (step, execution) => {
+      const result = await runStep(step, execution);
+      // What the workspace looked like when this step finished, so a later
+      // reader can tell whether the step's result still describes it.
+      if (!dryRun) await recordStepEvidence(receiptStore, { runId, step, result, workspace });
+      return result;
     }, { signal, context: { runId, workspace } });
     contentEvidence = await verifyContentAfterRun(workspace.path, config, contentEvidence);
   } catch (error) {
@@ -529,6 +549,25 @@ async function finishRun(run, { summary, contentEvidence, publisher, startedAt, 
     }
     throw error;
   }
+}
+
+// One receipt entry per finished step: the step, what kind of effect it can
+// have, and the digest of the workspace it left behind. The effect is derived
+// from what the step is and what it was approved to do; it is a label for
+// readers, never a permission.
+async function recordStepEvidence(receiptStore, { runId, step, result, workspace }) {
+  const approvals = Array.isArray(result?.approvals) ? result.approvals : [];
+  const reachedOut = approvals.some((approval) => approval?.operationKind === "network");
+  const effect = reachedOut ? "external" : step.type === "gate" ? "read" : "workspace";
+  await receiptStore.append({
+    type: "step",
+    runId,
+    step: step.id,
+    stepType: step.type,
+    status: "succeeded",
+    effect,
+    workspaceDigest: await workspaceDigest(workspace.path),
+  });
 }
 
 // Closes the code index and the MCP servers, once, however the run ends.
