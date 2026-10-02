@@ -4,21 +4,14 @@ export * from "./project-reads.js";
 import { checkRunReadiness, readAgents, readMergeRequests, readUsage, readWorktrees, worktreeManager } from "./project-reads.js";
 import { countRuns, describeOutcome, parseDiff, readReceipt, readRuns, verifyProjectReceipt, withCurrentPricing } from "./receipt-views.js";
 
-import { readRegularFile } from "./bounded-io.js";
-import { acquireWorkspaceLease } from "./workspace-lease.js";
-import { compactSession, compactionCheck, createSessionId, listSessions, readSession, runChatTurn, undoLastTurn, verifySession } from "./chat-session.js";
-import { resolveAttachments, summarizeAttachments } from "./chat-attachments.js";
-import { PolicyEngine } from "../policy/engine.js";
-import { git } from "../git/command.js";
 import { createAgent, createWorkflow, lockReviewedContent, removeContent, updateAgent, updateWorkflow, readAgentDetails, readContentFile, readContentReview, readWorkflows } from "./project-content.js";
 import { join, resolve } from "node:path";
 import { loadConfig } from "../config/load.js";
 import { describeSettings, setSetting, unsetSetting } from "../config/settings.js";
-import { ApprovalInbox, createInboxApprovalHandler } from "../core/approval-inbox.js";
-import { addUsage } from "./usage-total.js";
-import { createApprovalNotifier } from "../core/approval-notify.js";
+import { ApprovalInbox } from "../core/approval-inbox.js";
+import { chatApi } from "./project-chat.js";
+import { startProjectRun } from "./project-run-start.js";
 import { listChecks, runProjectCheck } from "./project-checks.js";
-import { runProject } from "./project-runner.js";
 import { createSecretResolver } from "../secrets/resolver.js";
 import { resolveConfiguredApiKey } from "../providers/register.js";
 import { knownPriceFor } from "../observability/known-pricing.js";
@@ -50,6 +43,9 @@ export async function openProjectState({ root = process.cwd(), env = process.env
   // one must stop what it started rather than stranding it.
   const running = new Set();
   const runErrors = /** @type {any[]} */ ([]);
+  // What the parts that moved out of this function share with it. The
+  // configuration is read through a getter because changing a setting replaces it.
+  const scope = { projectRoot, env, inbox, queue, runsDirectory, running, runErrors, get config() { return current; } };
   const self = {
     root: projectRoot,
     get config() { return current; },
@@ -62,116 +58,9 @@ export async function openProjectState({ root = process.cwd(), env = process.env
     ),
     // Conversations, read from the same place as everything else. Sending a
     // turn is not here: that starts a run, and starting runs is the caller's.
-    chat: {
-      list: () => listSessions(projectRoot),
-      read: async (id) => {
-        const session = await readSession(projectRoot, id);
-        // Whether a turn is going now is known here and nowhere on disk.
-        const active = [...running].find((record) => record.session === id);
-        return { ...session, running: Boolean(active), ...(active?.partial ? { partial: active.partial } : {}) };
-      },
-      verify: (id) => verifySession(projectRoot, id, {
-        verifyReceipt: (file) => verifyProjectReceipt(runsDirectory, file, { root: projectRoot, config: current }),
-        readEntries: async (file) => {
-          const text = await readRegularFile(join(runsDirectory, file), 16 * 1024 * 1024).then((bytes) => bytes.toString("utf8"));
-          return text.split("\n").filter(Boolean).map((line) => JSON.parse(line));
-        },
-      }),
-      // Files a person can name with '@': what git tracks, minus what the read
-      // policy refuses them. The same set search_files searches.
-      async files(query = "", { limit = 50 } = /** @type {any} */ ({})) {
-        const listed = await git(["ls-files", "-z"], { cwd: projectRoot, trim: false }).catch(() => ({ stdout: "" }));
-        const policy = new PolicyEngine(current.policy);
-        const needle = String(query).toLowerCase();
-        const found = [];
-        for (const path of listed.stdout.split("\0").filter(Boolean)) {
-          if (needle && !path.toLowerCase().includes(needle)) continue;
-          const verdict = policy.evaluateOperation({ kind: "read", path }, { workspace: projectRoot });
-          if (verdict?.kind === "reject") continue;
-          found.push(path);
-          if (found.length >= limit) break;
-        }
-        return found;
-      },
-      // One turn of a conversation, started the way any run from a surface is:
-      // its approvals land in the inbox this page already shows. Not awaited.
-      async send({ sessionId, text, agent, model, provider, effort, providerFactories } = /** @type {any} */ ({})) {
-        if (typeof text !== "string" || text.trim() === "") throw new TypeError("A message is required.");
-        const id = sessionId ?? createSessionId();
-        if ([...running].some((record) => record.session === id)) {
-          throw new Error("A turn is already running in this conversation. Wait for it, or stop it.");
-        }
-        const lease = await acquireWorkspaceLease(projectRoot, { sessionId: id });
-        try {
-        const names = (await readAgents({ root: projectRoot, config: current })).agents.filter((entry) => !entry.error).map((entry) => entry.name);
-        const chosen = agent ?? current.defaultAgent ?? "orchestrator";
-        if (!names.includes(chosen)) throw new TypeError(`Unknown agent '${chosen}'. This project has: ${names.join(", ")}.`);
-        if (provider) {
-          const verdict = new PolicyEngine(current.policy).evaluateProvider(provider, { agent: chosen });
-          if (verdict.allowed === false) throw new Error(/** @type {any} */ (verdict).reason ?? `The policy does not allow provider '${provider}'.`);
-          if (!current.providers?.[provider]) throw new TypeError(`No provider '${provider}' is configured.`);
-        }
-        const policy = new PolicyEngine(current.policy);
-        const { attachments, refused } = await resolveAttachments(text, {
-          root: projectRoot,
-          authorize: (path) => policy.evaluateOperation({ kind: "read", path }, { agent: chosen, workspace: projectRoot }),
-        });
-        const override = model || provider || effort ? { model, provider, effort } : undefined;
-        const started = self.startRun({
-          input: text.trim(),
-          agent: chosen,
-          providerFactories,
-          session: id,
-          // 'input' is dropped: the turn composes its own, with the attachments.
-          via: ({ input: _task, agent: _agent, ...options }) => runChatTurn({
-            ...options,
-            workspaceLease: lease,
-            sessionId: id,
-            text: text.trim(),
-            agent: chosen,
-            attachments,
-            agentOverride: override,
-          }),
-        });
-        // A failure is reported through runErrors like any run's; nothing here waits.
-        started.finally(() => lease.release()).catch(() => {});
-        return { sessionId: id, agent: chosen, attached: summarizeAttachments(attachments), refused };
-        } catch (error) { lease.release(); throw error; }
-      },
-      // Asks the model to summarise the older turns, as a run of its own. The
-      // answer is not awaited; it lands in the session as a 'compact' line.
-      async compact(id, { agent, model, provider, effort, providerFactories } = /** @type {any} */ ({})) {
-        const check = await compactionCheck(projectRoot, id);
-        if (!check.ok) return check;
-        if ([...running].some((record) => record.session === id)) {
-          return { ok: false, message: "A turn is running in this conversation; wait for it." };
-        }
-        const chosen = agent ?? current.defaultAgent ?? "orchestrator";
-        const override = model || provider || effort ? { model, provider, effort } : undefined;
-        const started = self.startRun({
-          input: "Summarise the conversation",
-          agent: chosen,
-          providerFactories,
-          session: id,
-          via: ({ input: _task, agent: _agent, ...options }) => compactSession({ ...options, sessionId: id, agent: chosen, agentOverride: override }),
-        });
-        started.catch(() => {});
-        return { ok: true, message: "Asking the model for a summary (one call). It appears in the conversation when it is written." };
-      },
-      // Takes back the newest turn's file changes. Not while a turn is running:
-      // the files are moving.
-      undo: async (id) => {
-        if ([...running].some((record) => record.session === id)) {
-          return { ok: false, message: "A turn is running in this conversation; stop it first." };
-        }
-        return undoLastTurn({ root: projectRoot, sessionId: id });
-      },
-      stop: (id) => {
-        const mine = [...running].filter((record) => record.session === id);
-        for (const record of mine) record.controller.abort();
-        return mine.length;
-      },
-    },
+    // The state is not built yet while this object is, so the conversation half
+    // reaches 'startRun' through it when it is called, not now.
+    chat: chatApi(scope, { startRun: (options) => self.startRun(options) }),
     settings: () => describeSettings({ root: projectRoot, env }),
     // The models a configured provider can currently reach, read live — never
     // cached here, because the answer is the provider's own and changes on
@@ -223,96 +112,7 @@ export async function openProjectState({ root = process.cwd(), env = process.env
     updateAgent: (name, input) => updateAgent({ root: projectRoot, config: current, name, input }),
     updateWorkflow: (name, input) => updateWorkflow({ root: projectRoot, config: current, name, input }),
     removeContent: (kind, name) => removeContent({ root: projectRoot, config: current, kind, name }),
-    startRun({ input, agent, workflow, signal, dryRun, providerFactories, via, session, worktree } = /** @type {any} */ ({})) {
-      if (!input || !String(input).trim()) throw new TypeError("A task is required to start a run.");
-      const inboxConfig = current.approval?.inbox ?? {};
-      if (inboxConfig.enabled === false) {
-        throw new Error("approval.inbox.enabled is false, so a run started here would have nobody to ask.");
-      }
-      const task = String(input).trim();
-      // The run owns a controller of its own, so 'stop everything' works even
-      // for a caller that passed no signal — a browser tab cannot pass one.
-      const controller = new AbortController();
-      if (signal) {
-        if (signal.aborted) controller.abort();
-        else signal.addEventListener("abort", () => controller.abort(), { once: true });
-      }
-      const record = /** @type {any} */ ({ task, agent, startedAt: new Date().toISOString(), controller, done: 0, ...(session ? { session } : {}) });
-      const execute = via ?? runProject;
-      const started = execute({
-        root: projectRoot,
-        env,
-        input: task,
-        agent,
-        signal: controller.signal,
-        // Where the run is, so a surface can say more than 'working'.
-        onEvent: (event) => {
-          if (event.type === "workflow.planned") {
-            record.runId = event.runId;
-            record.steps = event.steps;
-            if (event.plan) record.plan = event.plan;
-            if (event.workflow) record.workflow = event.workflow;
-          }
-          // Every agent that has run in this run, with who started it — a step
-          // names one agent, and an orchestrator hands work to others below it.
-          if (event.type === "run.started") {
-            record.agents ??= [];
-            if (record.agents.length < 40) record.agents.push({ runId: event.runId, parentRunId: event.parentRunId, name: event.agent, status: "working", startedAt: new Date().toISOString(), step: record.step });
-          }
-          if (event.type === "run.completed" || event.type === "run.failed") {
-            record.usage = addUsage(record.usage, event.usage);
-            const found = record.agents?.find((entry) => entry.runId === event.runId);
-            if (found) {
-              found.status = event.type === "run.completed" ? "done" : "failed";
-              found.finishedAt = new Date().toISOString();
-            }
-          }
-          if (event.type === "workflow.step.started") {
-            record.step = event.step;
-            record.stepSince = event.at;
-            record.stepAgent = undefined;
-          }
-          if (event.type === "run.started") record.stepAgent = event.agent;
-          // What a streaming provider has written so far, for a surface that
-          // shows an answer as it forms. Bounded: it is a preview, not the record.
-          if (event.type === "agent.delta") record.partial = `${record.partial ?? ""}${event.text}`.slice(-20_000);
-          if (event.type === "workflow.step.completed") {
-            record.done += 1;
-            record.step = undefined;
-            record.stepAgent = undefined;
-          }
-          if (event.type === "workflow.step.failed") {
-            record.done += 1;
-            record.failed = event.step;
-            record.error = event.error;
-            record.step = undefined;
-          }
-        },
-        dryRun,
-        providerFactories,
-        ...(worktree === undefined ? {} : { worktree }),
-        ...(workflow ? { workflow } : {}),
-        approvalHandler: createInboxApprovalHandler({
-          inbox,
-          timeoutMs: inboxConfig.timeoutMs ?? 24 * 60 * 60_000,
-          pollIntervalMs: inboxConfig.pollIntervalMs ?? 500,
-          notifier: createApprovalNotifier(current.approval?.notify),
-          signal: controller.signal,
-        }),
-      });
-      running.add(record);
-      // A surface that does not await the run — the page answers 202 and moves
-      // on — must still learn that it failed, so the reason is kept here.
-      started.then(
-        () => running.delete(record),
-        (error) => {
-          running.delete(record);
-          runErrors.unshift({ task, at: new Date().toISOString(), error: error.message, ...(error.code ? { code: error.code } : {}), ...(agent ? { agent } : {}) });
-          runErrors.length = Math.min(runErrors.length, 5);
-        },
-      );
-      return started;
-    },
+    startRun: (options) => startProjectRun(scope, options),
     // Whoever closes the surface stops what that surface started; a run left
     // working in a worktree nobody watches is worse than one that says why it
     // stopped, which its receipt records.

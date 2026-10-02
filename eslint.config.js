@@ -26,17 +26,6 @@ export default [
     },
   },
   {
-    // The two known outliers, held at where they are so they cannot grow:
-    // the review server's request handler (one route table written as if/else)
-    // and the TUI's run detail. Splitting them is the open work.
-    files: ["src/ui/server.js"],
-    rules: { complexity: ["error", 160] },
-  },
-  {
-    files: ["src/tui/render.js"],
-    rules: { complexity: ["error", 71] },
-  },
-  {
     // The page's script runs in a browser as one file made of these, in order,
     // so what one defines the others use: undefined-name and unused checks
     // across files are not meaningful, the syntax and the rest are.

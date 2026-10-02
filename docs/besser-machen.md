@@ -246,7 +246,9 @@ Danach ebenfalls erledigt: Benachrichtigung bei offener Genehmigung (`approval.n
 Typprüfung jetzt für alle Dateien in `src/`, axe-core-Test über alle Ansichten in hell und dunkel (er fand eine Tabellenüberschrift ohne Text; behoben).
 
 Außerdem: Erste-Schritte-Liste auf der Übersicht (live gelesen), `etnpilot content diff` (was sich seit dem Lock geändert hat), Komplexitäts-Ratsche in ESLint (zwei
-bekannte Ausreißer festgehalten: der Request-Handler der Prüfseite mit 160, `renderRunDetail` mit 71).
+bekannte Ausreißer: der Request-Handler der Prüfseite — inzwischen eine Routen-Tabelle, Komplexität 160 → 49 —
+und `renderRunDetail` der Terminal-Oberfläche — inzwischen eine Liste von Abschnitts-Funktionen, 71 → 13).
+Die Grenze von 60 steht jetzt ohne Ausnahmen.
 
 Weiter offen: Lauf fortsetzen nach Abbruch, Übersetzung der Oberfläche, optionaler Schlüsselbund, Gültigkeitszeitraum für Signaturschlüssel,
 aufgezeichnete Live-Fixtures, `openProjectState`/`createTuiApp` weiter zerlegen,
