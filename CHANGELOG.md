@@ -39,6 +39,9 @@ pre-1.0, so breaking changes may appear in any release.
 - **GitLab write smoke looks at the state when closing the MR answers 5xx**: on the first self-hosted GitLab, closing
   answered `500` (request id in the message) while the merge requests showed as closed. The cleanup now reads the
   merge request after a failed close and counts it as closed (`mr-closed-after-error`) when its state says so.
+- **A missing git remote for publishing lists the remotes there are** and the command to name the right one
+  (`etnpilot config set git.remote <name>`); on the owner's second real try `git.remote` said `origin` while the
+  remote was called `gitlab`.
 - **A content-lock mismatch names the files, and says when the cause is an uncommitted lock**: on the first real
   `run --publish` the run stopped with `Project content does not match the reviewed content lock` and nothing else,
   because the lock had been made after the last commit and the run's worktree starts from the commit. The message now lists the

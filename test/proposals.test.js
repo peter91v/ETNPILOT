@@ -150,5 +150,7 @@ test("the token goes to git for the GitLab's own address only, and a remote that
   const publisher = new GitLabPublisher({ baseUrl: "https://git.example.test", project: "g/p", token: "t", fetchImpl: async () => { throw new Error("no request may be made"); } });
   await assert.rejects(publisher.publish({ cwd: work, branch: "main", title: "x", description: "d" }), /git remote points to 'g\/other'/);
   await git(["remote", "remove", "gitlab"], { cwd: work });
-  await assert.rejects(publisher.publish({ cwd: work, branch: "main", title: "x", description: "d" }), /no git remote called 'gitlab'/);
+  await assert.rejects(publisher.publish({ cwd: work, branch: "main", title: "x", description: "d" }), /no git remote called 'gitlab'.*Add one: git remote add gitlab/);
+  await git(["remote", "add", "upstream", "https://git.example.test/g/p.git"], { cwd: work });
+  await assert.rejects(publisher.publish({ cwd: work, branch: "main", title: "x", description: "d" }), /The remotes here are: upstream\. Name the right one: etnpilot config set git\.remote upstream/);
 });

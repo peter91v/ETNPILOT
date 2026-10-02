@@ -52,7 +52,13 @@ export class GitLabPublisher {
     // Before anything is committed: a push to the wrong project, or to a remote
     // that is not there, is found out while nothing has happened yet.
     const remoteUrl = await git(["remote", "get-url", this.remote], { cwd }).then((result) => result.stdout, () => undefined);
-    if (remoteUrl === undefined) throw new Error(`There is no git remote called '${this.remote}' in this worktree (git.remote). Add one: git remote add ${this.remote} <address of ${this.project}>.`);
+    if (remoteUrl === undefined) {
+      const names = (await git(["remote"], { cwd }).then((result) => result.stdout, () => "")).split("\n").filter(Boolean);
+      throw new Error(`There is no git remote called '${this.remote}' in this worktree (git.remote is '${this.remote}'). `
+        + (names.length > 0
+          ? `The remotes here are: ${names.join(", ")}. Name the right one: etnpilot config set git.remote ${names[0]}`
+          : `Add one: git remote add ${this.remote} <address of ${this.project}>.`));
+    }
     const mismatch = remoteMismatch(remoteUrl, this.baseUrl, this.project);
     if (mismatch) throw new Error(mismatch);
     const status = await git(["status", "--porcelain"], { cwd });
