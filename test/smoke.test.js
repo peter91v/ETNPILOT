@@ -180,3 +180,22 @@ test("with observability off the check says its cost is not recorded", async () 
   assert.equal(report.usageRecorded, false);
   assert.match(formatSmoke(report).join("\n"), /Not recorded: observability is off/);
 });
+
+test("the Copilot provider is checked for its SDK and an answer; tools and streaming do not apply to it", async () => {
+  const { root, env } = await project();
+  const config = { defaultProvider: "github-copilot", providers: { "github-copilot": { type: "github-copilot" } } };
+  const factories = { "github-copilot": async (name) => ({ name, capabilities: ["chat"], invoke: async () => ({ text: "pong", model: "copilot-x", usage: { inputTokens: 5, outputTokens: 1 } }) }) };
+  const report = await runSmoke(root, { config, env, provider: "github-copilot", skip: ["forge"], factories, sdkImporter: async () => ({}) });
+  assert.deepEqual(report.steps.map((step) => `${step.id}:${step.status}`), ["key:pass", "reply:pass", "tools:skip", "stream:skip", "toolstream:skip", "forge:skip"]);
+  assert.match(report.steps[0].detail, /SDK installed/);
+});
+
+test("without the Copilot SDK the first step says what to do, and nothing else is tried", async () => {
+  const { root, env } = await project();
+  const config = { defaultProvider: "github-copilot", providers: { "github-copilot": { type: "github-copilot" } } };
+  const report = await runSmoke(root, { config, env, provider: "github-copilot", sdkImporter: async () => { throw new Error("not found"); } });
+  assert.equal(report.steps.length, 1);
+  assert.equal(report.steps[0].status, "fail");
+  assert.match(report.steps[0].detail, /Copilot SDK is not available/);
+  assert.match(report.steps[0].hint, /npm install @github\/copilot-sdk/);
+});
