@@ -60,3 +60,24 @@ test("the server only answers /api/setup with the token", async () => {
     await review.close();
   }
 });
+
+test("saving a GitLab token on the Accounts page installs the helper in the project's repository", async () => {
+  const { root, env } = await workdir();
+  const { setSetting } = await import("../src/config/settings.js");
+  await setSetting("git.baseUrl", "https://git.acme.test", { root, env, scope: "local" });
+  const review = await createReviewServer({ root, env, fetchImpl: gitlabOk });
+  try {
+    const address = await review.listen({ port: 0 });
+    const answer = await fetch(`http://127.0.0.1:${address.port}/api/auth/key`, {
+      method: "POST",
+      headers: { "x-etnpilot-token": review.token, "content-type": "application/json" },
+      body: JSON.stringify({ service: "gitlab", value: "glpat-accounts-token-1" }),
+    });
+    assert.equal(answer.status, 200);
+    assert.equal((await answer.json()).gitHelper, "git.acme.test");
+    const { stdout } = await run("git", ["-C", root, "config", "--local", "--get-all", "credential.https://git.acme.test.helper"]);
+    assert.match(stdout, / credential/);
+  } finally {
+    await review.close();
+  }
+});

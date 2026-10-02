@@ -82,3 +82,18 @@ test("a GitLab token entered with an address on the page also sets the project's
   await handle("POST", "/api/auth/key", { service: "github", value: "ghp_value_123456789" });
   assert.deepEqual(remembered, ["https://git.example.test"]);
 });
+
+test("a GitLab token saved on the page also installs the git helper, and other services do not", async () => {
+  const { env } = await routes(async () => reply({ username: "peter" }));
+  const installed = [];
+  const handle = createAccountRoutes({
+    env, fetchImpl: async () => reply({ username: "peter", login: "x" }),
+    gitlabHost: () => "https://git.acme.test",
+    installGitHelper: async () => { installed.push(1); return "git.acme.test"; },
+  });
+  const gitlab = await handle("POST", "/api/auth/key", { service: "gitlab", value: "glpat-page-token-1", host: "https://git.acme.test" });
+  assert.equal(gitlab.body.gitHelper, "git.acme.test");
+  const github = await handle("POST", "/api/auth/key", { service: "github", value: "ghp_secretvalue123456" });
+  assert.equal(github.body.gitHelper, undefined);
+  assert.equal(installed.length, 1);
+});

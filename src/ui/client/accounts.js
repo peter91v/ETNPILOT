@@ -130,6 +130,7 @@ async function saveAccountKey(service) {
     draft.value = "";
     toast(result.verified ? "Saved. It works" + (result.account ? " as " + result.account : "") + "." : "Saved, but not verified: " + (result.note || "the check did not run."), result.verified ? "ok" : "warn");
     if (result.baseUrlSet) toast("This project's GitLab address is now " + result.baseUrlSet + " (your own settings).");
+    if (result.gitHelper) toast("git in this project now uses this login for " + result.gitHelper + "; a push asks for nothing.");
     await loadAccounts();
   } catch (error) {
     toast(error.message, "bad");
@@ -183,6 +184,7 @@ async function pollDeviceSignIn() {
     }
     deviceSignIn = undefined;
     if (result.status === "done") toast("Signed in" + (result.account ? " as " + result.account : "") + (result.baseUrlSet ? ". This project's GitLab address is now " + result.baseUrlSet + " (your own settings)" : "") + ".");
+      if (result.gitHelper) toast("git in this project now uses this login for " + result.gitHelper + "; a push asks for nothing.");
     else toast(result.status === "denied" ? "The sign-in was declined." : "The code ran out. Start again.", "warn");
     await loadAccounts();
   } catch (error) {
