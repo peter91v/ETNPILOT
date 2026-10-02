@@ -39,6 +39,15 @@ pre-1.0, so breaking changes may appear in any release.
 - **GitLab write smoke looks at the state when closing the MR answers 5xx**: on the first self-hosted GitLab, closing
   answered `500` (request id in the message) while the merge requests showed as closed. The cleanup now reads the
   merge request after a failed close and counts it as closed (`mr-closed-after-error`) when its state says so.
+- **Publishing pushes with the GitLab token, and checks the remote first**: `etnpilot run --publish` failed on the first
+  real try with `git push failed (128): could not read Username`, because git was never given the token. It is now
+  passed to git for the GitLab's own address only (an `Authorization` header in the environment, not in the arguments),
+  and before anything is committed the publisher refuses a missing remote or a remote that is another project than
+  `git.project`.
+- **CodeGraph's server no longer leaves a daemon behind per run** (`CODEGRAPH_NO_DAEMON=1` for the server a run starts):
+  every run has its own worktree, and CodeGraph's shared daemon kept running after the run's worktree was removed
+  (one lingering process per run, and once in a while a file written into a worktree that was already gone, which failed
+  `run-failure-paths` on CI about one time in eight under load).
 - **First real GitLab write smoke passed** (self-hosted GitLab, 2026-10-02); the account is in docs/first-real-run.md.
 - **GitLab write smoke removes the merge request when it cannot close it**: if closing answers an error and the state
   does not say `closed` either, the smoke's own merge request is deleted (needs the owner role); when that fails the

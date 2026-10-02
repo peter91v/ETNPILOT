@@ -103,6 +103,7 @@ test("CodeGraph MCP configuration is local, bounded, and read-only by default", 
   assert.deepEqual(server.env, {
     CODEGRAPH_TELEMETRY: "0",
     CODEGRAPH_NO_UPDATE_CHECK: "1",
+    CODEGRAPH_NO_DAEMON: "1",
   });
   assert.throws(
     () => createCodeGraphMcpServer(root, { tools: ["filesystem_read"] }),
@@ -211,4 +212,10 @@ test("the platform-bundle failure is told apart from every other one", () => {
   assert.equal(isCodeGraphUnavailable(new Error("CodeGraph produced an incomplete index (state: failed).")), false);
   assert.equal(isCodeGraphUnavailable(new Error("Cannot find module '@colbymchenry/codegraph'")), false);
   assert.equal(isCodeGraphUnavailable(undefined), false);
+});
+
+test("the CodeGraph server of a run is an ordinary child: no daemon outlives the worktree it was started for", async () => {
+  const { createCodeGraphMcpServer } = await import("../src/codegraph/codegraph.js");
+  const server = createCodeGraphMcpServer("/tmp/some-worktree");
+  assert.equal(server.env.CODEGRAPH_NO_DAEMON, "1");
 });
