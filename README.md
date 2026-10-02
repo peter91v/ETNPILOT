@@ -55,6 +55,12 @@ etnpilot run "Add a health check"     # or: etnpilot ui, etnpilot tui, etnpilot 
 npm test                              # the repository's own tests
 ```
 
+More commands worth knowing: `etnpilot models` (what a provider offers this account, with prices),
+`etnpilot provider add gemini|mistral|openrouter|groq|ollama` ([docs/providers.md](docs/providers.md)),
+`etnpilot usage`, `etnpilot content diff` (what changed since the lock), `etnpilot gc` (old receipts;
+[docs/maintenance.md](docs/maintenance.md)) and `etnpilot resume <run> --dry-run` (what resuming an interrupted run
+would reuse; [docs/entwurf-lauf-fortsetzen.md](docs/entwurf-lauf-fortsetzen.md)).
+
 Without a provider at all, [docs/trying-it-out.md](docs/trying-it-out.md) shows a project that runs on a
 scripted one. `npm run check` is what CI runs: syntax, lint, types for the newer modules, and the tests;
 `npm run test:ui` drives the page in a real browser.

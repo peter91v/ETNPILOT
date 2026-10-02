@@ -299,6 +299,11 @@ async function runWorkflow(run) {
       runId,
       mode: dryRun ? "dry-run" : "execute",
       configDigest: `sha256:${createHash("sha256").update(canonicalJson(config)).digest("hex")}`,
+      // The steps and their order, and where the work happens: what a reader
+      // needs to say which steps a run finished and whether its workspace is
+      // still there.
+      plan: workflow.steps.map((step) => ({ id: step.id, type: step.type ?? "agent", needs: step.needs ?? [] })),
+      workspace: { path: workspace.path, branch: workspace.branch, managed: workspace.managed === true },
       ...(dryRun ? {} : { workspaceDigest: await workspaceDigest(workspace.path) }),
     });
     const runStep = async (step, execution) => {

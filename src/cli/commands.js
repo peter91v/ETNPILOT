@@ -11,6 +11,7 @@ import { receiptsCommands } from "./commands/receipts.js";
 import { securityCommands } from "./commands/security.js";
 import { serversCommands } from "./commands/servers.js";
 import { modelsCommands } from "./commands/models.js";
+import { resumeCommands } from "./commands/resume.js";
 import { gcCommands } from "./commands/gc.js";
 import { providersCommands } from "./commands/providers.js";
 import { usageCommands } from "./commands/usage.js";
@@ -37,6 +38,7 @@ export const COMMANDS = [
   ...modelsCommands,
   ...providersCommands,
   ...gcCommands,
+  ...resumeCommands,
 ];
 
 export const CLI_OPTIONS = Object.freeze({
@@ -101,6 +103,7 @@ export const CLI_OPTIONS = Object.freeze({
   changed: { type: "boolean", default: false },
   name: { type: "string" },
   "older-than": { type: "string" },
+  "allow-drift": { type: "boolean", default: false },
   keep: { type: "string" },
   apply: { type: "boolean", default: false },
   "record-fixtures": { type: "string" },
@@ -165,6 +168,7 @@ ${TRUST_USAGE}
   etnpilot telemetry summary [workflow-run-id] [--root directory]
   etnpilot provider presets
   etnpilot provider add <preset> [--name name] [--model id] [--force] [--root directory]
+  etnpilot resume <run-id|receipt-file> --dry-run [--allow-drift] [--public-key path] [--json] [--root directory]
   etnpilot gc [--older-than days] [--keep n] [--apply] [--json] [--root directory]
   etnpilot models [--provider name] [--json]       what the provider offers this account, with known prices
   etnpilot usage [--json] [--root directory]       tokens, requests and cost by model and by day
