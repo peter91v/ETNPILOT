@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -77,6 +77,31 @@ test("saving a GitLab token on the Accounts page installs the helper in the proj
     assert.equal((await answer.json()).gitHelper, "git.acme.test");
     const { stdout } = await run("git", ["-C", root, "config", "--local", "--get-all", "credential.https://git.acme.test.helper"]);
     assert.match(stdout, / credential/);
+  } finally {
+    await review.close();
+  }
+});
+
+test("the page drafts with a model, shows it, and writes only the draft it kept", async () => {
+  const { root, env } = await workdir();
+  const answer = { agents: [{ name: "doc-writer", description: "writes docs", tools: ["read_file", "write_file"], skills: [], prompt: "Write the docs." }], skills: [], instructions: [] };
+  const review = await createReviewServer({ root, env, authorModel: async () => ({ text: JSON.stringify(answer), usage: {} }) });
+  try {
+    const address = await review.listen({ port: 0 });
+    const call = (path, body) => fetch(`http://127.0.0.1:${address.port}${path}`, {
+      method: "POST", headers: { "x-etnpilot-token": review.token, "content-type": "application/json" }, body: JSON.stringify(body),
+    });
+    assert.equal((await fetch(`http://127.0.0.1:${address.port}/api/author/draft`, { method: "POST" })).status, 401);
+    const bad = await call("/api/author/draft", { mode: "new", kind: "agent", request: "" });
+    assert.equal(bad.status, 400);
+    const drafted = await (await call("/api/author/draft", { mode: "new", kind: "agent", request: "an agent for docs" })).json();
+    assert.equal(drafted.text, "Write the docs.");
+    await assert.rejects(readFile(join(root, ".etnpilot", "agents", "doc-writer.yaml"), "utf8"), /ENOENT/, "nothing is written by drafting");
+    assert.equal((await call("/api/author/apply", { id: "made-up" })).status, 404);
+    const applied = await (await call("/api/author/apply", { id: drafted.id })).json();
+    assert.deepEqual(applied.written, [".etnpilot/agents/doc-writer.yaml"]);
+    assert.match(await readFile(join(root, ".etnpilot", "prompts", "doc-writer.md"), "utf8"), /Write the docs/);
+    assert.equal((await call("/api/author/apply", { id: drafted.id })).status, 404, "a draft is accepted once");
   } finally {
     await review.close();
   }

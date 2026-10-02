@@ -53,7 +53,7 @@ function choicesFor(path, value, config) {
   if (SET_CHOICES[path]) return { kind: "set", values: [...SET_CHOICES[path]] };
   if (typeof value === "boolean") return { kind: "one", values: [true, false] };
   const providers = Object.keys(config?.providers ?? {});
-  if (path === "defaultProvider" && providers.length > 0) return { kind: "one", values: providers };
+  if ((path === "defaultProvider" || path === "forge.provider") && providers.length > 0) return { kind: "one", values: providers };
   if (path === "routing.defaults" && providers.length > 0) return { kind: "set", values: providers };
   if (/^providers\.[^.]+\.type$/.test(path)) return { kind: "one", values: [...PROVIDER_TYPES] };
   return undefined;

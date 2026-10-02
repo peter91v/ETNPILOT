@@ -79,6 +79,15 @@ providers:
     # /v1/chat/completions ("set reasoning_effort to 'none'"). It turns that
     # model's reasoning off, which is why it is not on by default.
     # reasoningEffort: none
+# Which provider and model AgentsForge and 'etnpilot author' use to draft agents,
+# prompts, skills and instructions. Writing these well matters more than
+# writing them cheaply, so they ask a stronger model than a routine run does.
+# 'model' applies to the provider named here only. Without a key for that
+# provider, the next one that has a key answers (an Anthropic provider first).
+# Change it on your own machine: 'etnpilot settings set forge.model <id>'.
+forge:
+  provider: anthropic
+  model: claude-opus-5-5
 routing:
   # Empty on purpose: with no list here the route is 'defaultProvider', so
   # changing that one setting is enough to switch provider. Name providers

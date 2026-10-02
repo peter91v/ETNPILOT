@@ -1,5 +1,6 @@
 // @ts-check
 import { forgeProject, summarizeForge } from "../../forge/forge.js";
+import { runAuthorCommand } from "../author.js";
 import { join, resolve } from "node:path";
 import { loadConfig } from "../../config/load.js";
 import { wireOrchestrator } from "../../config/init.js";
@@ -28,6 +29,12 @@ export const agentsCommands = [
       if (values.json) console.log(JSON.stringify(report, null, 2));
       else for (const line of formatSmoke(report)) console.log(line);
       return report.steps.some((step) => step.status === "fail") ? 1 : 0;
+    },
+  },
+  {
+    match: ({ command }) => command === "author",
+    async run({ subcommand, rest, values }) {
+      return await runAuthorCommand(subcommand, rest, values);
     },
   },
   {

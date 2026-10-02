@@ -8,6 +8,19 @@ pre-1.0, so breaking changes may appear in any release.
 
 ### Checks and hygiene (follow-up to the review)
 
+- **The review page drafts agents, skills, instructions and better prompts too.** Under Agents, "Draft with AI": describe
+  what is needed (or what to change in an existing prompt, skill or instruction), read the draft or the diff, and press
+  "Write this". The server keeps the draft and writes it by id, so the page never sends text or a path to be written.
+  Routes `POST /api/author/draft|apply|discard`. Fixes the route lookup so `/api/author` is not taken for `/api/auth`.
+- **`etnpilot author`: agents, prompts, skills and instructions drafted with a model's help** (`docs/authoring.md`).
+  Without arguments it asks what is needed; `author agent|skill|instruction "<what>"` drafts one new thing,
+  `author improve prompt|skill|instruction <name> "<change>"` shows a diff of a better version. It shows the draft and
+  writes only after a yes (`--yes` for scripts, `--dry-run` to look). The checks are AgentsForge's (allowed tools only,
+  names and sizes, nothing overwritten; an improvement replaces only the file it was made from, and only if unchanged).
+- **AgentsForge and `author` use a stronger model, and it is a setting.** `forge.provider` and `forge.model` (new projects:
+  `anthropic`, `claude-opus-5-5`). Without a setting an Anthropic provider with a key is preferred over the default
+  provider; if the named provider has no key the next one answers, and the report says so. `forge.model` goes only to the
+  provider it is set for.
 - **The Accounts page installs the git helper too.** Saving a GitLab token (or finishing the browser sign-in) there now
   does what `etnpilot login gitlab` does: when the project has a GitLab address and is a git repository, `git push` in
   it uses the stored login. The page says so in a notice.

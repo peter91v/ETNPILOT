@@ -1,5 +1,6 @@
 // @ts-check
 import { AUTH_USAGE } from "./auth.js";
+import { AUTHOR_USAGE } from "./author.js";
 import { TRUST_USAGE, guardProject, runTrustCommand } from "./trust.js";
 import { agentsCommands } from "./commands/agents.js";
 import { configCommands } from "./commands/config.js";
@@ -103,6 +104,7 @@ export const CLI_OPTIONS = Object.freeze({
   "no-import": { type: "boolean" },
   "no-forge": { type: "boolean" },
   "no-wizard": { type: "boolean" },
+  yes: { type: "boolean" },
   global: { type: "boolean", default: false },
   changed: { type: "boolean", default: false },
   name: { type: "string" },
@@ -163,6 +165,7 @@ Usage:
     [--require-signatures | --allow-unsigned] [--require-terminal | --allow-incomplete] [--require-dated]
   etnpilot secret check <name> [--root directory]
 ${AUTH_USAGE}
+${AUTHOR_USAGE}
 ${TRUST_USAGE}
   etnpilot policy check (--kind kind [--path path | --url url | --command "npm test"] | --provider name)
     [--agent name] [--root directory]
