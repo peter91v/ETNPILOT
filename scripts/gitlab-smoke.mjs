@@ -4,7 +4,7 @@ import { runGitLabSmoke } from "../src/gitlab/smoke.js";
 
 const env = process.env;
 if (!env.ETNPILOT_SMOKE_GITLAB_URL || !env.ETNPILOT_SMOKE_GITLAB_PROJECT || !env.ETNPILOT_GITLAB_TOKEN) {
-  console.error("GitLab smoke needs ETNPILOT_SMOKE_GITLAB_URL, ETNPILOT_SMOKE_GITLAB_PROJECT and ETNPILOT_GITLAB_TOKEN for a dedicated etnpilot-smoke project.");
+  console.error("(Or, with a signed-in GitLab login and git.project set: etnpilot smoke --gitlab-write --confirm-writes.) GitLab smoke needs ETNPILOT_SMOKE_GITLAB_URL, ETNPILOT_SMOKE_GITLAB_PROJECT and ETNPILOT_GITLAB_TOKEN for a dedicated etnpilot-smoke project.");
   process.exitCode = 2;
 } else {
   try {

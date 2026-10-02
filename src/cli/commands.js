@@ -74,6 +74,8 @@ export const CLI_OPTIONS = Object.freeze({
   "no-verify": { type: "boolean", default: false },
   preview: { type: "boolean", default: false },
   gitlab: { type: "boolean", default: false },
+  "gitlab-write": { type: "boolean", default: false },
+  "confirm-writes": { type: "boolean", default: false },
   command: { type: "string" },
   port: { type: "string" },
   status: { type: "string" },
@@ -136,7 +138,7 @@ Usage:
   etnpilot config set <path> <value> [--global] [--root directory]
   etnpilot config unset <path> [--global] [--root directory]
   etnpilot config diff [--root directory]
-  etnpilot smoke [--provider name] [--model id] [--skip key,reply,tools,stream,toolstream,forge] [--gitlab] [--json]
+  etnpilot smoke [--provider name] [--model id] [--skip key,reply,tools,stream,toolstream,forge] [--gitlab] [--gitlab-write --confirm-writes] [--json]
   etnpilot forge [--root directory] [--dry-run | --preview]
   etnpilot content lock [--root directory]
   etnpilot content diff [--json] [--root directory]

@@ -199,3 +199,37 @@ test("without the Copilot SDK the first step says what to do, and nothing else i
   assert.match(report.steps[0].detail, /Copilot SDK is not available/);
   assert.match(report.steps[0].hint, /npm install @github\/copilot-sdk/);
 });
+
+test("--gitlab-write uses the project's own GitLab login, writes only into a project named for it, and removes what it made", async () => {
+  const { root, config, env } = await project();
+  config.git = { baseUrl: "https://git.example.test", project: "team/etnpilot-smoke" };
+  const calls = [];
+  const gitlabApi = async (url, options = {}) => {
+    const method = options.method ?? "GET";
+    const path = new URL(String(url)).pathname.replace("/api/v4", "");
+    calls.push(`${method} ${path}`);
+    if (path === "/projects/team%2Fetnpilot-smoke" && method === "GET") return json({ id: 7, path: "etnpilot-smoke", default_branch: "main" });
+    if (path.endsWith("/repository/branches") && method === "POST") return json({ name: "b" });
+    if (path.endsWith("/repository/commits")) return json({ id: "abc" });
+    if (path.endsWith("/merge_requests") && method === "POST") return json({ iid: 3, draft: true, title: "Draft: x" });
+    if (path.endsWith("/approvals")) return json({ approved: false });
+    if (path.endsWith("/pipelines")) return json([{ status: "success" }]);
+    if (path.endsWith("/merge_requests/3") && method === "PUT") return json({ state: "closed" });
+    if (path.includes("/repository/branches/") && method === "DELETE") return new Response(null, { status: 204 });
+    return json({}, 404);
+  };
+  const withToken = { ...env, ETNPILOT_GITLAB_TOKEN: ["glpat", "test", "not", "a", "real", "token", "value"].join("-") };
+  const skip = ["key", "reply", "tools", "stream", "toolstream", "forge"];
+  const report = await runSmoke(root, { config, env: withToken, skip, gitlabWrite: true, fetchImpl: gitlabApi, gitlabPipelineMs: 0 });
+  const step = report.steps.find((entry) => entry.id === "gitlab-write");
+  assert.equal(step.status, "pass", step.detail);
+  assert.match(step.detail, /created and removed again/);
+  assert.ok(calls.some((call) => call.startsWith("PUT ")) && calls.some((call) => call.startsWith("DELETE ")), "it closed the MR and deleted the branch");
+
+  // Not part of an ordinary run, and refused for a project that is not named for it.
+  assert.equal((await runSmoke(root, { config, env: withToken, skip, fetchImpl: gitlabApi })).steps.some((entry) => entry.id === "gitlab-write"), false);
+  const real = { ...config, git: { baseUrl: "https://git.example.test", project: "team/app" } };
+  const refused = await runSmoke(root, { config: real, env: withToken, skip, gitlabWrite: true, fetchImpl: async (url, options = {}) => (options.method ?? "GET") === "GET" ? json({ id: 1, path: "app", default_branch: "main" }) : json({}, 500) });
+  assert.equal(refused.steps.find((entry) => entry.id === "gitlab-write").status, "fail");
+  assert.match(refused.steps.find((entry) => entry.id === "gitlab-write").detail, /etnpilot-smoke/);
+});
