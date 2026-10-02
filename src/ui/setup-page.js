@@ -1,4 +1,5 @@
 // @ts-check
+import { readFileSync } from "node:fs";
 // The page for a directory with no project in it. It is a page of its own
 // rather than an eighth view, for the same reason the terminal interface makes
 // it a screen of its own: there is nothing else to look at yet.
@@ -7,6 +8,8 @@
 // from a network, every value inserted as text. Material Design 3 throughout,
 // from the same tokens — a second design system for one screen would be a
 // second design system.
+const TRANSLATION = ["i18n-de", "i18n"].map((name) => readFileSync(new URL(`./client/${name}.js`, import.meta.url), "utf8")).join("\n");
+
 export function renderSetupPage(token, status) {
   const data = JSON.stringify({
     root: status.root,
@@ -123,6 +126,7 @@ export function renderSetupPage(token, status) {
     <span class="brand-mark" aria-hidden="true">E</span>
     <h1>No project here yet</h1>
   </div>
+  <p class="footnote" id="language-slot"></p>
   <p>This directory has no <code>.etnpilot/etnpilot.yaml</code>, so there is nothing to review.</p>
   <p class="path" id="root"></p>
   <p class="notice" id="checkout" hidden></p>
@@ -255,6 +259,7 @@ async function create() {
 
 document.getElementById("create").addEventListener("click", () => { if (!document.getElementById("create").onclick) void create(); });
 renderTemplates();
+${TRANSLATION}
 </script>
 </body>
 </html>`;
