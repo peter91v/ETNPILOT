@@ -131,6 +131,7 @@ function renderOverview() {
   ]));
   host.append(el("div", { class: "summary-strip" }, usageCards()));
   for (const card of setupGuide()) host.append(card);
+  for (const card of taskCostPanel()) host.append(card);
   for (const card of gettingStarted()) host.append(card);
 
   // A run that is working says where it is, not just that it is.

@@ -49,6 +49,7 @@ function buildChat() {
   const model = combobox({
     id: "chat-model", label: "Model", inline: true, placeholder: "model (the agent's own)",
     load: () => modelIdsFor(effectiveChoice({ agent: chatControl("chat-agent")?.value, provider: chatControl("chat-provider")?.value })?.provider),
+    emptyNote: () => modelNoteFor(effectiveChoice({ agent: chatControl("chat-agent")?.value, provider: chatControl("chat-provider")?.value })?.provider),
   });
   const fetchModels = button("Models", {
     class: "btn small",

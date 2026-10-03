@@ -173,7 +173,6 @@ export const DE = {
   "Succeeded": "Erfolgreich",
   "Incomplete": "Unvollständig",
   "Not sealed": "Nicht versiegelt",
-  "All runs": "Alle Läufe",
   "Give ETNPilot a provider key": "ETNPilot einen Anbieter-Schlüssel geben",
   "Sign in on the Accounts page, or set the key in the environment.": "Melde dich auf der Konten-Seite an oder setze den Schlüssel in der Umgebung.",
   "Commit the project once": "Das Projekt einmal committen",
@@ -244,6 +243,13 @@ export const DE = {
   "Say what should be different about the draft.": "Sag, was am Entwurf anders sein soll.",
   "Undo": "Rückgängig",
   "Put back what that write replaced. A file changed since is left alone and nothing is undone.": "Stellt wieder her, was dieses Schreiben ersetzt hat. Eine inzwischen geänderte Datei bleibt unberührt, dann wird nichts rückgängig gemacht.",
+  "Cost per finished task": "Kosten pro erledigter Aufgabe",
+  "All spend, also on attempts that failed on the way, divided by the runs that finished.": "Alle Ausgaben, auch für unterwegs gescheiterte Versuche, geteilt durch die Läufe, die fertig wurden.",
+  "Per task": "Pro Aufgabe",
+  "Finished": "Fertig",
+  "Spent": "Ausgegeben",
+  "All runs": "Alle Läufe",
+  "not priced": "ohne Preis",
   "Getting started": "Erste Schritte",
   "Could this run be resumed?": "Lässt sich dieser Lauf fortsetzen?",
   "Could this run be continued?": "Lässt sich dieser Lauf weiterführen?",
@@ -541,6 +547,10 @@ export const DE = {
 // they are.
 /** @type {Array<[RegExp, (...groups: any[]) => string]>} */
 export const DE_PATTERNS = [
+  [/^(\d+) of (\d+)$/, (_, done, all) => `${done} von ${all}`],
+  [/^Passed on tier (\d+)$/, (_, n) => `Bestanden auf Stufe ${n}`],
+  [/^Routed (simple|medium|complex)$/, (_, level) => `Geroutet: ${{ simple: "einfach", medium: "mittel", complex: "komplex" }[level]}`],
+  [/^(.+) each$/, (_, amount) => `${amount} pro Aufgabe`],
   [/^Last written: (.+) \((.+)\)$/, (_, what, paths) => `Zuletzt geschrieben: ${what} (${paths})`],
   [/^Took back (.+): (.+)\.$/, (_, what, paths) => `${what} zurückgenommen: ${paths}.`],
   [/^model: (.+)$/, (_, model) => `Modell: ${model}`],

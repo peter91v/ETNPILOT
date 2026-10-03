@@ -31,6 +31,7 @@ function ladderEditor(card, step, index, agents, redraw) {
       onInput: (value) => { tier.model = value.trim() || undefined; },
       placeholder: "model id",
       load: () => modelIdsFor(effectiveChoice({ agent: step.agent, provider: tier.provider })?.provider),
+      emptyNote: () => modelNoteFor(effectiveChoice({ agent: step.agent, provider: tier.provider })?.provider),
     }));
     row.append(field("tier-provider-" + index + "-" + position, "Provider (optional)", tier.provider ?? "", (value) => { tier.provider = value.trim() || undefined; }, "as in providers"));
     row.append(selectField("tier-effort-" + index + "-" + position, "Effort", tier.effort ?? "", [["", "the agent's own"], ["low", "low"], ["medium", "medium"], ["high", "high"]], (value) => { tier.effort = value || undefined; }));

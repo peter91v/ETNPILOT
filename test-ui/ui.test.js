@@ -227,7 +227,7 @@ test("a run with a ladder shows the path it took, which tier passed and what it 
   try {
     await ui.page.evaluate(() => show("runs"));
     await ui.page.locator("#view-runs tbody tr button").first().click();
-    await ui.page.getByText("passed on tier 2").first().waitFor();
+    await ui.page.locator("#view-runs").getByText("passed on tier 2").first().waitFor();
     const picture = ui.page.locator("#view-runs .ladder-flow").first();
     assert.match(await picture.textContent(), /strong-model/);
     assert.equal(await picture.locator(".lf-tier.passed").count(), 1);
@@ -332,6 +332,59 @@ test("an agent made in the page can name its provider and model, chosen from the
     const manifest = await readFile(join(setup.root, ".etnpilot", "agents", "planner.yaml"), "utf8");
     assert.match(manifest, /provider: beta/);
     assert.match(manifest, /model: beta-special/);
+  } finally {
+    await ui.close();
+  }
+});
+
+test("the overview shows what a finished task costs, split by the tier that passed", async (t) => {
+  if (skipReason) return t.skip(skipReason);
+  const setup = await project();
+  const runs = join(setup.root, ".etnpilot", "state", "runs");
+  await mkdir(runs, { recursive: true });
+  const run = (id, { status, cost, attempts = [], route }) => writeFile(join(runs, `${id}.jsonl`), [
+    { type: "run-start", mode: "execute", runId: id },
+    ...(route ? [{ type: "ladder-route", runId: id, step: "build", ...route }] : []),
+    ...attempts.map((attempt) => ({ type: "ladder-attempt", runId: id, step: "build", ...attempt })),
+    { type: "workflow", terminal: true, runId: id, mode: "execute", status, hash: "h".repeat(64), observability: { summary: { estimatedCost: cost, currency: "USD" } } },
+  ].map((line) => JSON.stringify(line)).join("\n") + "\n");
+  await run("a", { status: "succeeded", cost: 0.1, attempts: [{ tier: 1, status: "passed", cost: 0.1 }], route: { difficulty: "simple", risk: "low", startTier: 0, verify: "light" } });
+  await run("b", { status: "succeeded", cost: 0.4, attempts: [{ tier: 1, status: "failed", cost: 0.1 }, { tier: 2, status: "passed", cost: 0.3 }], route: { difficulty: "medium", risk: "high", startTier: 0, verify: "full" } });
+  await run("c", { status: "failed", cost: 0.5, attempts: [{ tier: 1, status: "failed", cost: 0.5 }] });
+  const ui = await open(setup);
+  try {
+    const panel = ui.page.locator("#view-overview section", { hasText: "Cost per finished task" });
+    await panel.waitFor();
+    const text = await panel.textContent();
+    assert.match(text, /\$0\.50 each/, "all spend ($1.00, the failed run included) over the two finished runs");
+    assert.match(text, /Passed on tier 1/);
+    assert.match(text, /Passed on tier 2/);
+    assert.match(text, /Routed simple/);
+    assert.deepEqual(ui.problems, []);
+  } finally {
+    await ui.close();
+  }
+});
+
+test("a model list that is empty says why instead of 'no match'", async (t) => {
+  if (skipReason) return t.skip(skipReason);
+  const setup = await project();
+  await writeFile(join(setup.root, ".etnpilot", "etnpilot.yaml"), [
+    "version: 1", "defaultProvider: alpha", "providers:",
+    "  alpha: { type: openai-compatible, baseUrl: 'http://127.0.0.1:9/v1', model: alpha-model }",
+    "content:", "  provenance:", "    mode: enforce", "codegraph:", "  enabled: false", "observability:", "  enabled: false", "",
+  ].join("\n"));
+  const ui = await open(setup);
+  try {
+    await ui.page.evaluate(() => show("agents"));
+    await ui.page.getByRole("button", { name: "New workflow" }).click();
+    await ui.page.locator("#workflow-name").fill("tiered");
+    await ui.page.locator("#step-type-0").selectOption("ladder");
+    await ui.page.locator("#tier-model-0-0").waitFor();
+    await ui.page.locator("#tier-model-0-0").fill("");
+    await ui.page.locator("#tier-model-0-0").focus();
+    await ui.page.locator("#tier-model-0-0-list .combo-empty").filter({ hasText: "offers no list" }).waitFor();
+    assert.match(await ui.page.locator("#tier-model-0-0-list").textContent(), /alpha/);
   } finally {
     await ui.close();
   }

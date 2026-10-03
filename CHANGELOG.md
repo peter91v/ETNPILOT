@@ -8,6 +8,13 @@ pre-1.0, so breaking changes may appear in any release.
 
 ### Checks and hygiene (follow-up to the review)
 
+- **The overview shows what a finished task costs.** A panel "Cost per finished task" (once there are finished runs): all
+  spend, failed attempts included, over the runs that finished; in total, by the tier of a ladder that passed and by the
+  router's difficulty. The same numbers as `etnpilot usage --tasks`, from `GET /api/usage/tasks`.
+- **A model combobox says why it is empty.** A provider that offers no list (no key yet, the address does not answer) is
+  named with its reason in the list, instead of a bare "No match"; the list is asked for again the next time it is opened
+  rather than remembered as empty. The workflow builder reads the providers before it is drawn, so a ladder's model lists
+  know which provider each tier means.
 - **Provider, model and effort where a run or an agent is made.** The "Start a run" dialog has "Provider, model and effort for
   this run" (for the chosen agent, this run only; the agent's file is not changed; unavailable without an agent, because the
   project's own workflow runs as written); the server accepts only a provider the project configures, a model id and

@@ -207,6 +207,9 @@ export async function createReviewServer({
   route("GET", "/api/usage", async ({ request, response, url, state }) => {
     return send(response, 200, await state.usage());
   });
+  route("GET", "/api/usage/tasks", async ({ request, response, url, state }) => {
+    return send(response, 200, await state.taskCosts());
+  });
   route("GET", "/api/merges", async ({ request, response, url, state }) => {
     const status = url.searchParams.get("status");
     return send(response, 200, await state.mergeRequests(status ? { state: status } : undefined));
