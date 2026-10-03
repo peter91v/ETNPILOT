@@ -226,10 +226,13 @@ function openAgentBuilder(preset, existing) {
     };
   }
   $("agent-modal-title").textContent = existing ? "Edit " + existing.name : "New agent";
-  drawAgentBuilder();
-  openModal("agent-modal");
-  // The provider list and the default come from /api/agents; draw again once they are here.
-  if (!agents?.providerInfo) void ensureAgentInfo().then(() => { if (agentDraft) drawAgentBuilder(); });
+  // The provider list and the default come from /api/agents. They are read
+  // before the form is drawn, not after: drawing again under someone who has
+  // started typing would throw their field away.
+  void ensureAgentInfo().then(() => {
+    drawAgentBuilder();
+    openModal("agent-modal");
+  });
 }
 
 function drawAgentBuilder() {
