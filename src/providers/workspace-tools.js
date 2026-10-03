@@ -4,7 +4,7 @@ import { readResponseBytes, utf8Prefix, cancelBody } from "../runtime/bounded-io
 import { searchLines } from "./search-worker-host.js";
 import { runChild } from "../runtime/child-process.js";
 import { commandEnvironment } from "../runtime/command-environment.js";
-import { tail } from "../checks/runner.js";
+import { outputTail, tail } from "../checks/runner.js";
 import { unifiedDiff } from "./text-diff.js";
 import { validateProposal } from "../content/proposals.js";
 import { git } from "../git/command.js";
@@ -825,7 +825,7 @@ function commandFailure(command, code, exitSignal, timedOut, bounds, stderr, std
     : code === null
       ? `'${name}' was killed by ${exitSignal ?? "a signal"}`
       : `'${name}' exited with code ${code}`;
-  const said = tail(stderr) || tail(stdout);
+  const said = outputTail(stdout, stderr);
   return said ? `${headline}: ${said}` : `${headline}, and said nothing.`;
 }
 

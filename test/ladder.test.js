@@ -184,3 +184,42 @@ test("a workflow made after the last commit is explained, not just reported miss
   const run = await runProject({ root, input: "go", workflow: "gtp-test", providerFactories: factories });
   assert.equal(run.summary.status, "succeeded");
 });
+
+test("a check that cannot run on the untouched workspace stops the ladder before any tier", async () => {
+  const tested = [];
+  const records = [];
+  await assert.rejects(runLadder(step, {
+    ...deps({ passAt: 1, tested, records }),
+    checkBaseline: async () => ({ ok: false, name: "npm test", detail: "Cannot start ChromeHeadless: no binary for Chrome" }),
+  }), (error) => error.code === "ladder_environment" && /no tier was tried/.test(error.message));
+  assert.equal(tested.length, 0);
+  assert.equal(records[0].type, "ladder-baseline");
+  assert.equal(records[0].environment, true);
+});
+
+test("a baseline that fails honestly is noted for the tiers and the work goes on", async () => {
+  const tested = [];
+  const result = await runLadder(step, {
+    ...deps({ passAt: 1, tested }),
+    checkBaseline: async () => ({ ok: false, name: "npm test", detail: "1 test failed: adds numbers" }),
+  });
+  assert.equal(result.ladder.passed, true);
+  assert.match(tested[0].text, /already failed before any change/);
+});
+
+test("baseline can be switched off, and is skipped without command checks", async () => {
+  let called = 0;
+  const checkBaseline = async () => { called += 1; return { ok: true }; };
+  await runLadder({ ...step, baseline: false }, { ...deps({ passAt: 1 }), checkBaseline });
+  await runLadder({ ...step, verify: [{ reviewer: "qa" }] }, { ...deps({ passAt: 1 }), checkBaseline });
+  assert.equal(called, 0);
+});
+
+test("the same command failing the same way on two tiers stops the ladder", async () => {
+  const tested = [];
+  await assert.rejects(runLadder(step, {
+    ...deps({ passAt: 99, tested }),
+    verifyCommand: async () => ({ ok: false, detail: `Chrome failed after ${Math.random()} 12ms on port ${tested.length}` }),
+  }), (error) => error.code === "ladder_stuck" && error.ladder.attempts.length === 2);
+  assert.equal(tested.length, 2);
+});

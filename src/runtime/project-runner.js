@@ -334,15 +334,13 @@ async function runWorkflow(run) {
         if (dryRun) return { step: step.id, skipped: true, reason: "dry-run" };
         return runLadderStep(step, harness, {
           input, execution, metadata, traceMetadata, runId, workspace, receiptStore,
-          verifyCommand: async (verifier) => {
-            try {
-              await runObservedCheck({ ...step, id: `${step.id}-verify`, name: verifier.name ?? verifier.command.join(" "), command: verifier.command }, {
-                cwd: workspace.path, root, signal: execution.signal, env: checkEnv, sandbox, telemetry, trace: traceMetadata, workflowRunId: runId,
-              });
-              return { ok: true };
-            } catch (error) {
-              return { ok: false, detail: String(error.message ?? error) };
+          verifyCommand: (verifier) => verifyLadderCommand(step, verifier, { workspace, root, execution, checkEnv, sandbox, telemetry, traceMetadata, runId }),
+          checkBaseline: async (verifiers) => {
+            for (const verifier of verifiers) {
+              const outcome = await verifyLadderCommand(step, verifier, { workspace, root, execution, checkEnv, sandbox, telemetry, traceMetadata, runId });
+              if (!outcome.ok) return { ...outcome, name: verifier.name ?? verifier.command.join(" ") };
             }
+            return { ok: true };
           },
         });
       }
@@ -910,7 +908,18 @@ async function runQuorumStep(step, harness, { input, execution, metadata, traceM
 // The ladder: one tier at a time, cheapest first, each result verified. A tier
 // is the step's agent with another model, provider and effort, registered
 // under its own name for the run so the receipt says which one answered.
-async function runLadderStep(step, harness, { input, execution, metadata, traceMetadata, runId, workspace, receiptStore, verifyCommand }) {
+async function verifyLadderCommand(step, verifier, { workspace, root, execution, checkEnv, sandbox, telemetry, traceMetadata, runId }) {
+  try {
+    await runObservedCheck({ ...step, id: `${step.id}-verify`, name: verifier.name ?? verifier.command.join(" "), command: verifier.command }, {
+      cwd: workspace.path, root, signal: execution.signal, env: checkEnv, sandbox, telemetry, trace: traceMetadata, workflowRunId: runId,
+    });
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, detail: String(error.message ?? error), code: error.exitCode };
+  }
+}
+
+async function runLadderStep(step, harness, { input, execution, metadata, traceMetadata, runId, workspace, receiptStore, verifyCommand, checkBaseline }) {
   const base = harness.agents.get(step.agent);
   const composed = composeAgentInput(input, execution.dependencyResults);
   const call = (agent, text) => harness.run({
@@ -933,6 +942,7 @@ async function runLadderStep(step, harness, { input, execution, metadata, traceM
     runReviewer: (name, text) => call(name, text),
     runTriage: step.router ? (text) => call(step.router.agent, text) : undefined,
     verifyCommand,
+    checkBaseline,
   });
   return result;
 }

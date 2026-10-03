@@ -148,3 +148,11 @@ test("'dependencies are missing' is said only where nothing above the worktree h
   // And a run in the checkout itself never is.
   assert.equal(await dependenciesMissingForTest(root, root), false);
 });
+
+test("a failed check shows the end of both streams, not only stderr", async () => {
+  const { outputTail } = await import("../src/checks/runner.js");
+  const text = outputTail("Chrome not found\n", "Generating bundles...\n");
+  assert.match(text, /Chrome not found/);
+  assert.match(text, /Generating bundles/);
+  assert.equal(outputTail("", "only err\n"), "only err");
+});
