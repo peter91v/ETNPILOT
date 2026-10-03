@@ -253,7 +253,7 @@ async function setUpRun({
     // Setup never reached the workflow, so the run left no evidence worth
     // keeping. Remove the workspace instead of leaking a worktree per attempt.
     error.workspaceCleanup = await discardWorkspace(workspace, worktreeManager, branch);
-    throw error;
+    throw await explainMissingName(error, repositoryRoot, useWorktree);
   }
   return {
     root, input, agent, workflowName, dryRun, publish, env, fetchImpl, signal, metadata, session, approvalHandler,
@@ -725,12 +725,36 @@ async function describeProjectLoadError(error, useWorktree, repositoryRoot) {
   return detailed;
 }
 
+// A run works in a worktree made from the last commit. A workflow or agent that
+// was made since (on the page, say) is a file in the checkout and nothing in the
+// worktree, so the run says it does not exist, which is true there and not what a
+// person who just made it expects to read. Said here, with the file and the fix.
+async function explainMissingName(error, repositoryRoot, useWorktree) {
+  const unknownWorkflow = error?.code === "unknown_workflow";
+  const unknownAgent = /^Unknown workflow agent/.test(String(error?.message ?? ""));
+  if (!useWorktree || (!unknownWorkflow && !unknownAgent)) return error;
+  const status = await git(["status", "--porcelain", "--untracked-files=all", "--", ".etnpilot"], { cwd: repositoryRoot }).then((result) => result.stdout, () => "");
+  const files = status.split("\n").filter(Boolean).map((line) => line.slice(3).trim().replace(/^"|"$/g, ""));
+  const prefix = unknownWorkflow ? ".etnpilot/workflows/" : ".etnpilot/agents/";
+  const mine = files.filter((file) => file.startsWith(prefix));
+  if (mine.length === 0) return error;
+  const explained = new Error(
+    `${error.message} In your checkout there ${mine.length === 1 ? "is a file" : "are files"} that the run's worktree does not have, because ${mine.length === 1 ? "it is" : "they are"} not committed: ${mine.join(", ")}.`
+    + " A run works on committed content, which is what was reviewed. Commit "
+    + `${mine.length === 1 ? "it" : "them"} (git add .etnpilot && git commit -m "Add ETNPilot workflow") and run again, or choose 'Work directly in this directory'.`,
+  );
+  explained.code = error.code;
+  explained.cause = error;
+  explained.workspaceCleanup = error.workspaceCleanup;
+  return explained;
+}
+
 // A worktree starts from the last commit. Content that was changed, or locked,
 // after it is in the checkout and not in the worktree, so the lock the worktree
 // holds is the old one and the check fails for a reason the message did not
 // give. Said here, with the files.
 async function explainUncommittedContent(error, repositoryRoot) {
-  const status = await git(["status", "--porcelain", "--", ".etnpilot"], { cwd: repositoryRoot }).then((result) => result.stdout, () => "");
+  const status = await git(["status", "--porcelain", "--untracked-files=all", "--", ".etnpilot"], { cwd: repositoryRoot }).then((result) => result.stdout, () => "");
   const files = status.split("\n").filter(Boolean).map((line) => line.slice(3).trim());
   if (files.length === 0) return error;
   const explained = new Error(

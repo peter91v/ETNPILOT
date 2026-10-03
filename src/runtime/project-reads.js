@@ -237,6 +237,13 @@ export async function checkRunReadiness({ root, config }) {
       commands: [lockCommand, ...(inPlace ? [] : [commit.replace("Add ETNPilot configuration", "Lock ETNPilot content")])],
     };
   }
-  return { ready: true, workspace: inPlace ? "in-place" : "worktree", baseRef };
+  // What a worktree will not have: content made or changed since the last commit.
+  // Not a reason to refuse (the project itself is committed), but a run that names
+  // such a workflow or agent would not find it, so it is said before the run.
+  const uncommitted = inPlace ? [] : await git(["status", "--porcelain", "--untracked-files=all", "--", ".etnpilot"], { cwd: root }).then(
+    (result) => result.stdout.split("\n").filter(Boolean).map((line) => line.slice(3).trim().replace(/^"|"$/g, "")),
+    () => [],
+  );
+  return { ready: true, workspace: inPlace ? "in-place" : "worktree", baseRef, ...(uncommitted.length > 0 ? { uncommitted } : {}) };
 }
 

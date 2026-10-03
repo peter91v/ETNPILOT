@@ -144,3 +144,43 @@ test("a ladder runs inside a real workflow run: tiers are the same agent with an
   const entries = (await readFile(join(root, ".etnpilot", "state", "runs", `${run.runId}.jsonl`), "utf8")).split("\n").filter(Boolean).map((line) => JSON.parse(line));
   assert.equal(entries.filter((entry) => entry.type === "ladder-attempt").length, 2);
 });
+
+test("a workflow made after the last commit is explained, not just reported missing", async () => {
+  const { mkdtemp, mkdir, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { git } = await import("../src/git/command.js");
+  const { runProject } = await import("../src/runtime/project-runner.js");
+  const { checkRunReadiness } = await import("../src/runtime/project-reads.js");
+  const { loadConfig } = await import("../src/config/load.js");
+  const root = await mkdtemp(join(tmpdir(), "etnpilot-uncommitted-"));
+  await mkdir(join(root, ".etnpilot", "agents"), { recursive: true });
+  await writeFile(join(root, ".gitignore"), ".etnpilot/state/\n.etnpilot/worktrees/\n");
+  await writeFile(join(root, ".etnpilot", "agents", "builder.yaml"), "name: builder\nprovider: fake\nprompt: Build it.\n");
+  await writeFile(join(root, ".etnpilot", "etnpilot.yaml"), "version: 1\nproviders:\n  fake:\n    type: fake\ncontent:\n  provenance:\n    mode: off\ncodegraph:\n  enabled: false\nobservability:\n  enabled: false\nworkflow:\n  steps:\n    - id: only\n      type: agent\n      agent: builder\n");
+  await git(["init", "-b", "main"], { cwd: root });
+  await git(["config", "user.email", "test@example.invalid"], { cwd: root });
+  await git(["config", "user.name", "ETNPilot Test"], { cwd: root });
+  await git(["add", "."], { cwd: root });
+  await git(["commit", "-m", "initial"], { cwd: root });
+  // Made after the commit, the way the page makes one.
+  await mkdir(join(root, ".etnpilot", "workflows"), { recursive: true });
+  await writeFile(join(root, ".etnpilot", "workflows", "gtp-test.yaml"), "name: gtp-test\nsteps:\n  - id: step-1\n    type: agent\n    agent: builder\n");
+
+  const readiness = await checkRunReadiness({ root, config: await loadConfig(join(root, ".etnpilot", "etnpilot.yaml")) });
+  assert.equal(readiness.ready, true);
+  assert.deepEqual(readiness.uncommitted, [".etnpilot/workflows/gtp-test.yaml"], "the page can name it before the run");
+
+  const factories = { fake: (name) => ({ name, invoke: async () => ({ text: "x" }) }) };
+  const error = await runProject({ root, input: "go", workflow: "gtp-test", providerFactories: factories }).catch((caught) => caught);
+  assert.equal(error.code, "unknown_workflow");
+  assert.match(error.message, /There is no workflow called 'gtp-test'/);
+  assert.match(error.message, /not committed/);
+  assert.match(error.message, /git add \.etnpilot/);
+
+  // Committed, it runs.
+  await git(["add", "."], { cwd: root });
+  await git(["commit", "-m", "workflow"], { cwd: root });
+  const run = await runProject({ root, input: "go", workflow: "gtp-test", providerFactories: factories });
+  assert.equal(run.summary.status, "succeeded");
+});

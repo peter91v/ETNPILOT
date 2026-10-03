@@ -24,7 +24,19 @@ function ladderEditor(card, step, index, agents, redraw) {
   step.tiers ??= [];
   step.tiers.forEach((tier, position) => {
     const row = el("div", { class: "ladder-row" });
-    row.append(el("span", { class: "builder-num", text: String(position + 1) }));
+    // Provider and effort are short and sit side by side; a model id is long and
+    // gets the whole row beneath them. Side by side with the effort it was cut off.
+    row.append(el("div", { class: "ladder-row-head" }, [
+      el("span", { class: "builder-num", text: String(position + 1) }),
+      el("span", { class: "grow" }),
+      button("Remove", { class: "btn link", onClick: () => { step.tiers.splice(position, 1); redraw(); } }),
+    ]));
+    row.append(el("div", { class: "ladder-pair even" }, [
+      selectField("tier-provider-" + index + "-" + position, "Provider", tier.provider ?? "",
+        [["", "default"], ...providerNames().map((name) => [name, name])],
+        (value) => { tier.provider = value || undefined; redraw(); }),
+      selectField("tier-effort-" + index + "-" + position, "Effort", tier.effort ?? "", [["", "own"], ["low", "low"], ["medium", "medium"], ["high", "high"]], (value) => { tier.effort = value || undefined; }),
+    ]));
     // The list is the models of the provider this tier would use: its own, else
     // the agent's, else the project's default.
     row.append(comboField("tier-model-" + index + "-" + position, "Model", tier.model ?? "", {
@@ -33,9 +45,6 @@ function ladderEditor(card, step, index, agents, redraw) {
       load: () => modelIdsFor(effectiveChoice({ agent: step.agent, provider: tier.provider })?.provider),
       emptyNote: () => modelNoteFor(effectiveChoice({ agent: step.agent, provider: tier.provider })?.provider),
     }));
-    row.append(field("tier-provider-" + index + "-" + position, "Provider (optional)", tier.provider ?? "", (value) => { tier.provider = value.trim() || undefined; }, "as in providers"));
-    row.append(selectField("tier-effort-" + index + "-" + position, "Effort", tier.effort ?? "", [["", "the agent's own"], ["low", "low"], ["medium", "medium"], ["high", "high"]], (value) => { tier.effort = value || undefined; }));
-    row.append(button("Remove", { class: "btn link", onClick: () => { step.tiers.splice(position, 1); redraw(); } }));
     card.append(row);
   });
   if (step.tiers.length < 6) card.append(button("Add a tier", { class: "btn small", onClick: () => { step.tiers.push({ model: "", effort: "high" }); redraw(); } }));
@@ -63,12 +72,14 @@ function verifierRows(card, step, key, index, agents, redraw) {
   step[key].forEach((verifier, position) => {
     const isReviewer = verifier.reviewer !== undefined;
     const row = el("div", { class: "ladder-row" });
-    row.append(selectField(key + "-kind-" + index + "-" + position, "Kind", isReviewer ? "reviewer" : "command", [["command", "A command"], ["reviewer", "A reviewer agent"]], (value) => {
+    const kind = selectField(key + "-kind-" + index + "-" + position, "Kind", isReviewer ? "reviewer" : "command", [["command", "A command"], ["reviewer", "A reviewer agent"]], (value) => {
       step[key][position] = value === "reviewer" ? { reviewer: agents[0] ?? "" } : { command: "npm test" };
       redraw();
-    }));
-    if (isReviewer) row.append(selectField(key + "-agent-" + index + "-" + position, "Reviewer", verifier.reviewer, agents.map((name) => [name, name]), (value) => { verifier.reviewer = value; }));
-    else row.append(field(key + "-cmd-" + index + "-" + position, "Command", Array.isArray(verifier.command) ? verifier.command.join(" ") : (verifier.command ?? ""), (value) => { verifier.command = value; }, "npm test"));
+    });
+    const value = isReviewer
+      ? selectField(key + "-agent-" + index + "-" + position, "Reviewer", verifier.reviewer, agents.map((name) => [name, name]), (chosen) => { verifier.reviewer = chosen; })
+      : field(key + "-cmd-" + index + "-" + position, "Command", Array.isArray(verifier.command) ? verifier.command.join(" ") : (verifier.command ?? ""), (text) => { verifier.command = text; }, "npm test");
+    row.append(el("div", { class: "ladder-pair even" }, [kind, value]));
     row.append(button("Remove", { class: "btn link", onClick: () => { step[key].splice(position, 1); redraw(); } }));
     card.append(row);
   });

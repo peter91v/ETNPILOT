@@ -454,6 +454,10 @@
   .combo-option.chosen { color: var(--md-primary); font-weight: 500; }
   .composer-controls .combo.inline { flex: 1 1 160px; max-width: 260px; }
   .composer-controls .combo.inline > input { max-width: none; width: 100%; }
+  .ladder-row-head { display: flex; gap: 8px; align-items: center; }
+  .ladder-row-head .field { flex: 1 1 auto; min-width: 0; }
+  .ladder-pair { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: 8px; align-items: start; }
+  .ladder-pair.even { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .ladder-row { display: grid; gap: 4px; padding: 8px 0; border-top: 1px solid var(--md-outline-variant); }
   .ladder-flow-box { margin: 8px 0; overflow-x: auto; }
   .ladder-flow { width: 100%; max-width: 420px; height: auto; display: block; }

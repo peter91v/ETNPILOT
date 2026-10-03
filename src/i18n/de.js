@@ -217,7 +217,6 @@ export const DE = {
   "Discard": "Verwerfen",
   "Agent that does the work": "Agent, der die Arbeit macht",
   "Tiers, cheapest first. A failed check moves the task to the next one.": "Stufen, die billigste zuerst. Fällt eine Prüfung durch, geht die Aufgabe zur nächsten.",
-  "Provider (optional)": "Anbieter (optional)",
   "Effort": "Aufwand",
   "the agent's own": "der des Agenten",
   "Add a tier": "Stufe hinzufügen",
@@ -250,6 +249,7 @@ export const DE = {
   "Spent": "Ausgegeben",
   "All runs": "Alle Läufe",
   "not priced": "ohne Preis",
+  "default": "Standard",
   "Getting started": "Erste Schritte",
   "Could this run be resumed?": "Lässt sich dieser Lauf fortsetzen?",
   "Could this run be continued?": "Lässt sich dieser Lauf weiterführen?",
@@ -547,6 +547,8 @@ export const DE = {
 // they are.
 /** @type {Array<[RegExp, (...groups: any[]) => string]>} */
 export const DE_PATTERNS = [
+  [/^The (agent|workflow) '(.+)' is not committed yet, and a run starts from the last commit, so it would not find it\. Commit it \(git add \.etnpilot && git commit\), or work directly in this directory\.$/, (_, kind, name) => `${kind === "agent" ? "Der Agent" : "Der Workflow"} '${name}' ist noch nicht committet, und ein Lauf startet vom letzten Commit, würde ihn also nicht finden. Committe ihn (git add .etnpilot && git commit) oder arbeite direkt in diesem Verzeichnis.`],
+  [/^(.+) \(not committed\)$/, (_, name) => `${name} (nicht committet)`],
   [/^(\d+) of (\d+)$/, (_, done, all) => `${done} von ${all}`],
   [/^Passed on tier (\d+)$/, (_, n) => `Bestanden auf Stufe ${n}`],
   [/^Routed (simple|medium|complex)$/, (_, level) => `Geroutet: ${{ simple: "einfach", medium: "mittel", complex: "komplex" }[level]}`],
