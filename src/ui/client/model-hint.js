@@ -32,3 +32,9 @@ async function ensureAgentInfo() {
     // The hints just stay general.
   }
 }
+
+// The providers the project configures. A function of its own because several
+// builders name the list of agents `agents` too, and that would hide this one.
+function providerNames() {
+  return agents?.providers ?? [];
+}

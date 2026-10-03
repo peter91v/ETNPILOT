@@ -8,6 +8,14 @@ pre-1.0, so breaking changes may appear in any release.
 
 ### Checks and hygiene (follow-up to the review)
 
+- **A workflow or agent made since the last commit is explained, not just "missing".** A run works in a worktree made from
+  the last commit; a workflow made on the page is a file in the checkout and nothing there, so the run said "There is no
+  workflow called 'x'". It now says that the file exists in the checkout but is not committed, and what to do (commit it, or
+  work directly in this directory). The "Start a run" dialog marks such workflows and agents "(not committed)" and warns
+  under the choice before the run (`uncommitted` in the run readiness).
+- **The ladder form is compact.** The provider is a choice from the project's providers (not free text), provider and
+  effort sit side by side and the model has the whole row beneath them (it was cut off beside the effort); checks show
+  kind and value side by side.
 - **The overview shows what a finished task costs.** A panel "Cost per finished task" (once there are finished runs): all
   spend, failed attempts included, over the runs that finished; in total, by the tier of a ladder that passed and by the
   router's difficulty. The same numbers as `etnpilot usage --tasks`, from `GET /api/usage/tasks`.

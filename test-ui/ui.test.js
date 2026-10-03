@@ -190,7 +190,14 @@ test("an agent can be drafted with a model, read, and then written", async (t) =
 
 test("a ladder can be built in the workflow builder and is drawn as a flow", async (t) => {
   if (skipReason) return t.skip(skipReason);
-  const ui = await open(await project());
+  const setup = await project();
+  await writeFile(join(setup.root, ".etnpilot", "etnpilot.yaml"), [
+    "version: 1", "defaultProvider: alpha", "providers:",
+    "  alpha: { type: openai-compatible, baseUrl: 'http://127.0.0.1:9/v1', model: alpha-model }",
+    "  beta: { type: openai-compatible, baseUrl: 'http://127.0.0.1:9/v1', model: beta-model }",
+    "content:", "  provenance:", "    mode: enforce", "codegraph:", "  enabled: false", "observability:", "  enabled: false", "",
+  ].join("\n"));
+  const ui = await open(setup);
   try {
     await ui.page.evaluate(() => show("agents"));
     await ui.page.getByRole("button", { name: "New workflow" }).click();
@@ -200,6 +207,16 @@ test("a ladder can be built in the workflow builder and is drawn as a flow", asy
     assert.equal(await ui.page.locator("#tier-model-0-0").inputValue(), "claude-haiku-4-5-20251001");
     assert.equal(await ui.page.locator("#workflow-body .ladder-flow").count(), 1, "the plan is drawn while editing");
     await ui.page.locator("#tier-model-0-0").fill("cheap-model");
+    // The provider is a choice from the project's own, and model and effort sit side by side.
+    assert.equal(await ui.page.locator("select#tier-provider-0-0").count(), 1);
+    assert.deepEqual(await ui.page.locator("select#tier-provider-0-0 option").allTextContents(), ["default", "alpha", "beta"]);
+    await ui.page.locator("select#tier-provider-0-1").selectOption("beta");
+    assert.equal(await ui.page.locator("select#tier-provider-0-1").inputValue(), "beta");
+    const provider = await ui.page.locator("#tier-provider-0-0").boundingBox();
+    const effort = await ui.page.locator("#tier-effort-0-0").boundingBox();
+    const model = await ui.page.locator("#tier-model-0-0").boundingBox();
+    assert.ok(Math.abs(provider.y - effort.y) < 12, "provider and effort share a row");
+    assert.ok(model.y > provider.y + provider.height - 4 && model.width > provider.width * 1.6, "the model has the whole row beneath them");
     await ui.page.getByRole("button", { name: "Add a check" }).click();
     await ui.page.locator("#workflow-save").click();
     await ui.page.locator("#view-agents .ladder-flow").first().waitFor();

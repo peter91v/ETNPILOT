@@ -112,9 +112,10 @@ async function prepareRunModal() {
   } catch (error) {
     agents = { agents: [], error: error.message };
   }
+  const notCommitted = uncommittedNames();
   for (const agent of agents.agents ?? []) {
     select.append(el("option", {
-      text: agent.error ? agent.name + " (this manifest does not parse)" : agent.name,
+      text: agent.error ? agent.name + " (this manifest does not parse)" : agent.name + (notCommitted.agents.has(agent.name) ? " (not committed)" : ""),
       attrs: { value: agent.name, ...(agent.error ? { disabled: "disabled" } : {}) },
     }));
   }
@@ -123,13 +124,36 @@ async function prepareRunModal() {
   const named = (workflowData ?? (await api("/api/workflows").catch(() => ({ workflows: [] })))).workflows.filter((workflow) => (workflow.errors ?? []).length === 0);
   const flows = $("run-workflow");
   flows.replaceChildren(el("option", { text: "the project's own workflow", attrs: { value: "" } }));
-  for (const workflow of named) flows.append(el("option", { text: workflow.name, attrs: { value: workflow.name } }));
+  for (const workflow of named) flows.append(el("option", { text: workflow.name + (notCommitted.workflows.has(workflow.name) ? " (not committed)" : ""), attrs: { value: workflow.name } }));
   $("run-workflow-field").hidden = named.length === 0;
   fillRunProviders();
   describeRunChoice();
 }
 
+// A workflow or agent made since the last commit is in the checkout and not in
+// the worktree a run starts from, so the run would not find it. Said before the
+// run, on the entry and under the choice, unless the run works in this directory.
+function uncommittedNames() {
+  const files = runReadiness?.uncommitted ?? [];
+  const nameOf = (file) => file.replace(/^.*\//, "").replace(/\.ya?ml$/, "");
+  return {
+    agents: new Set(files.filter((file) => file.startsWith(".etnpilot/agents/")).map(nameOf)),
+    workflows: new Set(files.filter((file) => file.startsWith(".etnpilot/workflows/")).map(nameOf)),
+  };
+}
+
+function describeUncommitted() {
+  const warning = $("run-uncommitted");
+  const names = uncommittedNames();
+  const inPlace = $("run-inplace-box").checked;
+  const chosen = $("run-agent").value ? { kind: "agent", name: $("run-agent").value, set: names.agents } : { kind: "workflow", name: $("run-workflow").value, set: names.workflows };
+  const hit = !inPlace && chosen.name !== "" && chosen.set.has(chosen.name);
+  warning.hidden = !hit;
+  if (hit) warning.textContent = "The " + chosen.kind + " '" + chosen.name + "' is not committed yet, and a run starts from the last commit, so it would not find it. Commit it (git add .etnpilot && git commit), or work directly in this directory.";
+}
+
 function describeRunChoice() {
+  describeUncommitted();
   $("run-workflow").disabled = $("run-agent").value !== "";
   const chosen = $("run-agent").value;
   const agent = (agents?.agents ?? []).find((candidate) => candidate.name === chosen);
@@ -386,6 +410,8 @@ $("workflow-save").addEventListener("click", () => { void saveWorkflow(); });
 $("agent-save").addEventListener("click", () => { void saveAgent(); });
 $("lock-confirm").addEventListener("click", () => { void confirmLock(); });
 $("run-agent").addEventListener("change", describeRunChoice);
+$("run-workflow").addEventListener("change", describeRunChoice);
+$("run-inplace-box").addEventListener("change", describeRunChoice);
 $("run-copy").addEventListener("click", () => { void copyRunCommands(); });
 $("open-palette").addEventListener("click", () => {
   $("palette-input").value = "";
