@@ -34,6 +34,17 @@ export const SERVICES = Object.freeze({
     baseUrl: "https://api.openai.com/v1",
     hosts: ["api.openai.com"],
   },
+  brave: {
+    id: "brave",
+    label: "Brave Search",
+    secret: "brave.apiKey",
+    env: "BRAVE_SEARCH_API_KEY",
+    method: "key",
+    usedFor: "the web_search tool",
+    keyHelp: "Create a key at api-dashboard.search.brave.com (the free plan is enough to start).",
+    baseUrl: "https://api.search.brave.com",
+    hosts: ["api.search.brave.com"],
+  },
   github: {
     id: "github",
     label: "GitHub",

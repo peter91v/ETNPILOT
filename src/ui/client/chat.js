@@ -382,7 +382,7 @@ function message(who, text, { tone = "", meta, extra = [] } = {}) {
 // folded behind a count, because ten rows of "did read_file …" pushed the
 // answer off the screen — but a refusal or a failure is never folded: that is
 // the part someone needs to see.
-const VERBS = { read_file: "read", list_files: "listed", search_files: "searched", write_file: "wrote", edit_file: "edited", run_command: "ran", fetch_url: "fetched", spawn_subagent: "handed on", load_skill: "opened a skill" };
+const VERBS = { read_file: "read", list_files: "listed", search_files: "searched", write_file: "wrote", edit_file: "edited", run_command: "ran", fetch_url: "fetched", web_search: "searched the web", spawn_subagent: "handed on", load_skill: "opened a skill" };
 const openCallFolds = new Set();
 
 function callChip(call) {

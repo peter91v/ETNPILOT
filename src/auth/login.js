@@ -49,6 +49,8 @@ function verification(service, value, { host, baseUrl }) {
       };
     case "openai":
       return { url: `${(baseUrl ?? service.baseUrl).replace(/\/$/, "")}/models`, headers: { authorization: `Bearer ${value}` } };
+    case "brave":
+      return { url: `${service.baseUrl}/res/v1/web/search?q=etnpilot&count=1`, headers: { accept: "application/json", "x-subscription-token": value } };
     case "github":
       return { url: `${service.apiBase}/user`, headers: { authorization: `Bearer ${value}`, accept: "application/vnd.github+json", "user-agent": "etnpilot" }, account: (body) => body.login };
     case "gitlab":

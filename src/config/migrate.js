@@ -63,12 +63,13 @@ const TOOL_NAMES = Object.freeze({
   execute: "run_command",
   webfetch: "fetch_url",
   fetch: "fetch_url",
+  websearch: "web_search",
   task: "spawn_subagent",
   agent: "spawn_subagent",
   askuserquestion: "ask_human",
   skill: "load_skill",
 });
-const EVERY_TOOL = Object.freeze(["read_file", "list_files", "search_files", "write_file", "edit_file", "run_command", "fetch_url"]);
+const EVERY_TOOL = Object.freeze(["read_file", "list_files", "search_files", "write_file", "edit_file", "run_command", "fetch_url", "web_search"]);
 
 // With 'dryRun' nothing is written: the report says what would be imported, so a
 // surface can show it before anyone has chosen to create the project.
