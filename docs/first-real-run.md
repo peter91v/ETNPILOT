@@ -340,3 +340,12 @@ be pasted as it is:
 It never writes to the project, and the tool step runs in a temporary
 directory with only `read_file` and `list_files` offered. A failure prints the
 reason and, where there is one, the command that fixes it.
+
+### Web search
+
+`web_search` gives an agent current facts from the web (versions, documentation, error messages). It
+is opt-in like `fetch_url`: add `web_search` to the agent's `tools:`. It uses Brave Search; store a
+key once with `etnpilot login brave` (or set `BRAVE_SEARCH_API_KEY`). Every search asks for approval
+(kind `network`), returns titles, addresses and short extracts only, and marks the run as having read
+from outside, so earlier run-scoped approvals stop applying. Open a page with `fetch_url` when an
+extract is not enough.

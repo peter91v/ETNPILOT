@@ -13,6 +13,7 @@ const TOOL_WORDS = {
   edit_file: "edits files",
   run_command: "runs commands",
   fetch_url: "reads web pages",
+  web_search: "searches the web",
   load_skill: "opens its skills",
   propose_instruction: "proposes rules",
   spawn_subagent: "hands work to other agents",
@@ -194,7 +195,7 @@ function agentCard(agent) {
 const AGENT_TOOL_GROUPS = [
   ["Read", [["read_file", "reads files"], ["list_files", "lists files"], ["search_files", "searches files"]]],
   ["Change", [["write_file", "writes files"], ["edit_file", "edits files"], ["run_command", "runs commands"]]],
-  ["Other", [["fetch_url", "reads web pages"], ["ask_human", "asks you questions"]]],
+  ["Other", [["fetch_url", "reads web pages"], ["web_search", "searches the web"], ["ask_human", "asks you questions"]]],
 ];
 const AGENT_PRESETS = {
   reader: { label: "Only reads", tools: ["read_file", "list_files", "search_files"] },
