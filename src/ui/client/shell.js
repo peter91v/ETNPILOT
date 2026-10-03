@@ -82,6 +82,7 @@ function buildRunOptions() {
   const model = combobox({
     id: "run-model", label: "Model", inline: true, placeholder: "model (the agent's own)",
     load: () => modelIdsFor(effectiveChoice({ agent: $("run-agent").value, provider: $("run-provider").value })?.provider),
+    emptyNote: () => modelNoteFor(effectiveChoice({ agent: $("run-agent").value, provider: $("run-provider").value })?.provider),
     onInput: () => describeRunChoice(),
   });
   const effort = el("select", { class: "inline", attrs: { id: "run-effort", "aria-label": "Thinking effort" } }, [

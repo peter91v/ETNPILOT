@@ -4,10 +4,11 @@
 // model may not be on it yet. Options can arrive later (`setOptions`) or be
 // fetched the first time the list is opened (`load`).
 
-function combobox({ id, label, value = "", options = [], load, onInput, placeholder = "", inline = false } = /** @type {any} */ ({})) {
+function combobox({ id, label, value = "", options = [], load, emptyNote, onInput, placeholder = "", inline = false } = /** @type {any} */ ({})) {
   const listId = id + "-list";
   let items = options.slice();
   let loaded = !load;
+  let loading = false;
   let active = -1;
   // Opened with the chevron: the whole list, whatever is typed, until typing resumes.
   let everything = false;
@@ -30,7 +31,10 @@ function combobox({ id, label, value = "", options = [], load, onInput, placehol
     const visible = shown();
     list.replaceChildren();
     if (visible.length === 0) {
-      list.append(el("li", { class: "combo-empty", text: loaded ? "No match: your text is used as it is." : "Reading the list…", attrs: { role: "presentation" } }));
+      // Why there is nothing to pick, in the list's own words, when the list is
+      // empty because the provider offered none rather than because of the filter.
+      const why = items.length === 0 ? emptyNote?.() : undefined;
+      list.append(el("li", { class: "combo-empty", text: loading ? "Reading the list…" : why ?? "No match: your text is used as it is.", attrs: { role: "presentation" } }));
     }
     visible.forEach((item, index) => {
       const row = el("li", { class: "combo-option" + (index === active ? " active" : "") + (item === input.value ? " chosen" : ""), text: item, attrs: { role: "option", id: listId + "-" + index, "aria-selected": String(item === input.value) } });
@@ -44,9 +48,15 @@ function combobox({ id, label, value = "", options = [], load, onInput, placehol
     list.hidden = false;
     input.setAttribute("aria-expanded", "true");
     draw();
-    if (!loaded) {
-      loaded = true;
-      Promise.resolve(load()).then((fresh) => { items = Array.isArray(fresh) ? fresh : items; draw(); }, () => { draw(); });
+    if (!loaded && !loading) {
+      loading = true;
+      Promise.resolve(load()).then((fresh) => {
+        items = Array.isArray(fresh) ? fresh : items;
+        // A list that came back empty is asked for again next time: the key may have been added since.
+        loaded = items.length > 0;
+        loading = false;
+        draw();
+      }, () => { loading = false; draw(); });
     }
   }
   function close() {
@@ -92,22 +102,38 @@ function combobox({ id, label, value = "", options = [], load, onInput, placehol
   return box;
 }
 
-// The ids a provider offers, asked for once per provider and kept for the
-// life of the page; a provider that cannot list (no key, no list) offers none.
+// The ids a provider offers, asked for per provider and kept for the life of the
+// page, but only when it answered: a provider that could not list (no key yet, no
+// list) is asked again the next time, and says why.
 const providerModelIds = new Map();
+const providerModelNotes = new Map();
 async function modelIdsFor(provider) {
-  if (!provider) return [];
+  if (!provider) {
+    providerModelNotes.set("", "No provider is chosen, so there is no list. Type a model id.");
+    return [];
+  }
   if (providerModelIds.has(provider)) return providerModelIds.get(provider);
-  let ids = [];
   try {
     const result = await api("/api/providers/" + encodeURIComponent(provider) + "/models");
-    if (result.available) ids = result.models.map((entry) => entry.id);
-  } catch { /* a courtesy: typing a model still works */ }
-  providerModelIds.set(provider, ids);
-  return ids;
+    if (result.available) {
+      const ids = result.models.map((entry) => entry.id);
+      providerModelIds.set(provider, ids);
+      providerModelNotes.delete(provider);
+      return ids;
+    }
+    providerModelNotes.set(provider, "'" + provider + "' offers no list: " + (result.reason ?? "no reason given") + ". Type a model id.");
+  } catch (error) {
+    providerModelNotes.set(provider, "The list of '" + provider + "' could not be read: " + error.message + ". Type a model id.");
+  }
+  return [];
+}
+
+// The note for the provider a field is about, for `emptyNote`.
+function modelNoteFor(provider) {
+  return providerModelNotes.get(provider ?? "");
 }
 
 // A combobox with its label, the way `field` draws a text field.
-function comboField(id, label, value, { load, onInput, placeholder } = /** @type {any} */ ({})) {
-  return el("div", { class: "field" }, [el("label", { text: label, attrs: { for: id } }), combobox({ id, label, value, load, onInput, placeholder })]);
+function comboField(id, label, value, { load, emptyNote, onInput, placeholder } = /** @type {any} */ ({})) {
+  return el("div", { class: "field" }, [el("label", { text: label, attrs: { for: id } }), combobox({ id, label, value, load, emptyNote, onInput, placeholder })]);
 }

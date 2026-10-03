@@ -279,6 +279,7 @@ function drawAgentBuilder() {
     onInput: (value) => { draft.model = value.trim(); },
     placeholder: describeChoice(effectiveChoice({ provider: draft.provider })) || "the provider's own",
     load: () => modelIdsFor(effectiveChoice({ provider: draft.provider })?.provider),
+    emptyNote: () => modelNoteFor(effectiveChoice({ provider: draft.provider })?.provider),
   }));
   host.append(selectField("agent-effort", "How hard it thinks", draft.effort, [["", "the provider's own"], ["low", "low"], ["medium", "medium"], ["high", "high"]], (value) => { draft.effort = value; }));
   if (draft.errors.length > 0) host.append(el("div", { class: "notice bad", attrs: { role: "alert" } }, draft.errors.map((message) => el("p", { text: message }))));
@@ -405,8 +406,12 @@ function openWorkflowBuilder(preset, existing) {
   // Agent steps start on the first agent that exists, so a preset is runnable as soon as it is saved.
   for (const step of base.steps) if (step.type === "agent" && !step.agent) step.agent = names[0] ?? "";
   builder = { workflow: base, errors: [], saving: false, editing: existing?.name };
-  drawBuilder();
-  openModal("workflow-modal");
+  // The providers and the default are read first: a ladder's model lists are
+  // drawn from them, and drawing again under a typing person would lose a field.
+  void ensureAgentInfo().then(() => {
+    drawBuilder();
+    openModal("workflow-modal");
+  });
 }
 
 function drawBuilder() {

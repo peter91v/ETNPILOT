@@ -2,6 +2,7 @@
 export * from "./receipt-views.js";
 export * from "./project-reads.js";
 import { checkRunReadiness, readAgents, readMergeRequests, readUsage, readWorktrees, worktreeManager } from "./project-reads.js";
+import { summarizeTaskCosts } from "./task-costs.js";
 import { countRuns, describeOutcome, parseDiff, readReceipt, readRuns, verifyProjectReceipt, withCurrentPricing } from "./receipt-views.js";
 
 import { createAgent, createWorkflow, lockReviewedContent, removeContent, updateAgent, updateWorkflow, readAgentDetails, readContentFile, readContentReview, readWorkflows } from "./project-content.js";
@@ -189,6 +190,8 @@ export async function openProjectState({ root = process.cwd(), env = process.env
     // What the provider cost. Read on demand and only when the telemetry file
     // has changed, because it is the whole file every time.
     usage: () => readUsage({ root: projectRoot, config: current }),
+    // What a finished task costs, read from the receipts (see task-costs.js).
+    taskCosts: () => summarizeTaskCosts(runsDirectory),
     // Which agents this project has, so a surface can offer them by name
     // instead of asking a person to remember how they spelled one.
     agents: () => readAgents({ root: projectRoot, config: current }),

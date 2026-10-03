@@ -23,6 +23,7 @@ export async function summarizeTaskCosts(runsDirectory, { limit = 500 } = /** @t
 async function readRun(path) {
   let status;
   let observedCost;
+  let currency;
   let mode = "execute";
   const attempts = [];
   let route;
@@ -37,6 +38,7 @@ async function readRun(path) {
       if (entry.terminal === true) {
         status = entry.status;
         observedCost = entry.observability?.summary?.estimatedCost;
+        currency = entry.observability?.summary?.currency;
       }
     }
   } catch {
@@ -48,6 +50,7 @@ async function readRun(path) {
   return {
     succeeded: status === "succeeded",
     // The run's own total when it was recorded; otherwise what the ladder's attempts add up to.
+    currency,
     cost: typeof observedCost === "number" ? observedCost : (attempts.length > 0 ? ladderCost : undefined),
     attempts: attempts.length,
     passedTier: passed?.tier,
@@ -78,6 +81,7 @@ function aggregate(runs) {
   const per = (entry) => ({ ...entry, perCompleted: entry.completed > 0 && entry.priced > 0 ? entry.cost / entry.completed : undefined });
   return {
     ...per(total),
+    currency: runs.find((run) => run.currency)?.currency ?? "USD",
     failed: total.runs - total.completed,
     byTier: Object.fromEntries(Object.entries(byTier).map(([key, value]) => [key, per(value)])),
     byDifficulty: Object.fromEntries(Object.entries(byDifficulty).map(([key, value]) => [key, per(value)])),
