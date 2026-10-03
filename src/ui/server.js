@@ -282,8 +282,9 @@ export async function createReviewServer({
       }
     }
     const workflow = typeof body.workflow === "string" && body.workflow.trim() !== "" ? body.workflow.trim() : undefined;
-    state.startRun({ input: task, agent, ...(workflow && !agent ? { workflow } : {}), ...(inPlace ? { worktree: false } : {}) });
-    return send(response, 202, { started: true, task, ...(agent ? { agent } : {}), ...(workflow && !agent ? { workflow } : {}), ...(inPlace ? { inPlace: true } : {}) });
+    const agentOverride = agent ? runOverride(body, state.config?.providers ?? {}) : undefined;
+    state.startRun({ input: task, agent, ...(agentOverride ? { agentOverride } : {}), ...(workflow && !agent ? { workflow } : {}), ...(inPlace ? { worktree: false } : {}) });
+    return send(response, 202, { started: true, task, ...(agent ? { agent } : {}), ...(agentOverride ? { agentOverride } : {}), ...(workflow && !agent ? { workflow } : {}), ...(inPlace ? { inPlace: true } : {}) });
   });
   // The checks this project can run on itself. Listing them is part of the
   // state; running one is a POST, because it reads the working tree.
@@ -686,4 +687,24 @@ function html(response, status, body, extra = {}) {
     "referrer-policy": "no-referrer",
   });
   response.end(body);
+}
+
+// The provider, model and effort a person chose for this one run, for the agent
+// they chose. Only names the project configures, a model id, and the three
+// efforts are accepted; an empty field means "the agent's own".
+function runOverride(body, providers) {
+  const override = {};
+  if (typeof body.provider === "string" && body.provider.trim() !== "") {
+    if (!Object.hasOwn(providers, body.provider.trim())) throw badRequest(`'${body.provider}' is not a provider of this project.`);
+    override.provider = body.provider.trim();
+  }
+  if (typeof body.model === "string" && body.model.trim() !== "") {
+    if (!/^[A-Za-z0-9._:/-]{1,100}$/.test(body.model.trim())) throw badRequest("That is not a model id.");
+    override.model = body.model.trim();
+  }
+  if (typeof body.effort === "string" && body.effort.trim() !== "") {
+    if (!["low", "medium", "high"].includes(body.effort.trim())) throw badRequest("Effort is low, medium or high.");
+    override.effort = body.effort.trim();
+  }
+  return Object.keys(override).length > 0 ? override : undefined;
 }

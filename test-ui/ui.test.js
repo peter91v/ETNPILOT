@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after, before } from "node:test";
@@ -155,6 +155,20 @@ test("an agent can be drafted with a model, read, and then written", async (t) =
     await ui.page.locator("#author-request").fill("an agent for docs");
     await ui.page.getByRole("button", { name: "Draft it" }).click();
     await ui.page.getByText("Write the docs.").first().waitFor();
+    // Not what was wanted: say what to change and the draft is made again.
+    await ui.page.locator("#author-change").fill("shorter");
+    await ui.page.getByRole("button", { name: "Change the draft" }).click();
+    await ui.page.getByRole("button", { name: "Write this" }).waitFor();
+    await ui.page.getByRole("button", { name: "Write this" }).click();
+    await ui.page.getByText("It is not reviewed yet").first().waitFor();
+    // Changed its mind: the last write can be taken back.
+    await ui.page.getByRole("button", { name: "Undo", exact: true }).click();
+    await ui.page.getByText("Took back new agent").first().waitFor();
+    await assert.rejects(readFile(join(setup.root, ".etnpilot", "agents", "doc-writer.yaml"), "utf8"), /ENOENT/);
+    // And written again, so the rest of this test still finds the agent.
+    await ui.page.locator("#author-request").fill("an agent for docs");
+    await ui.page.getByRole("button", { name: "Draft it" }).click();
+    await ui.page.getByText("Write the docs.").first().waitFor();
     await ui.page.getByRole("button", { name: "Write this" }).click();
     await ui.page.getByText("It is not reviewed yet").first().waitFor();
     // Improving picks from what exists, and a new prompt is a kind of its own.
@@ -248,6 +262,15 @@ test("the model shown follows the default provider, the agent and the provider c
 
     await ui.page.evaluate("startRunWith({})");
     await ui.page.getByText("the default agent answers with alpha · alpha-model").waitFor();
+    // The run's own choice: unavailable without an agent, then it changes what the agent answers with.
+    assert.equal(await ui.page.locator("#run-provider").isDisabled(), true);
+    await ui.page.locator("#run-agent").selectOption("worker");
+    assert.equal(await ui.page.locator("#run-provider").isDisabled(), false);
+    await ui.page.locator("#run-options summary").click();
+    await ui.page.locator("#run-provider").selectOption("beta");
+    await ui.page.getByText("answers with beta · beta-model").waitFor();
+    await ui.page.locator("#run-model").fill("typed-run-model");
+    await ui.page.getByText("answers with beta · typed-run-model").waitFor();
     assert.deepEqual(ui.problems.filter((problem) => !/Failed to load resource|ERR_/.test(problem)), []);
   } finally {
     await ui.close();
@@ -280,6 +303,35 @@ test("a combobox offers its list from the chevron, filters while typing, and kee
     assert.deepEqual(await options(), []);
     assert.equal(await ui.page.evaluate("window.comboValue"), "brand-new-model");
     assert.deepEqual(ui.problems, []);
+  } finally {
+    await ui.close();
+  }
+});
+
+test("an agent made in the page can name its provider and model, chosen from the provider's own list", async (t) => {
+  if (skipReason) return t.skip(skipReason);
+  const setup = await project();
+  await writeFile(join(setup.root, ".etnpilot", "etnpilot.yaml"), [
+    "version: 1", "defaultProvider: alpha", "providers:",
+    "  alpha: { type: openai-compatible, baseUrl: 'http://127.0.0.1:9/v1', model: alpha-model }",
+    "  beta: { type: openai-compatible, baseUrl: 'http://127.0.0.1:9/v1', model: beta-model }",
+    "content:", "  provenance:", "    mode: enforce", "codegraph:", "  enabled: false", "observability:", "  enabled: false", "",
+  ].join("\n"));
+  const ui = await open(setup);
+  try {
+    await ui.page.evaluate(() => show("agents"));
+    await ui.page.getByRole("button", { name: "New agent" }).click();
+    await ui.page.locator("#agent-name").fill("planner");
+    await ui.page.locator("#agent-prompt").fill("Plan the work.");
+    assert.equal(await ui.page.locator("#agent-model").getAttribute("placeholder"), "alpha · alpha-model");
+    await ui.page.locator("#agent-provider").selectOption("beta");
+    assert.equal(await ui.page.locator("#agent-model").getAttribute("placeholder"), "beta · beta-model");
+    await ui.page.locator("#agent-model").fill("beta-special");
+    await ui.page.locator("#agent-save").click();
+    await ui.page.getByText("Saved .etnpilot/agents/planner.yaml").first().waitFor();
+    const manifest = await readFile(join(setup.root, ".etnpilot", "agents", "planner.yaml"), "utf8");
+    assert.match(manifest, /provider: beta/);
+    assert.match(manifest, /model: beta-special/);
   } finally {
     await ui.close();
   }

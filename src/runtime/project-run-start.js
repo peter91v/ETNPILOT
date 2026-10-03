@@ -8,7 +8,7 @@ import { addUsage } from "./usage-total.js";
 // Starting a run from a surface, and keeping track of it while it works.
 // `scope` is what the state shares with it: project root, environment, the
 // inbox, the runs being tracked and the errors of those that failed.
-export function startProjectRun(scope, { input, agent, workflow, signal, dryRun, providerFactories, via, session, worktree } = /** @type {any} */ ({})) {
+export function startProjectRun(scope, { input, agent, agentOverride, workflow, signal, dryRun, providerFactories, via, session, worktree } = /** @type {any} */ ({})) {
   const { projectRoot, env, inbox, running, runErrors } = scope;
   if (!input || !String(input).trim()) throw new TypeError("A task is required to start a run.");
   const inboxConfig = scope.config.approval?.inbox ?? {};
@@ -30,6 +30,7 @@ export function startProjectRun(scope, { input, agent, workflow, signal, dryRun,
     env,
     input: task,
     agent,
+    ...(agentOverride ? { agentOverride } : {}),
     signal: controller.signal,
     // Where the run is, so a surface can say more than 'working'.
     onEvent: (event) => trackRunEvent(record, event),

@@ -203,7 +203,7 @@ const AGENT_PRESETS = {
 let agentDraft;
 
 function openAgentBuilder(preset, existing) {
-  agentDraft = { name: "", description: "", prompt: "", tools: [...(AGENT_PRESETS[preset ?? "reader"].tools)], skills: [], subagents: [], effort: "", errors: [], saving: false };
+  agentDraft = { name: "", description: "", prompt: "", tools: [...(AGENT_PRESETS[preset ?? "reader"].tools)], skills: [], subagents: [], effort: "", provider: "", model: "", errors: [], saving: false };
   if (existing) {
     // Editing: the form starts from what the agent is. One with no list of tools
     // has every tool, so the form starts with every tool it offers ticked,
@@ -219,12 +219,20 @@ function openAgentBuilder(preset, existing) {
       skills: [...existing.skills],
       subagents: [...existing.subagents],
       effort: existing.effort ?? "",
+      // Only what the manifest says itself; "inherited" is the project's default and is left empty.
+      provider: existing.inheritedProvider ? "" : (existing.provider ?? ""),
+      model: existing.model ?? "",
       cut: Boolean(existing.promptCut),
     };
   }
   $("agent-modal-title").textContent = existing ? "Edit " + existing.name : "New agent";
-  drawAgentBuilder();
-  openModal("agent-modal");
+  // The provider list and the default come from /api/agents. They are read
+  // before the form is drawn, not after: drawing again under someone who has
+  // started typing would throw their field away.
+  void ensureAgentInfo().then(() => {
+    drawAgentBuilder();
+    openModal("agent-modal");
+  });
 }
 
 function drawAgentBuilder() {
@@ -239,7 +247,7 @@ function drawAgentBuilder() {
     if (!on && at >= 0) list.splice(at, 1);
   };
   host.append(
-    ...(draft.editing ? [el("p", { class: "muted", text: "Changing an agent makes it unreviewed again: lock it under Content afterwards. What this form does not show (provider, model) stays as it is." })] : []),
+    ...(draft.editing ? [el("p", { class: "muted", text: "Changing an agent makes it unreviewed again: lock it under Content afterwards. Provider and model are chosen below; empty means the project's own." })] : []),
     ...(draft.editing ? [] : [field("agent-name", "Name", draft.name, (value) => { draft.name = value; }, "e.g. test-writer")]),
     field("agent-description", "What it is for (one line)", draft.description, (value) => { draft.description = value; }, ""),
   );
@@ -264,6 +272,14 @@ function drawAgentBuilder() {
     host.append(el("h5", { class: "card-h", text: "Agents it can hand work to" }));
     for (const other of others) host.append(checkField("agent-sub-" + other, other, draft.subagents.includes(other), (on) => toggle(draft.subagents, other, on)));
   }
+  // Provider and model: empty is the project's own. The list of models follows
+  // the provider (or the project's default).
+  host.append(selectField("agent-provider", "Provider", draft.provider, [["", "the project's default" + (agents?.defaultProvider ? " (" + agents.defaultProvider + ")" : "")], ...(agents?.providers ?? []).map((name) => [name, name])], (value) => { draft.provider = value; draft.model = ""; drawAgentBuilder(); }));
+  host.append(comboField("agent-model", "Model", draft.model, {
+    onInput: (value) => { draft.model = value.trim(); },
+    placeholder: describeChoice(effectiveChoice({ provider: draft.provider })) || "the provider's own",
+    load: () => modelIdsFor(effectiveChoice({ provider: draft.provider })?.provider),
+  }));
   host.append(selectField("agent-effort", "How hard it thinks", draft.effort, [["", "the provider's own"], ["low", "low"], ["medium", "medium"], ["high", "high"]], (value) => { draft.effort = value; }));
   if (draft.errors.length > 0) host.append(el("div", { class: "notice bad", attrs: { role: "alert" } }, draft.errors.map((message) => el("p", { text: message }))));
   $("agent-save").disabled = draft.saving;
