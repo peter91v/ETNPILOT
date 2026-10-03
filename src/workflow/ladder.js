@@ -66,6 +66,10 @@ export function cleanLadder(step, { id, known, errors, out }) {
     else if (known.size > 0 && !known.has(step.router.agent)) errors.push(`'${id}' router names the agent '${step.router.agent}', which does not exist.`);
     else out.router = { agent: step.router.agent };
   }
+  if (step.baseline !== undefined) {
+    if (typeof step.baseline !== "boolean") errors.push(`'${id}' baseline must be true or false.`);
+    else out.baseline = step.baseline;
+  }
   if (step.maxAttempts !== undefined) {
     if (!Number.isInteger(step.maxAttempts) || step.maxAttempts < 1 || step.maxAttempts > LADDER_LIMITS.tiers) errors.push(`'${id}' maxAttempts must be a number from 1 to ${LADDER_LIMITS.tiers}.`);
     else out.maxAttempts = step.maxAttempts;
@@ -112,15 +116,28 @@ export function startTier(triage, tierCount) {
   return 0;
 }
 
+// A failure no stronger model can fix: the tool is missing, the dependencies or
+// the browser are not there. Only trusted before any change was made; afterwards
+// the same words can be the agent's own mistake.
+const ENVIRONMENT_FAILURE = /was not found|could not be (run|executed)|could not start|command not found|ENOENT|Cannot find module|node_modules|No binary for|Cannot start Chrome\w*|Missing X server|no display|ECONNREFUSED/i;
+
+export function isEnvironmentFailure(outcome) {
+  return outcome.code === 126 || outcome.code === 127 || ENVIRONMENT_FAILURE.test(String(outcome.detail ?? ""));
+}
+
+// The same failure with its numbers (timings, counts, ports) blanked, so two
+// tiers failing alike compare equal.
+const signature = (name, detail) => `${name}\u0000${String(detail ?? "").replace(/\d+/g, "#").replace(/\s+/g, " ").trim()}`;
+
 const money = (value) => (typeof value === "number" ? value : 0);
 
 // deps: runAgent(tier, input) -> receipt, verifyCommand(verifier) -> {ok, detail},
 // runReviewer(name, input) -> receipt, runTriage(input) -> receipt, record(entry)
 /**
  * @param {any} step
- * @param {{ input: string, runAgent: (tier: any, input: string) => Promise<any>, verifyCommand: (verifier: any) => Promise<{ ok: boolean, detail?: string }>, runReviewer: (name: string, input: string) => Promise<any>, runTriage?: (input: string) => Promise<any>, record?: (entry: any) => Promise<any>, signal?: AbortSignal }} deps
+ * @param {{ input: string, runAgent: (tier: any, input: string) => Promise<any>, verifyCommand: (verifier: any) => Promise<{ ok: boolean, detail?: string }>, runReviewer: (name: string, input: string) => Promise<any>, runTriage?: (input: string) => Promise<any>, checkBaseline?: (verifiers: any[]) => Promise<{ ok: boolean, name?: string, detail?: string, code?: number }>, record?: (entry: any) => Promise<any>, signal?: AbortSignal }} deps
  */
-export async function runLadder(step, { input, runAgent, verifyCommand, runReviewer, runTriage, record = async () => {}, signal }) {
+export async function runLadder(step, { input, runAgent, verifyCommand, runReviewer, runTriage, checkBaseline, record = async () => {}, signal }) {
   const attempts = [];
   let route;
   let first = 0;
@@ -132,8 +149,24 @@ export async function runLadder(step, { input, runAgent, verifyCommand, runRevie
     route = { ...triage, startTier: first, verify: verifiers === step.verify ? "full" : "light" };
     await record({ type: "ladder-route", step: step.id, ...route });
   }
+  // The checks on the untouched workspace, once. A tool or a browser that is
+  // not there fails every tier alike; that is found here, for the price of one
+  // check, and not after three models have tried. A check that fails on honest
+  // grounds (the task is to make it pass) is only noted and the work goes on.
+  let baseline;
+  if (checkBaseline && step.baseline !== false && verifiers.some((verifier) => verifier.command)) {
+    const result = await checkBaseline(verifiers.filter((verifier) => verifier.command));
+    baseline = { ok: result.ok, ...(result.ok ? {} : { name: result.name, environment: isEnvironmentFailure(result) }) };
+    await record({ type: "ladder-baseline", step: step.id, ...baseline, ...(result.ok ? {} : { detail: String(result.detail ?? "").slice(-LADDER_LIMITS.feedbackChars) }) });
+    if (!result.ok && baseline.environment) {
+      const error = new Error(`'${step.id}': the check '${result.name}' cannot run here, before any change was made, so no tier was tried.\n${result.detail ?? ""}`);
+      Object.assign(error, { code: "ladder_environment", ladder: summarize(step, [], route, false) });
+      throw error;
+    }
+  }
   const limit = Math.min(step.maxAttempts ?? step.tiers.length, step.tiers.length - first);
-  let feedback = "";
+  let feedback = baseline && !baseline.ok ? "\n\n(Note: the check '" + baseline.name + "' already failed before any change was made.)" : "";
+  let previous;
   for (let attempt = 0; attempt < limit; attempt += 1) {
     signal?.throwIfAborted();
     const tierIndex = first + attempt;
@@ -169,7 +202,7 @@ export async function runLadder(step, { input, runAgent, verifyCommand, runRevie
         outcome = { ok: verdict === "approve", detail: String(review.result?.text ?? "").slice(-LADDER_LIMITS.feedbackChars) };
         entry.verify.push({ kind: "reviewer", name: verifier.reviewer, ok: outcome.ok, verdict });
       }
-      if (!outcome.ok) { failure = { name: entry.verify.at(-1).name, detail: outcome.detail }; break; }
+      if (!outcome.ok) { failure = { name: entry.verify.at(-1).name, detail: outcome.detail, code: outcome.code, command: Boolean(verifier.command) }; break; }
     }
     if (!failure) {
       entry.status = "passed";
@@ -179,6 +212,16 @@ export async function runLadder(step, { input, runAgent, verifyCommand, runRevie
     }
     attempts.push(entry);
     await record({ type: "ladder-attempt", step: step.id, ...entry });
+    // The same command failing the same way on two tiers in a row: the stronger
+    // model changed nothing about it, and a third would not either.
+    const now = signature(failure.name, failure.detail);
+    const stuck = failure.command && now === previous;
+    previous = now;
+    if (stuck && attempt < limit - 1) {
+      const error = new Error(`'${step.id}' stopped after ${attempts.length} tier(s): '${failure.name}' fails in exactly the same way on two tiers in a row, so a stronger model is not changing it. If this is the environment (a missing browser or tool), fix that first.\n${String(failure.detail ?? "").slice(-LADDER_LIMITS.feedbackChars)}`);
+      Object.assign(error, { code: "ladder_stuck", ladder: summarize(step, attempts, route, false) });
+      throw error;
+    }
     feedback = feedbackFrom(`Verification '${failure.name}' failed after the previous attempt.\n${failure.detail ?? ""}`);
   }
   const error = new Error(`'${step.id}' did not pass verification on any of ${attempts.length} tier(s).`);

@@ -55,7 +55,7 @@ const OUTPUT_TAIL_BYTES = 2000;
 
 function describeFailure(executable, code, result, passed) {
   const headline = `Check failed with exit code ${code}: ${executable}`;
-  const output = tail(result.stderr) || tail(result.stdout);
+  const output = outputTail(result.stdout, result.stderr);
   const hint = exitCodeHint(code, executable, passed);
   return [headline, hint, output].filter(Boolean).join("\n");
 }
@@ -84,6 +84,16 @@ function exitCodeHint(code, executable, passed = []) {
       + ` execute bit, or a variable its wrapper needs. ${envAdvice}`;
   }
   return undefined;
+}
+
+// The end of what a command printed. Tools split their output between the two
+// streams (Angular builds on one and reports the failing browser on the other),
+// so the end of one stream alone can show only the start of the story.
+export function outputTail(stdout, stderr) {
+  const out = tail(stdout);
+  const err = tail(stderr);
+  if (out && err) return `${out}\n--- stderr ---\n${err}`;
+  return err || out;
 }
 
 export function tail(text) {

@@ -58,3 +58,9 @@ etnpilot usage --tasks
 Cost per **finished task**, from the receipts: all spend (including attempts that failed on the way) divided by the runs
 that succeeded, in total, by the rung that passed, and by the router's difficulty. Compare a ladder with a plain agent
 step on the same kind of work before trusting any rule of thumb, including the ones in videos.
+
+## Checks before and between tiers
+
+- **Baseline.** Before the first tier, the command checks run once on the untouched workspace. If one cannot run there (a missing tool, missing dependencies, no browser), the step stops with `ladder_environment` and no tier is tried. A check that fails for an honest reason (the task is to make it pass) is only noted in the feedback. Switch it off with `baseline: false`.
+- **Same failure twice.** If the same command fails in the same way (numbers aside) on two tiers in a row, the step stops with `ladder_stuck`; a stronger model is not changing it.
+- A failed command shows the end of its output from both streams, so the reason is visible and not only the build progress.
