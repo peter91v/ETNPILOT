@@ -72,7 +72,36 @@ async function copyRunCommands() {
   }
 }
 
+// The run dialog's own choice of provider, model and effort, built once. It
+// applies to the agent chosen above it; without an agent the project's
+// workflow runs as written, and these stay unavailable.
+function buildRunOptions() {
+  const body = $("run-options-body");
+  if (body.childElementCount > 0) return;
+  const provider = el("select", { class: "inline", attrs: { id: "run-provider", "aria-label": "Provider" } });
+  const model = combobox({
+    id: "run-model", label: "Model", inline: true, placeholder: "model (the agent's own)",
+    load: () => modelIdsFor(effectiveChoice({ agent: $("run-agent").value, provider: $("run-provider").value })?.provider),
+    onInput: () => describeRunChoice(),
+  });
+  const effort = el("select", { class: "inline", attrs: { id: "run-effort", "aria-label": "Thinking effort" } }, [
+    el("option", { text: "effort: the agent's own", attrs: { value: "" } }),
+    ...["low", "medium", "high"].map((level) => el("option", { text: "effort: " + level, attrs: { value: level } })),
+  ]);
+  provider.addEventListener("change", () => { model.setOptions([]); model.querySelector("input").value = ""; describeRunChoice(); });
+  body.append(provider, model, effort);
+}
+
+function fillRunProviders() {
+  const select = $("run-provider");
+  const keep = select.value;
+  select.replaceChildren(el("option", { text: "provider: the agent's own", attrs: { value: "" } }));
+  for (const name of agents?.providers ?? []) select.append(el("option", { text: "provider: " + name, attrs: { value: name } }));
+  select.value = keep;
+}
+
 async function prepareRunModal() {
+  buildRunOptions();
   api("/api/runs/readiness").then(showRunReadiness, () => showRunReadiness({ ready: true }));
   const select = $("run-agent");
   select.replaceChildren(el("option", { text: "the project's own workflow", attrs: { value: "" } }));
@@ -95,6 +124,7 @@ async function prepareRunModal() {
   flows.replaceChildren(el("option", { text: "the project's own workflow", attrs: { value: "" } }));
   for (const workflow of named) flows.append(el("option", { text: workflow.name, attrs: { value: workflow.name } }));
   $("run-workflow-field").hidden = named.length === 0;
+  fillRunProviders();
   describeRunChoice();
 }
 
@@ -104,7 +134,12 @@ function describeRunChoice() {
   const agent = (agents?.agents ?? []).find((candidate) => candidate.name === chosen);
   const steps = agents?.steps ?? [];
   const hint = $("run-hint");
-  const answers = describeChoice(effectiveChoice({ agent: chosen }));
+  // What was chosen here counts: the provider, the model typed.
+  const answers = describeChoice(effectiveChoice({ agent: chosen, provider: $("run-provider")?.value, model: $("run-model")?.value.trim() }));
+  const options = $("run-options");
+  for (const control of ["run-provider", "run-model", "run-effort"]) if ($(control)) $(control).disabled = chosen === "";
+  $("run-options-note").textContent = chosen === "" ? "Choose an agent above to change its provider, model or effort for this run. The project's own workflow runs as written." : "Applies to this run only; the agent's file is not changed.";
+  options.classList.toggle("muted", chosen === "");
   if (!chosen) {
     hint.textContent = (steps.length > 0
       ? "The project's own workflow runs: " + steps.join(" → ")
@@ -124,6 +159,13 @@ function describeRunChoice() {
     + (agent?.description ? " · " + agent.description : "") + ".";
 }
 
+// Only with an agent chosen, and only what was filled in.
+function runOverrideFields() {
+  if ($("run-agent").value === "") return {};
+  const fields = { provider: $("run-provider").value, model: $("run-model").value.trim(), effort: $("run-effort").value };
+  return Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== ""));
+}
+
 async function startRun(event) {
   event.preventDefault();
   const task = $("run-task").value.trim();
@@ -136,7 +178,7 @@ async function startRun(event) {
   try {
     const started = await api("/api/runs/start", {
       method: "POST",
-      body: JSON.stringify({ task, agent: $("run-agent").value, ...($("run-agent").value === "" && $("run-workflow").value !== "" ? { workflow: $("run-workflow").value } : {}), ...($("run-inplace-box").checked ? { worktree: false } : {}) }),
+      body: JSON.stringify({ task, agent: $("run-agent").value, ...runOverrideFields(), ...($("run-agent").value === "" && $("run-workflow").value !== "" ? { workflow: $("run-workflow").value } : {}), ...($("run-inplace-box").checked ? { worktree: false } : {}) }),
     });
     $("run-task").value = "";
     clearError();

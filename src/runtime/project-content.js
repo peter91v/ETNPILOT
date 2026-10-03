@@ -255,6 +255,7 @@ export async function createAgent({ root, config, input }) {
   const missingAgents = subagents.filter((agent) => !agentNames.includes(agent));
   if (missingAgents.length > 0) errors.push(`Agents that do not exist: ${missingAgents.join(", ")}.`);
   if (input?.effort !== undefined && input.effort !== "" && !EFFORTS.includes(input.effort)) errors.push("Effort is low, medium or high.");
+  const { provider, model } = checkProviderInput(input, config, errors);
   if (name && (agentNames.includes(name) || await readFile(join(etn, "prompts", `${name}.md`), "utf8").then(() => true, () => false))) {
     throw Object.assign(new Error(`An agent or prompt called '${name}' already exists.`), { statusCode: 409 });
   }
@@ -271,6 +272,8 @@ export async function createAgent({ root, config, input }) {
     requires: ["chat"],
     subagents,
     ...(EFFORTS.includes(input?.effort) ? { effort: input.effort } : {}),
+    ...(provider ? { provider } : {}),
+    ...(model ? { model } : {}),
   }).trimEnd() + "\n" + YAML.stringify({ tools }, { flowCollectionPadding: false }).trimEnd();
   await mkdir(join(etn, "prompts"), { recursive: true });
   await mkdir(join(etn, "agents"), { recursive: true });
@@ -297,7 +300,7 @@ export async function updateAgent({ root, config, name, input }) {
   const path = join(etn, "agents", `${name}.yaml`);
   const text = await readFile(path, "utf8").catch(() => undefined);
   if (text === undefined) throw Object.assign(new Error(`There is no agent called '${name}'.`), { statusCode: 404 });
-  const asked = await checkAgentInput({ etn, name, input });
+  const asked = await checkAgentInput({ etn, name, input, config });
 
   const document = YAML.parseDocument(text);
   const current = document.toJS() ?? {};
@@ -311,10 +314,22 @@ export async function updateAgent({ root, config, name, input }) {
   return { name, path: `.etnpilot/agents/${name}.yaml`, unreviewed: true };
 }
 
+// The provider and model an agent was given in the form: a provider the project
+// configures and a model id, or empty for "the project's default". A model name
+// belongs to one vendor, so a model without a provider is refused when the agent
+// has none of its own to pair it with.
+function checkProviderInput(input, config, errors) {
+  const provider = typeof input?.provider === "string" ? input.provider.trim() : undefined;
+  const model = typeof input?.model === "string" ? input.model.trim() : undefined;
+  if (provider && !Object.hasOwn(config?.providers ?? {}, provider)) errors.push(`'${provider}' is not a provider of this project.`);
+  if (model && !/^[A-Za-z0-9._:/-]{1,100}$/.test(model)) errors.push("That is not a model id.");
+  return { provider, model };
+}
+
 // What the form asked for, refused with the first reason when any of it is
 // wrong. Returns the values worth keeping: the prompt, the tools, the skills
 // and the agents it may hand work to.
-async function checkAgentInput({ etn, name, input }) {
+async function checkAgentInput({ etn, name, input, config }) {
   const known = WORKSPACE_TOOL_DEFINITIONS.map((definition) => definition.name);
   const errors = [];
   const prompt = typeof input?.prompt === "string" ? input.prompt.replace(/\r\n/g, "\n").trim() : undefined;
@@ -337,8 +352,9 @@ async function checkAgentInput({ etn, name, input }) {
     if (loop) errors.push(`'${loop}' already hands work on to '${name}': that would go round in a circle.`);
   }
   if (input?.effort !== undefined && input.effort !== "" && !EFFORTS.includes(input.effort)) errors.push("Effort is low, medium or high.");
+  const { provider, model } = checkProviderInput(input, config, errors);
   if (errors.length > 0) throw Object.assign(new Error(errors[0]), { statusCode: 400, details: { errors } });
-  return { prompt, tools, skills, subagents };
+  return { prompt, tools, skills, subagents, provider, model };
 }
 
 // Work handed round in a circle would never end: the agent that closes one, if
@@ -354,7 +370,7 @@ async function handingInCircle({ etn, name, subagents, agentNames }) {
   return subagents.find((next) => (graph.get(next) ?? []).some((after) => reaches(after, name)));
 }
 
-function applyAgentInput(document, current, input, { tools: asked, skills, subagents }) {
+function applyAgentInput(document, current, input, { tools: asked, skills, subagents, provider, model }) {
   const finalSkills = skills ?? current.skills ?? [];
   const finalSubagents = subagents ?? current.subagents ?? [];
   if (typeof input?.description === "string") {
@@ -365,6 +381,9 @@ function applyAgentInput(document, current, input, { tools: asked, skills, subag
   if (input?.effort !== undefined) {
     if (EFFORTS.includes(input.effort)) document.set("effort", input.effort); else document.delete("effort");
   }
+  // Empty means "the project's own", so the line goes.
+  if (provider !== undefined) { if (provider) document.set("provider", provider); else document.delete("provider"); }
+  if (model !== undefined) { if (model) document.set("model", model); else document.delete("model"); }
   // Handing work on needs the tool to do it, whichever way the list arrived; an
   // agent with no list of tools already has every one.
   const base = asked ?? (Array.isArray(current.tools) ? current.tools.map(String) : undefined);

@@ -8,6 +8,16 @@ pre-1.0, so breaking changes may appear in any release.
 
 ### Checks and hygiene (follow-up to the review)
 
+- **Provider, model and effort where a run or an agent is made.** The "Start a run" dialog has "Provider, model and effort for
+  this run" (for the chosen agent, this run only; the agent's file is not changed; unavailable without an agent, because the
+  project's own workflow runs as written); the server accepts only a provider the project configures, a model id and
+  low/medium/high. The agent builder has a provider (empty: the project's default) and a model combobox whose list follows
+  the provider, and writes them to the manifest (empty removes the line).
+- **"Draft with AI" can be changed and taken back.** Under the draft: "Change something about the draft" asks again with
+  the draft in front of the model (in the terminal: "Change something?" before "Write this?"); an improvement can show the
+  whole new text; and **Undo** (`etnpilot author undo`) puts back what the last write replaced, or removes what it made
+  (an agent is two files; a skill's folder goes with its file), only while nobody changed those files since, and then
+  all of it or nothing. The record is kept in `.etnpilot/state/author-undo.json` (not committed).
 - **Models are chosen in a combobox, and an agent can be improved.** The model field in the chat and the model of a ladder
   tier are comboboxes: the chevron opens the provider's list (fetched once per provider), typing filters it, and any
   value the list does not have is kept. "Draft with AI → Improve an existing one" now offers **agent**: it improves

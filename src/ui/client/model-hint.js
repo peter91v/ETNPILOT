@@ -21,3 +21,14 @@ function describeChoice(choice) {
   if (!choice) return "";
   return choice.provider + (choice.model ? " · " + choice.model : "");
 }
+
+// The providers and agents the hints are drawn from, read once if no other view
+// has read them yet (the chat and the run dialog read them as they open).
+async function ensureAgentInfo() {
+  if (agents?.providerInfo) return;
+  try {
+    agents = await api("/api/agents");
+  } catch {
+    // The hints just stay general.
+  }
+}

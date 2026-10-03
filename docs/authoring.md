@@ -19,6 +19,11 @@ etnpilot author improve prompt orchestrator "shorter, and always list the files 
 - What is written is unreviewed: read it, run `etnpilot content lock`, commit `.etnpilot/`, and your team gets the same
   agents through the merge request.
 
+**Not what you wanted?** Say what should be different and the draft is made again with the first one in front of the model
+(terminal: the "Change something?" question; page: "Change the draft"). **Changed your mind after writing?**
+`etnpilot author undo` (page: Undo) puts back what the last write replaced and removes what it created, as long as nobody
+has changed those files since; otherwise nothing is undone.
+
 On the review page the same thing is under **Agents → Draft with AI**: you see the draft (or the diff) first and press
 "Write this". The page can only accept a draft the server kept, by its id.
 

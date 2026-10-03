@@ -1,7 +1,8 @@
 // @ts-check
 import { join, resolve } from "node:path";
 import { loadConfig } from "../config/load.js";
-import { AUTHOR_KINDS, IMPROVE_KINDS, applyDraft, draftImprovement, draftNew, listItems, renderDiff } from "../forge/author.js";
+import { AUTHOR_KINDS, IMPROVE_KINDS, applyDraft, draftImprovement, draftNew, listItems, refineDraft, renderDiff } from "../forge/author.js";
+import { describeLastWrite, undoLastWrite } from "../forge/author-undo.js";
 import { terminalPrompter } from "./wizard.js";
 
 // 'etnpilot author': drafting an agent, skill, instruction or an improved
@@ -10,7 +11,8 @@ import { terminalPrompter } from "./wizard.js";
 
 export const AUTHOR_USAGE = `  etnpilot author                                  asks what you need (agent, skill, instruction, or improving one) and drafts it with a model
   etnpilot author <agent|skill|instruction|prompt> "<what you need>" [--yes] [--dry-run]
-  etnpilot author improve <prompt|skill|instruction> <name> "<what to change>" [--yes] [--dry-run]
+  etnpilot author undo                             takes back the last thing 'author' wrote (if nobody changed it since)
+  etnpilot author improve <agent|prompt|skill|instruction> <name> "<what to change>" [--yes] [--dry-run]
                                                   uses forge.provider and forge.model; nothing is written until you accept`;
 
 export async function runAuthorCommand(subcommand, rest, values, { prompter, stdin = process.stdin, stdout = process.stdout, env = process.env, fetchImpl, runModel, factories } = /** @type {any} */ ({})) {
@@ -18,6 +20,13 @@ export async function runAuthorCommand(subcommand, rest, values, { prompter, std
   const root = resolve(values.root ?? ".");
   const interactive = Boolean(stdin.isTTY) || Boolean(prompter);
   const ask = prompter ?? (interactive ? terminalPrompter({ stdin, stdout }) : undefined);
+  if (subcommand === "undo") {
+    const last = await describeLastWrite(root);
+    if (!last) { say("There is nothing to undo."); return 0; }
+    const result = await undoLastWrite(root);
+    say(`Took back ${result.label}: ${[...result.restored, ...result.removed].join(", ")}.`);
+    return 0;
+  }
   const config = await loadConfig(join(root, ".etnpilot", "etnpilot.yaml"));
   const options = { root, config, env, fetchImpl, runModel, factories };
 
@@ -30,11 +39,11 @@ export async function runAuthorCommand(subcommand, rest, values, { prompter, std
     const [target, name, ...request] = words;
     if (!IMPROVE_KINDS.includes(target) || !name) throw new Error(`Use: etnpilot author improve <${IMPROVE_KINDS.join("|")}> <name> "<what to change>".`);
     const wish = request.join(" ") || (ask ? await ask.ask("What should change") : "");
-    return await finish(await draftImprovement(target, name, wish, options), ask, say, values, root);
+    return await finish(await draftImprovement(target, name, wish, options), ask, say, values, root, options);
   }
   if (!AUTHOR_KINDS.includes(kind)) throw new Error(`Unknown kind '${kind}'. Use agent, skill, instruction, or 'improve'.`);
   const wish = words.join(" ") || (ask ? await ask.ask(`What should the ${kind} do`) : "");
-  return await finish(await draftNew(kind, wish, options), ask, say, values, root);
+  return await finish(await draftNew(kind, wish, options), ask, say, values, root, options);
 }
 
 async function menu(ask, say, options, values) {
@@ -46,7 +55,7 @@ async function menu(ask, say, options, values) {
   if (index < AUTHOR_KINDS.length) {
     const kind = AUTHOR_KINDS[index];
     const wish = await ask.ask(`Describe the ${kind} in a sentence`);
-    return await finish(await draftNew(kind, wish, options), ask, say, values, options.root);
+    return await finish(await draftNew(kind, wish, options), ask, say, values, options.root, options);
   }
   const kind = IMPROVE_KINDS[index - AUTHOR_KINDS.length];
   const names = await listItems(kind, join(options.root, ".etnpilot"));
@@ -56,10 +65,10 @@ async function menu(ask, say, options, values) {
   while (chosen < 0 || chosen >= names.length) chosen = Number.parseInt(await ask.ask(`Which ${kind}`, "1"), 10) - 1;
   const name = names[chosen];
   const wish = await ask.ask("What should change");
-  return await finish(await draftImprovement(kind, name, wish, options), ask, say, values, options.root);
+  return await finish(await draftImprovement(kind, name, wish, options), ask, say, values, options.root, options);
 }
 
-async function finish(draft, ask, say, values, root) {
+function show(draft, say) {
   if (draft.provider?.name) say(`Drafted with ${draft.provider.name}${draft.provider.model ? ` (${draft.provider.model})` : ""}.`);
   if (draft.provider?.preferred) say(`forge.provider is '${draft.provider.preferred}', which has no key here.`);
   say();
@@ -74,6 +83,18 @@ async function finish(draft, ask, say, values, root) {
     for (const line of renderDiff(draft.diff)) say(line);
   }
   say();
+}
+
+async function finish(first, ask, say, values, root, options) {
+  let draft = first;
+  show(draft, say);
+  // Not what was wanted: say what to change and the draft is made again from it.
+  while (ask && !values["dry-run"] && values.yes !== true) {
+    const change = await ask.ask("Change something? (say what, or Enter to go on)");
+    if (change === "") break;
+    draft = await refineDraft(draft, change, options);
+    show(draft, say);
+  }
   if (values["dry-run"]) { say("Dry run: nothing was written."); return 0; }
   const accepted = values.yes === true || (ask ? await ask.confirm("Write this?", false) : false);
   if (!accepted) {
@@ -84,6 +105,6 @@ async function finish(draft, ask, say, values, root) {
   const written = result.written ?? [...result.agents, ...result.skills, ...result.instructions, ...(result.prompts ?? [])].map((entry) => entry.to);
   for (const skipped of result.skipped ?? []) say(`Skipped ${skipped.name}: ${skipped.reason}.`);
   for (const path of written) say(`Wrote ${path}`);
-  if (written.length > 0) say("It is not reviewed yet: read it, then 'etnpilot content lock' and commit it for your team.");
+  if (written.length > 0) say("It is not reviewed yet: read it, then 'etnpilot content lock' and commit it for your team. Changed your mind: 'etnpilot author undo'.");
   return 0;
 }

@@ -104,6 +104,13 @@ test("the page drafts with a model, shows it, and writes only the draft it kept"
     assert.deepEqual(applied.written, [".etnpilot/agents/doc-writer.yaml"]);
     assert.match(await readFile(join(root, ".etnpilot", "prompts", "doc-writer.md"), "utf8"), /Write the docs/);
     assert.equal((await call("/api/author/apply", { id: drafted.id })).status, 404, "a draft is accepted once");
+    const info = await (await fetch(`http://127.0.0.1:${address.port}/api/author`, { headers: { "x-etnpilot-token": review.token } })).json();
+    assert.equal(info.last.label, "new agent");
+    const undone = await (await call("/api/author/undo", {})).json();
+    assert.equal(undone.removed.length, 2);
+    await assert.rejects(readFile(join(root, ".etnpilot", "agents", "doc-writer.yaml"), "utf8"), /ENOENT/);
+    assert.equal((await call("/api/author/undo", {})).status, 400, "nothing left to undo");
+    assert.equal((await call("/api/author/refine", { id: "made-up", request: "x" })).status, 404);
   } finally {
     await review.close();
   }

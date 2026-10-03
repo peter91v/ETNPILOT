@@ -5,6 +5,7 @@ import YAML from "yaml";
 import { join, relative } from "node:path";
 import { askProvider, chooseProvider, describePlan, parseJson, validatePlan, writePlan } from "./forge.js";
 import { surveyRepository } from "./survey.js";
+import { listContentFiles, recordWrites } from "./author-undo.js";
 
 // Drafting one thing at a time with a model's help: a new agent (with its
 // prompt), skill or instruction from a sentence, or a better version of a
@@ -72,11 +73,11 @@ async function ask({ root, config, env, provider, runModel, fetchImpl, factories
 // A new agent, skill or instruction. Returns { mode: "new", plan, preview, provider, usage }.
 export async function draftNew(kind, request, options = /** @type {any} */ ({})) {
   if (!AUTHOR_KINDS.includes(kind)) throw new TypeError(`Cannot write a '${kind}'. Choose one of: ${AUTHOR_KINDS.join(", ")}.`);
-  const wish = limit(request, 2000);
+  const wish = limit(request, 4500);
   if (wish === "") throw new TypeError("Say what is needed, in a sentence.");
   const { root } = options;
   const survey = await surveyRepository(root);
-  const input = `${survey.text}\n\n### What the person asks for\n${wish}`;
+  const input = `${survey.text}\n\n### What the person asks for\n${wish}${options.context ? `\n\n### The draft made so far (change it as asked; keep what is fine)\n${options.context}` : ""}`;
   const answer = await ask({ ...options, system: newPrompt(kind), input });
   let parsed;
   try {
@@ -84,14 +85,14 @@ export async function draftNew(kind, request, options = /** @type {any} */ ({}))
   } catch (error) {
     throw Object.assign(new Error(`The answer could not be used (${error.message}). Nothing was written.`), { code: "bad_answer" });
   }
-  if (kind === "prompt") return promptDraft(parsed, answer);
+  if (kind === "prompt") return { ...promptDraft(parsed, answer), request: wish };
   const plan = validatePlan(parsed, { root });
   // One thing of the asked kind was wanted; anything else that came back is not.
   const lists = { agent: plan.agents, skill: plan.skills, instruction: plan.instructions };
   for (const [name, entries] of Object.entries(lists)) entries.splice(name === kind ? 1 : 0);
   const list = lists[kind];
   if (plan.covered || list.length === 0) throw Object.assign(new Error("The model proposed nothing usable."), { code: "empty" });
-  return { mode: "new", kind, plan, preview: describePlan(plan), provider: answer.provider, usage: answer.usage, notes: plan.notes };
+  return { mode: "new", kind, request: wish, plan, preview: describePlan(plan), provider: answer.provider, usage: answer.usage, notes: plan.notes };
 }
 
 // A prompt on its own (an agent points to it with 'promptRef'); it is written
@@ -145,7 +146,7 @@ function splitSkill(text) {
 // Returns { mode: "improve", path, before, after, summary, diff, ... }.
 export async function draftImprovement(kind, name, request, options = /** @type {any} */ ({})) {
   if (!IMPROVE_KINDS.includes(kind)) throw new TypeError(`Cannot improve a '${kind}'. Choose one of: ${IMPROVE_KINDS.join(", ")}.`);
-  const wish = limit(request, 2000);
+  const wish = limit(request, 4500);
   if (wish === "") throw new TypeError("Say what should change, in a sentence.");
   const { root } = options;
   const configDir = options.configDir ?? join(root, ".etnpilot");
@@ -153,7 +154,7 @@ export async function draftImprovement(kind, name, request, options = /** @type 
   const { path, text } = await currentText(kind, name, configDir);
   const split = kind === "skill" ? splitSkill(text) : { head: "", body: text };
   const survey = await surveyRepository(root);
-  const input = `${survey.text}\n\n### The existing ${kind} '${name}'\n${split.body}\n\n### What the person asks for\n${wish}`;
+  const input = `${survey.text}\n\n### The existing ${kind} '${name}'\n${split.body}\n\n### What the person asks for\n${wish}${options.context ? `\n\n### The version proposed so far (change it as asked; keep what is fine)\n${options.context}` : ""}`;
   const answer = await ask({ ...options, system: improvePrompt(kind), input });
   let parsed;
   try {
@@ -166,7 +167,7 @@ export async function draftImprovement(kind, name, request, options = /** @type 
   const summary = limit(parsed?.summary, 400);
   const full = `${split.head}${after}\n`;
   return {
-    mode: "improve", kind, name, path: relative(root, path), before: text, after: full, summary,
+    mode: "improve", kind, name, request: wish, path: relative(root, path), before: text, after: full, summary,
     edits: [{ path: relative(root, path), before: text, after: full }],
     diff: lineDiff(text, full), provider: answer.provider, usage: answer.usage,
   };
@@ -200,7 +201,7 @@ async function draftAgentImprovement(name, wish, options, configDir) {
     throw Object.assign(new Error(`The agent '${name}' has no prompt to improve.`), { code: "missing" });
   }
   const survey = await surveyRepository(root);
-  const input = `${survey.text}\n\n### The existing agent '${name}'\ndescription: ${manifest.description ?? "(none)"}\ntools: ${(manifest.tools ?? []).join(", ") || "(the default set)"}\n\nprompt:\n${promptText}\n\n### What the person asks for\n${wish}`;
+  const input = `${survey.text}\n\n### The existing agent '${name}'\ndescription: ${manifest.description ?? "(none)"}\ntools: ${(manifest.tools ?? []).join(", ") || "(the default set)"}\n\nprompt:\n${promptText}\n\n### What the person asks for\n${wish}${options.context ? `\n\n### The version proposed so far (change it as asked; keep what is fine)\n${options.context}` : ""}`;
   const answer = await ask({ ...options, system: improvePrompt("agent"), input });
   let parsed;
   try {
@@ -226,9 +227,33 @@ async function draftAgentImprovement(name, wish, options, configDir) {
   if (edits.length === 0) throw Object.assign(new Error("The model changed nothing."), { code: "empty" });
   const diff = edits.flatMap((edit) => [{ op: " ", text: `── ${edit.path}` }, ...lineDiff(edit.before, edit.after)]);
   return {
-    mode: "improve", kind: "agent", name, path: edits.map((edit) => edit.path).join(", "), before: edits[0].before, after: edits[0].after,
+    mode: "improve", kind: "agent", name, request: wish, path: edits.map((edit) => edit.path).join(", "), before: edits[0].before, after: edits[0].after,
     summary: limit(parsed?.summary, 400), edits, diff, provider: answer.provider, usage: answer.usage,
   };
+}
+
+// What a draft says, as text the model can be shown again when the person asks
+// for a change to it.
+export function draftText(draft) {
+  if (draft.mode === "new") {
+    const item = draft.plan.agents[0] ?? draft.plan.skills[0] ?? draft.plan.instructions[0] ?? draft.plan.prompts?.[0];
+    const head = draft.plan.agents[0] ? `agent ${item.name} (tools: ${item.tools.join(", ")}) — ${item.description}\n` : "";
+    return `${head}${item.prompt ?? item.body}`.slice(0, 8000);
+  }
+  return draft.edits.map((edit) => `--- ${edit.path}\n${edit.after}`).join("\n").slice(0, 8000);
+}
+
+// The same request, asked again with the draft and what the person wants
+// different about it. The original files are still the base, so a refined
+// improvement is a diff against what is on disk, not against the first draft.
+export async function refineDraft(draft, change, options = /** @type {any} */ ({})) {
+  const wish = limit(change, 2000);
+  if (wish === "") throw new TypeError("Say what should be different, in a sentence.");
+  const request = `${draft.request}\n\nChange the draft as follows: ${wish}`;
+  const withContext = { ...options, context: draftText(draft) };
+  return draft.mode === "new"
+    ? draftNew(draft.kind, request, withContext)
+    : draftImprovement(draft.kind, draft.name, request, withContext);
 }
 
 // Lines removed (-) and added (+), with a little context: enough to read what
@@ -278,8 +303,10 @@ export function renderDiff(diff, context = 2) {
 // (the same rule AgentsForge keeps); an improvement replaces exactly the file it
 // was drafted from, and only if that file has not changed since.
 export async function applyDraft(draft, { root, configDir = join(root, ".etnpilot") }) {
+  const label = draft.mode === "new" ? `new ${draft.kind}` : `${draft.kind} ${draft.name}`;
   if (draft.mode === "new") {
     const report = /** @type {any} */ ({ agents: [], skills: [], instructions: [], prompts: [], skipped: [], notes: [] });
+    const known = await listContentFiles(root);
     await writePlan(draft.plan, { root, configDir, report, provider: draft.provider });
     for (const prompt of draft.plan.prompts ?? []) {
       const path = join(configDir, "prompts", `${prompt.name}.md`);
@@ -291,6 +318,11 @@ export async function applyDraft(draft, { root, configDir = join(root, ".etnpilo
       if (made) report.prompts.push({ name: prompt.name, to: relative(root, path) });
       else report.skipped.push({ name: `prompt ${prompt.name}`, reason: "already exists" });
     }
+    // Whatever is new on disk now is what this wrote (an agent is two files).
+    const created = [...await listContentFiles(root)].filter((path) => !known.has(path)).sort();
+    const writes = [];
+    for (const path of created) writes.push({ path, before: null, after: await readFile(join(root, path), "utf8") });
+    report.undoId = await recordWrites(root, { label, writes });
     return report;
   }
   const edits = draft.edits ?? [{ path: draft.path, before: draft.before, after: draft.after }];
@@ -302,5 +334,6 @@ export async function applyDraft(draft, { root, configDir = join(root, ".etnpilo
     }
   }
   for (const edit of edits) await writeFile(join(root, edit.path), edit.after, "utf8");
-  return { written: edits.map((edit) => edit.path) };
+  const undoId = await recordWrites(root, { label, writes: edits.map((edit) => ({ path: edit.path, before: edit.before, after: edit.after })) });
+  return { written: edits.map((edit) => edit.path), undoId };
 }

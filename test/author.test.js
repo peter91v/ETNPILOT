@@ -150,3 +150,57 @@ test("an agent can be improved: its prompt file, and its description only when t
   await assert.rejects(draftImprovement("agent", "../x", "y", { root, config: {}, runModel: reply({}) }), /not the name of an agent/);
   await assert.rejects(draftImprovement("agent", "ghost", "y", { root, config: {}, runModel: reply({}) }), /There is no agent/);
 });
+
+test("a draft can be changed by saying what is different, and the model sees the draft it is changing", async () => {
+  const { refineDraft } = await import("../src/forge/author.js");
+  const root = await project();
+  const seen = [];
+  const model = async ({ input }) => {
+    seen.push(input);
+    return { text: JSON.stringify(seen.length === 1
+      ? { agents: [{ name: "reviewer", description: "reviews", tools: ["read_file"], prompt: "Review the diff." }], skills: [], instructions: [] }
+      : { agents: [{ name: "reviewer", description: "reviews", tools: ["read_file"], prompt: "Review the diff, briefly." }], skills: [], instructions: [] }), usage: {} };
+  };
+  const first = await draftNew("agent", "a reviewer", { root, config: {}, runModel: model });
+  const second = await refineDraft(first, "make it briefer", { root, config: {}, runModel: model });
+  assert.equal(second.plan.agents[0].prompt, "Review the diff, briefly.");
+  assert.match(seen[1], /a reviewer/);
+  assert.match(seen[1], /Change the draft as follows: make it briefer/);
+  assert.match(seen[1], /Review the diff\./, "the first draft is shown to the model");
+  await assert.rejects(refineDraft(first, "  ", { root, config: {}, runModel: model }), /Say what should be different/);
+});
+
+test("the last write can be undone, whole, and only while nobody changed the files since", async () => {
+  const { undoLastWrite, describeLastWrite } = await import("../src/forge/author-undo.js");
+  const root = await project();
+  const agent = await draftNew("agent", "an agent", { root, config: {}, runModel: reply(agentAnswer) });
+  const report = await applyDraft(agent, { root });
+  assert.ok(report.undoId);
+  const last = await describeLastWrite(root);
+  assert.deepEqual(last.paths, [".etnpilot/agents/test-writer.yaml", ".etnpilot/prompts/test-writer.md"], "an agent is two files and both are recorded");
+
+  // Somebody edits one of them: nothing is undone.
+  await writeFile(join(root, ".etnpilot", "prompts", "test-writer.md"), "Edited by hand.\n");
+  await assert.rejects(undoLastWrite(root), (error) => error.code === "changed" && /changed since/.test(error.message));
+  assert.match(await readFile(join(root, ".etnpilot", "agents", "test-writer.yaml"), "utf8"), /test-writer/, "the other file was not touched either");
+  await writeFile(join(root, ".etnpilot", "prompts", "test-writer.md"), (await draftNew("agent", "x", { root, config: {}, runModel: reply(agentAnswer) })).plan.agents[0].prompt + "\n");
+
+  const undone = await undoLastWrite(root);
+  assert.equal(undone.removed.length, 2);
+  await assert.rejects(readFile(join(root, ".etnpilot", "agents", "test-writer.yaml"), "utf8"), /ENOENT/);
+  await assert.rejects(undoLastWrite(root), (error) => error.code === "nothing");
+
+  // An improvement is put back to the earlier text, a skill's folder goes with its file.
+  const skill = await draftNew("skill", "a skill", { root, config: {}, runModel: reply({ agents: [], skills: [{ name: "deploy", body: "Step 1." }], instructions: [] }) });
+  await applyDraft(skill, { root });
+  await undoLastWrite(root);
+  await assert.rejects(readFile(join(root, ".etnpilot", "skills", "deploy", "SKILL.md"), "utf8"), /ENOENT/);
+
+  const prompt = join(root, ".etnpilot", "prompts", "orchestrator.md");
+  const before = await readFile(prompt, "utf8");
+  const improved = await draftImprovement("prompt", "orchestrator", "shorter", { root, config: {}, runModel: reply({ text: "Short.", summary: "s" }) });
+  await applyDraft(improved, { root });
+  assert.equal(await readFile(prompt, "utf8"), "Short.\n");
+  await undoLastWrite(root);
+  assert.equal(await readFile(prompt, "utf8"), before);
+});
