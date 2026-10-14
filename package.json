@@ -36,7 +36,7 @@
     "node": ">=22.13"
   },
   "dependencies": {
-    "@colbymchenry/codegraph": "1.6.0",
+    "@colbymchenry/codegraph": "1.6.2",
     "yaml": "^2.8.1"
   },
   "peerDependencies": {
@@ -50,11 +50,11 @@
   "license": "MIT",
   "devDependencies": {
     "@eslint/js": "^9.39.5",
-    "@types/node": "^26.6.3",
-    "axe-core": "^4.13.0",
+    "@types/node": "^26.6.5",
+    "axe-core": "^4.14.0",
     "eslint": "^9.39.5",
     "globals": "^17.13.0",
-    "playwright": "^1.63.0",
+    "playwright": "^1.64.0",
     "typescript": "^7.0.2"
   }
 }
